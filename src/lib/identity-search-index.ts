@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { fetchProfileAffiliations } from "./profile-affiliations";
 import { fetchProfileBioEntities } from "./profile-bio-entities";
 import { fetchProfileSnapshots } from "./profile-history";
@@ -192,7 +192,7 @@ function addAffiliationEntries(
 }
 
 export function syncIdentitySearchIndexForProfileIds(
-	db: Database.Database,
+	db: Database,
 	profileIds: string[],
 ) {
 	const uniqueProfileIds = Array.from(new Set(profileIds)).filter(Boolean);
@@ -334,7 +334,7 @@ export function syncIdentitySearchIndexForProfileIds(
 }
 
 export function ensureIdentitySearchIndexForDmProfiles(
-	db: Database.Database,
+	db: Database,
 	account?: string,
 ) {
 	const params: string[] = [];

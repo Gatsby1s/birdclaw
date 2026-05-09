@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { getBirdclawConfig } from "./config";
 import { getNativeDb } from "./db";
 
@@ -160,17 +160,13 @@ function yearFromTimestamp(value: unknown) {
 	return match[1];
 }
 
-function rowsForQuery(
-	db: Database.Database,
-	sql: string,
-	params: unknown[] = [],
-) {
+function rowsForQuery(db: Database, sql: string, params: unknown[] = []) {
 	return (db.prepare(sql).all(...params) as Record<string, unknown>[]).map(
 		toJsonRecord,
 	);
 }
 
-function getExportRowSets(db: Database.Database) {
+function getExportRowSets(db: Database) {
 	const rowSets: Array<{ logicalName: string; rows: JsonRecord[] }> = [
 		{
 			logicalName: "accounts",
@@ -355,7 +351,7 @@ function addRows(
 	shards.set(relativePath, existing);
 }
 
-function buildShards(db: Database.Database) {
+function buildShards(db: Database) {
 	const shards = new Map<string, JsonRecord[]>();
 	const rowSets = getExportRowSets(db);
 
@@ -812,7 +808,7 @@ export async function exportBackup({
 	validate = true,
 }: {
 	repoPath: string;
-	db?: Database.Database;
+	db?: Database;
 	commit?: boolean;
 	push?: boolean;
 	message?: string;
@@ -924,7 +920,7 @@ function rowsForManifestPath(
 }
 
 function insertRows(
-	db: Database.Database,
+	db: Database,
 	sql: string,
 	rows: JsonRecord[],
 	keys: string[],
@@ -936,7 +932,7 @@ function insertRows(
 }
 
 function readFtsIds(
-	db: Database.Database,
+	db: Database,
 	tableName: "tweets_fts" | "dm_fts",
 	idColumn: "tweet_id" | "message_id",
 ) {
@@ -947,7 +943,7 @@ function readFtsIds(
 }
 
 function insertFtsRows(
-	db: Database.Database,
+	db: Database,
 	tableName: "tweets_fts" | "dm_fts",
 	idColumn: "tweet_id" | "message_id",
 	rows: JsonRecord[],
@@ -969,7 +965,7 @@ function insertFtsRows(
 	}
 }
 
-function clearBackupImportData(db: Database.Database) {
+function clearBackupImportData(db: Database) {
 	db.exec(`
     delete from ai_scores;
     delete from tweet_actions;
@@ -998,7 +994,7 @@ export async function importBackup({
 	mode = "merge",
 }: {
 	repoPath: string;
-	db?: Database.Database;
+	db?: Database;
 	validate?: boolean;
 	mode?: BackupImportMode;
 }): Promise<BackupImportResult> {
@@ -1491,7 +1487,7 @@ export async function syncBackup({
 }: {
 	repoPath: string;
 	remote?: string;
-	db?: Database.Database;
+	db?: Database;
 	message?: string;
 }): Promise<BackupSyncResult> {
 	const resolvedRepoPath = path.resolve(repoPath);
@@ -1531,7 +1527,7 @@ export async function updateBackupFromGit({
 }: {
 	repoPath: string;
 	remote?: string;
-	db?: Database.Database;
+	db?: Database;
 }): Promise<{
 	ok: true;
 	repoPath: string;
@@ -1562,7 +1558,7 @@ export async function updateBackupFromGit({
 	};
 }
 
-function readAutoSyncState(db: Database.Database) {
+function readAutoSyncState(db: Database) {
 	const row = db
 		.prepare("select value_json from sync_cache where cache_key = ?")
 		.get(AUTO_SYNC_CACHE_KEY) as { value_json: string } | undefined;
@@ -1581,7 +1577,7 @@ function readAutoSyncState(db: Database.Database) {
 }
 
 function writeAutoSyncState(
-	db: Database.Database,
+	db: Database,
 	value: { checkedAt: string; ok: boolean; error?: string },
 ) {
 	db.prepare(
@@ -1622,7 +1618,7 @@ function resolveAutoSyncConfig() {
 }
 
 export async function maybeAutoUpdateBackup(
-	db?: Database.Database,
+	db?: Database,
 ): Promise<BackupAutoUpdateResult> {
 	if (process.env.BIRDCLAW_BACKUP_AUTO_SYNC === "0") {
 		return {
@@ -1689,7 +1685,7 @@ export async function maybeAutoUpdateBackup(
 }
 
 export async function maybeAutoSyncBackup(
-	db?: Database.Database,
+	db?: Database,
 ): Promise<BackupAutoUpdateResult> {
 	if (process.env.BIRDCLAW_BACKUP_AUTO_SYNC === "0") {
 		return {

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { lookupProfileViaBird } from "./bird-actions";
 import { getNativeDb } from "./db";
 import type { ProfileRecord, XurlMentionUser } from "./types";
@@ -41,7 +41,7 @@ export function normalizeProfileQuery(value: string) {
 	return (urlMatch?.[1] ?? withoutPrefix).replace(/^@/, "").trim();
 }
 
-export function getDefaultAccountId(db: Database.Database) {
+export function getDefaultAccountId(db: Database) {
 	const row = db
 		.prepare(
 			`
@@ -55,7 +55,7 @@ export function getDefaultAccountId(db: Database.Database) {
 	return row?.id ?? "acct_primary";
 }
 
-export function getAccountHandle(db: Database.Database, accountId: string) {
+export function getAccountHandle(db: Database, accountId: string) {
 	const row = db
 		.prepare("select handle from accounts where id = ?")
 		.get(accountId) as { handle: string } | undefined;
@@ -63,7 +63,7 @@ export function getAccountHandle(db: Database.Database, accountId: string) {
 }
 
 export function resolveLocalProfile(
-	db: Database.Database,
+	db: Database,
 	normalizedQuery: string,
 ): ResolvedModerationProfile | null {
 	const row = db

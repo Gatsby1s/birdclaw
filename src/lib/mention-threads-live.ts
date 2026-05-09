@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { listThreadViaBird } from "./bird";
 import { getNativeDb } from "./db";
 import type { XurlMentionData, XurlMentionsResponse } from "./types";
@@ -39,7 +39,7 @@ function getMediaCount(tweet: XurlMentionData) {
 	).length;
 }
 
-function replaceTweetFts(db: Database.Database, tweetId: string, text: string) {
+function replaceTweetFts(db: Database, tweetId: string, text: string) {
 	db.prepare("delete from tweets_fts where tweet_id = ?").run(tweetId);
 	db.prepare("insert into tweets_fts (tweet_id, text) values (?, ?)").run(
 		tweetId,
@@ -47,7 +47,7 @@ function replaceTweetFts(db: Database.Database, tweetId: string, text: string) {
 	);
 }
 
-function resolveAccount(db: Database.Database, accountId?: string) {
+function resolveAccount(db: Database, accountId?: string) {
 	const row = accountId
 		? (db
 				.prepare("select id, handle from accounts where id = ?")
@@ -73,11 +73,7 @@ function resolveAccount(db: Database.Database, accountId?: string) {
 	};
 }
 
-function listRecentMentionIds(
-	db: Database.Database,
-	accountId: string,
-	limit: number,
-) {
+function listRecentMentionIds(db: Database, accountId: string, limit: number) {
 	return (
 		db
 			.prepare(
@@ -105,7 +101,7 @@ function mergeMentionThreadIntoLocalStore({
 	mentionIds,
 	payload,
 }: {
-	db: Database.Database;
+	db: Database;
 	accountId: string;
 	accountHandle: string;
 	mentionIds: Set<string>;

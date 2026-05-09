@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 
 const now = new Date("2026-03-08T12:00:00.000Z");
 
@@ -22,7 +22,7 @@ function svgAvatarDataUrl(label: string, hue: number) {
 	return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-export function seedDemoData(db: Database.Database) {
+export function seedDemoData(db: Database) {
 	const accountCount = db
 		.prepare("select count(*) as count from accounts")
 		.get() as {

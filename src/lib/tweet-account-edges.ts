@@ -1,9 +1,9 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 
 export type TweetAccountEdgeKind = "home" | "mention";
 
 export function upsertTweetAccountEdge(
-	db: Database.Database,
+	db: Database,
 	{
 		accountId,
 		tweetId,

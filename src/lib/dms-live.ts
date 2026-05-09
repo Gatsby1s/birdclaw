@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import {
 	type BirdDmConversation,
 	type BirdDmEvent,
@@ -25,7 +25,7 @@ function assertBirdLimit(limit: number) {
 	}
 }
 
-function resolveAccount(db: Database.Database, accountId?: string) {
+function resolveAccount(db: Database, accountId?: string) {
 	const row = accountId
 		? (db
 				.prepare("select id, handle from accounts where id = ?")
@@ -112,7 +112,7 @@ function getLatestEvent(events: BirdDmEvent[]) {
 }
 
 function mergeDirectMessagesIntoLocalStore(
-	db: Database.Database,
+	db: Database,
 	accountId: string,
 	accountUsername: string,
 	payload: {

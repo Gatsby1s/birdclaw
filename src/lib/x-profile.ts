@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { normalizeAvatarUrl } from "./avatar-cache";
 import { syncIdentitySearchIndexForProfileIds } from "./identity-search-index";
 import { syncProfileBioEntitiesForProfileId } from "./profile-bio-entities";
@@ -125,7 +125,7 @@ function buildProfileMetadata(user: XurlMentionUser) {
 }
 
 function updateExistingProfileFromUser(
-	db: Database.Database,
+	db: Database,
 	profileId: string,
 	user: XurlMentionUser,
 ): ResolvedXProfile {
@@ -199,7 +199,7 @@ function updateExistingProfileFromUser(
 }
 
 export function upsertProfileFromXUser(
-	db: Database.Database,
+	db: Database,
 	user: XurlMentionUser,
 ): ResolvedXProfile {
 	const externalUserId = String(user.id ?? "");
@@ -309,7 +309,7 @@ export function upsertProfileFromXUser(
 }
 
 export function ensureStubProfileForXUser(
-	db: Database.Database,
+	db: Database,
 	externalUserId: string,
 ): ResolvedXProfile {
 	const profileId = buildExternalProfileId(externalUserId);

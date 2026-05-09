@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { findArchives } from "./archive-finder";
 import { getDb, getNativeDb } from "./db";
 import { fetchProfileAffiliations } from "./profile-affiliations";
@@ -235,7 +235,7 @@ function getTimelineQualityReason(
 	return "keep:long-text";
 }
 
-function countTimelineEdges(db: Database.Database, kind: "home" | "mention") {
+function countTimelineEdges(db: Database, kind: "home" | "mention") {
 	const row = db
 		.prepare(
 			`
@@ -1113,7 +1113,7 @@ export function queryResource(
 }
 
 function refreshDmConversationState(
-	db: Database.Database,
+	db: Database,
 	conversationId: string,
 	lastMessageAt: string,
 ) {

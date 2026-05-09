@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import BetterSqlite3 from "better-sqlite3";
+import NativeSqliteDatabase from "./sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetBirdclawPathsForTests } from "./config";
 import { getNativeDb, resetDatabaseForTests } from "./db";
@@ -25,7 +25,9 @@ describe("database init", () => {
 		tempDirs.push(tempDir);
 		process.env.BIRDCLAW_HOME = tempDir;
 
-		const legacyDb = new BetterSqlite3(path.join(tempDir, "birdclaw.sqlite"));
+		const legacyDb = new NativeSqliteDatabase(
+			path.join(tempDir, "birdclaw.sqlite"),
+		);
 		legacyDb.exec(`
       create table tweets (
         id text primary key,

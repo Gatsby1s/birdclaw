@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { maybeAutoSyncBackup, type BackupAutoUpdateResult } from "./backup";
 import { ensureBirdclawDirs, getBirdclawPaths } from "./config";
 import { getNativeDb } from "./db";
@@ -31,7 +31,7 @@ export interface BookmarkSyncJobOptions {
 	cacheTtlMs?: number;
 	logPath?: string;
 	lockPath?: string;
-	db?: Database.Database;
+	db?: Database;
 }
 
 export interface BookmarkSyncAuditEntry {
@@ -117,7 +117,7 @@ export function getDefaultBookmarkSyncLockPath() {
 	return path.join(getBirdclawPaths().rootDir, "locks", "bookmarks-sync.lock");
 }
 
-function countBookmarks(db: Database.Database) {
+function countBookmarks(db: Database) {
 	const row = db
 		.prepare("select count(*) as count from tweet_collections where kind = ?")
 		.get("bookmarks") as { count: number };

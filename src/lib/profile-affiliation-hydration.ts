@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { lookupProfileViaBird } from "./bird";
 import { syncIdentitySearchIndexForProfileIds } from "./identity-search-index";
 import { syncProfileBioEntitiesForProfileId } from "./profile-bio-entities";
@@ -30,7 +30,7 @@ function normalizeHandle(value: string | null) {
 }
 
 function replaceSyntheticAffiliation(
-	db: Database.Database,
+	db: Database,
 	row: SyntheticAffiliationRow,
 	realProfileId: string,
 ) {
@@ -98,7 +98,7 @@ function replaceSyntheticAffiliation(
 	);
 }
 
-function findLocalOrganizationProfileId(db: Database.Database, handle: string) {
+function findLocalOrganizationProfileId(db: Database, handle: string) {
 	const row = db
 		.prepare(
 			`
@@ -113,7 +113,7 @@ function findLocalOrganizationProfileId(db: Database.Database, handle: string) {
 }
 
 export async function hydrateProfileAffiliationOrganizations(
-	db: Database.Database,
+	db: Database,
 	subjectProfileId: string,
 ): Promise<ProfileAffiliationHydrationResult> {
 	const rows = db

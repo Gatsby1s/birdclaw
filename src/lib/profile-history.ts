@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { fetchProfileAffiliations } from "./profile-affiliations";
 import type { ProfileSnapshot } from "./types";
 
@@ -59,7 +59,7 @@ function toSnapshot(row: Record<string, unknown>): ProfileSnapshot {
 }
 
 export function recordProfileSnapshot(
-	db: Database.Database,
+	db: Database,
 	profileId: string,
 	source = "x_profile",
 ) {
@@ -133,7 +133,7 @@ export function recordProfileSnapshot(
 }
 
 export function fetchProfileSnapshots(
-	db: Database.Database,
+	db: Database,
 	profileIds: string[],
 	limitPerProfile = 5,
 ) {

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { listHomeTimelineViaBird } from "./bird";
 import { getNativeDb } from "./db";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
@@ -21,7 +21,7 @@ function assertLimit(limit: number) {
 	}
 }
 
-function resolveAccount(db: Database.Database, accountId?: string) {
+function resolveAccount(db: Database, accountId?: string) {
 	const row = accountId
 		? (db.prepare("select id from accounts where id = ?").get(accountId) as
 				| { id: string }
@@ -54,7 +54,7 @@ function getMediaCount(tweet: XurlMentionData) {
 	).length;
 }
 
-function replaceTweetFts(db: Database.Database, tweetId: string, text: string) {
+function replaceTweetFts(db: Database, tweetId: string, text: string) {
 	db.prepare("delete from tweets_fts where tweet_id = ?").run(tweetId);
 	db.prepare("insert into tweets_fts (tweet_id, text) values (?, ?)").run(
 		tweetId,
@@ -63,7 +63,7 @@ function replaceTweetFts(db: Database.Database, tweetId: string, text: string) {
 }
 
 function mergeHomeTimelineIntoLocalStore(
-	db: Database.Database,
+	db: Database,
 	accountId: string,
 	payload: XurlMentionsResponse,
 ) {

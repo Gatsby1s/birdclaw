@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import type { ProfileAffiliation, XurlMentionUser } from "./types";
 
 interface NormalizedAffiliationInput {
@@ -124,7 +124,7 @@ export function normalizeProfileAffiliationsFromUser(
 }
 
 export function syncProfileAffiliationsFromUser(
-	db: Database.Database,
+	db: Database,
 	subjectProfileId: string,
 	user: XurlMentionUser,
 ) {
@@ -173,10 +173,7 @@ export function syncProfileAffiliationsFromUser(
 	return affiliations;
 }
 
-export function fetchProfileAffiliations(
-	db: Database.Database,
-	profileIds: string[],
-) {
+export function fetchProfileAffiliations(db: Database, profileIds: string[]) {
 	if (profileIds.length === 0) {
 		return new Map<string, ProfileAffiliation[]>();
 	}
@@ -239,7 +236,7 @@ export function fetchProfileAffiliations(
 }
 
 export function attachAffiliationsToProfiles<T extends { id: string }>(
-	db: Database.Database,
+	db: Database,
 	profiles: T[],
 ): Array<
 	T & {

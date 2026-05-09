@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { listMentionsViaBird } from "./bird";
 import type { MentionsDataSource } from "./config";
 import { getNativeDb } from "./db";
@@ -65,7 +65,7 @@ function parseMaxPages(value?: number) {
 	return Math.floor(value);
 }
 
-function resolveAccount(db: Database.Database, accountId?: string) {
+function resolveAccount(db: Database, accountId?: string) {
 	const row = accountId
 		? (db
 				.prepare("select id, handle from accounts where id = ?")
@@ -150,7 +150,7 @@ function getMediaCount(tweet: XurlMentionData) {
 	).length;
 }
 
-function replaceTweetFts(db: Database.Database, tweetId: string, text: string) {
+function replaceTweetFts(db: Database, tweetId: string, text: string) {
 	db.prepare("delete from tweets_fts where tweet_id = ?").run(tweetId);
 	db.prepare("insert into tweets_fts (tweet_id, text) values (?, ?)").run(
 		tweetId,
@@ -159,7 +159,7 @@ function replaceTweetFts(db: Database.Database, tweetId: string, text: string) {
 }
 
 function mergeMentionsIntoLocalStore(
-	db: Database.Database,
+	db: Database,
 	accountId: string,
 	payload: XurlMentionsResponse,
 	source: MentionsDataSource,

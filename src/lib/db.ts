@@ -1,4 +1,4 @@
-import BetterSqlite3 from "better-sqlite3";
+import NativeSqliteDatabase, { type Database } from "./sqlite";
 import { Kysely, SqliteDialect } from "kysely";
 import { ensureBirdclawDirs, getBirdclawPaths } from "./config";
 import { seedDemoData } from "./seed";
@@ -204,7 +204,7 @@ export interface BirdclawDatabase {
 	sync_cache: SyncCacheTable;
 }
 
-let nativeDb: BetterSqlite3.Database | undefined;
+let nativeDb: Database | undefined;
 let kyselyDb: Kysely<BirdclawDatabase> | undefined;
 
 export interface InitDatabaseOptions {
@@ -443,17 +443,14 @@ const INDEX_SQL = `
   create index if not exists idx_sync_cache_updated on sync_cache(updated_at desc);
 `;
 
-function getColumnNames(
-	db: BetterSqlite3.Database,
-	tableName: string,
-): Set<string> {
+function getColumnNames(db: Database, tableName: string): Set<string> {
 	const rows = db.prepare(`pragma table_info(${tableName})`).all() as Array<{
 		name: string;
 	}>;
 	return new Set(rows.map((row) => row.name));
 }
 
-function ensureTweetMetadataColumns(db: BetterSqlite3.Database) {
+function ensureTweetMetadataColumns(db: Database) {
 	const columnNames = getColumnNames(db, "tweets");
 	if (!columnNames.has("entities_json")) {
 		db.exec(
@@ -470,7 +467,7 @@ function ensureTweetMetadataColumns(db: BetterSqlite3.Database) {
 	}
 }
 
-function ensureProfileAvatarColumns(db: BetterSqlite3.Database) {
+function ensureProfileAvatarColumns(db: Database) {
 	const columnNames = getColumnNames(db, "profiles");
 	if (!columnNames.has("following_count")) {
 		db.exec(
@@ -501,14 +498,14 @@ function ensureProfileAvatarColumns(db: BetterSqlite3.Database) {
 	}
 }
 
-function ensureAccountExternalUserIdColumn(db: BetterSqlite3.Database) {
+function ensureAccountExternalUserIdColumn(db: Database) {
 	const columnNames = getColumnNames(db, "accounts");
 	if (!columnNames.has("external_user_id")) {
 		db.exec("alter table accounts add column external_user_id text");
 	}
 }
 
-function ensureTweetCollectionsTable(db: BetterSqlite3.Database) {
+function ensureTweetCollectionsTable(db: Database) {
 	db.exec(`
     create table if not exists tweet_collections (
       account_id text not null,
@@ -523,7 +520,7 @@ function ensureTweetCollectionsTable(db: BetterSqlite3.Database) {
   `);
 }
 
-function ensureTweetAccountEdgesTable(db: BetterSqlite3.Database) {
+function ensureTweetAccountEdgesTable(db: Database) {
 	db.exec(`
     create table if not exists tweet_account_edges (
       account_id text not null,
@@ -540,7 +537,7 @@ function ensureTweetAccountEdgesTable(db: BetterSqlite3.Database) {
   `);
 }
 
-function ensureProfileAffiliationsTable(db: BetterSqlite3.Database) {
+function ensureProfileAffiliationsTable(db: Database) {
 	db.exec(`
     create table if not exists profile_affiliations (
       subject_profile_id text not null,
@@ -561,7 +558,7 @@ function ensureProfileAffiliationsTable(db: BetterSqlite3.Database) {
   `);
 }
 
-function ensureProfileSnapshotsTable(db: BetterSqlite3.Database) {
+function ensureProfileSnapshotsTable(db: Database) {
 	db.exec(`
     create table if not exists profile_snapshots (
       profile_id text not null,
@@ -584,7 +581,7 @@ function ensureProfileSnapshotsTable(db: BetterSqlite3.Database) {
   `);
 }
 
-function ensureProfileBioEntitiesTable(db: BetterSqlite3.Database) {
+function ensureProfileBioEntitiesTable(db: Database) {
 	db.exec(`
     create table if not exists profile_bio_entities (
       profile_id text not null,
@@ -600,7 +597,7 @@ function ensureProfileBioEntitiesTable(db: BetterSqlite3.Database) {
   `);
 }
 
-function ensureIdentitySearchIndexTable(db: BetterSqlite3.Database) {
+function ensureIdentitySearchIndexTable(db: Database) {
 	db.exec(`
     create table if not exists identity_search_index (
       profile_id text not null,
@@ -615,7 +612,7 @@ function ensureIdentitySearchIndexTable(db: BetterSqlite3.Database) {
   `);
 }
 
-function backfillTweetCollections(db: BetterSqlite3.Database) {
+function backfillTweetCollections(db: Database) {
 	const now = new Date().toISOString();
 	const insert = db.prepare(`
     insert or ignore into tweet_collections (
@@ -636,7 +633,7 @@ function backfillTweetCollections(db: BetterSqlite3.Database) {
 	})();
 }
 
-function backfillTweetAccountEdges(db: BetterSqlite3.Database) {
+function backfillTweetAccountEdges(db: Database) {
 	const now = new Date().toISOString();
 	db.prepare(`
     insert or ignore into tweet_account_edges (
@@ -658,7 +655,7 @@ function backfillTweetAccountEdges(db: BetterSqlite3.Database) {
   `).run(now);
 }
 
-function ensureSchemaIndexes(db: BetterSqlite3.Database) {
+function ensureSchemaIndexes(db: Database) {
 	db.exec(INDEX_SQL);
 }
 
@@ -667,7 +664,7 @@ function initDatabase(options: InitDatabaseOptions = {}) {
 
 	if (!nativeDb) {
 		const { dbPath } = getBirdclawPaths();
-		nativeDb = new BetterSqlite3(dbPath);
+		nativeDb = new NativeSqliteDatabase(dbPath);
 		nativeDb.exec(BASE_SCHEMA_SQL);
 		ensureAccountExternalUserIdColumn(nativeDb);
 		ensureTweetMetadataColumns(nativeDb);
@@ -697,7 +694,7 @@ function initDatabase(options: InitDatabaseOptions = {}) {
 
 export function getNativeDb(options: InitDatabaseOptions = {}) {
 	initDatabase(options);
-	return nativeDb as BetterSqlite3.Database;
+	return nativeDb as Database;
 }
 
 export function getDb() {

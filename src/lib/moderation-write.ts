@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import type { ActionsTransport } from "./config";
 import { getNativeDb } from "./db";
 import {
@@ -43,7 +43,7 @@ export async function resolveModerationTarget({
 }
 
 export function writeModerationRow(
-	db: Database.Database,
+	db: Database,
 	table: "blocks" | "mutes",
 	accountId: string,
 	profileId: string,
@@ -61,7 +61,7 @@ export function writeModerationRow(
 }
 
 export function deleteModerationRow(
-	db: Database.Database,
+	db: Database,
 	table: "blocks" | "mutes",
 	accountId: string,
 	profileId: string,

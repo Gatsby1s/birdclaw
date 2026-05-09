@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { getNativeDb } from "./db";
 import {
 	getAccountHandle,
@@ -16,7 +16,7 @@ function remoteBlockSyncDisabled() {
 }
 
 function upsertRemoteBlock(
-	db: Database.Database,
+	db: Database,
 	accountId: string,
 	profileId: string,
 	blockedAt: string,
@@ -33,7 +33,7 @@ function upsertRemoteBlock(
 }
 
 function pruneRemoteBlocks(
-	db: Database.Database,
+	db: Database,
 	accountId: string,
 	profileIds: string[],
 ) {

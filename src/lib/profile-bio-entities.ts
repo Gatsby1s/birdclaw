@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "./sqlite";
 import { fetchProfileAffiliations } from "./profile-affiliations";
 import type { ProfileBioEntity, ProfileRecord } from "./types";
 
@@ -163,7 +163,7 @@ export function extractProfileBioEntities(profile: ProfileRecord) {
 }
 
 function getProfileRecord(
-	db: Database.Database,
+	db: Database,
 	profileId: string,
 ): ProfileRecord | null {
 	const row = db
@@ -220,7 +220,7 @@ function getProfileRecord(
 }
 
 export function syncProfileBioEntitiesForProfileId(
-	db: Database.Database,
+	db: Database,
 	profileId: string,
 ) {
 	const profile = getProfileRecord(db, profileId);
@@ -282,10 +282,7 @@ export function syncProfileBioEntitiesForProfileId(
 	return entities;
 }
 
-export function fetchProfileBioEntities(
-	db: Database.Database,
-	profileIds: string[],
-) {
+export function fetchProfileBioEntities(db: Database, profileIds: string[]) {
 	if (profileIds.length === 0) {
 		return new Map<string, ProfileBioEntity[]>();
 	}
