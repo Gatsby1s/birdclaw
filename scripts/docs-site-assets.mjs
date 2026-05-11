@@ -79,8 +79,8 @@ a:hover{text-decoration:underline;text-underline-offset:.2em;color:var(--accent-
 .sidebar-head{display:flex;align-items:center;gap:10px;margin-bottom:22px}
 .brand{display:flex;align-items:center;gap:11px;color:var(--ink);text-decoration:none;flex:1;min-width:0}
 .brand:hover{text-decoration:none}
-.brand .mark{display:inline-flex;align-items:center;justify-content:center;flex:0 0 36px;width:36px;height:36px;border-radius:50%;background:var(--accent);color:#fff;box-shadow:0 6px 16px rgba(29,155,240,.32)}
-.brand .mark svg{width:22px;height:22px;display:block}
+.brand .mark{display:inline-flex;align-items:center;justify-content:center;flex:0 0 36px;width:36px;height:36px;border-radius:10px;background:#020507;box-shadow:0 6px 16px rgba(29,155,240,.24);overflow:hidden}
+.brand .mark img{width:30px;height:30px;display:block;object-fit:contain}
 .brand strong{display:block;font-size:1.08rem;line-height:1.1;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
 .brand small{display:block;color:var(--muted);font-size:.74rem;margin-top:3px;font-weight:400}
 .theme-toggle{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:34px;height:34px;border-radius:999px;border:1px solid var(--line-strong);background:var(--paper);color:var(--muted);cursor:pointer;padding:0;transition:border-color .15s,color .15s,background-color .15s,transform .12s}
@@ -110,8 +110,8 @@ main{min-width:0;padding:32px clamp(20px,4.5vw,56px) 80px;max-width:1180px;margi
 .repo:hover,.edit:hover,.btn-ghost:hover{border-color:var(--accent);color:var(--accent);text-decoration:none}
 .edit{color:var(--muted)}
 .home-hero{padding:18px 0 32px;margin-bottom:8px;border-bottom:1px solid var(--line);position:relative;overflow:hidden}
-.home-hero .feather{position:absolute;right:-30px;top:-10px;width:340px;height:340px;color:var(--accent);opacity:.07;pointer-events:none}
-:root[data-theme="dark"] .home-hero .feather{opacity:.12}
+.home-hero .home-mark{position:absolute;right:-24px;top:-12px;width:310px;height:310px;object-fit:contain;opacity:.08;pointer-events:none;filter:drop-shadow(0 18px 32px rgba(29,155,240,.18))}
+:root[data-theme="dark"] .home-hero .home-mark{opacity:.16}
 .home-hero h1{font-size:3.4rem;line-height:1.02;letter-spacing:-.03em;margin:0 0 .35em;font-weight:800;color:var(--ink)}
 .home-hero h1 .accent{color:var(--accent)}
 .home-hero .lede{font-size:1.16rem;line-height:1.55;color:var(--text);margin:0 0 1.3em;max-width:60ch}
@@ -210,7 +210,7 @@ body:not(.home) .doc>h1:first-child{display:none}
   .doc h1{font-size:2.05rem}
   .hero-meta{width:100%;justify-content:flex-start}
   .home-hero{padding-top:8px}
-  .home-hero .feather{width:240px;height:240px;right:-60px;top:-30px}
+  .home-hero .home-mark{width:230px;height:230px;right:-64px;top:-34px}
   .doc{padding:0}
   .doc-grid{margin-top:18px;gap:24px}
   .doc :is(h2,h3,h4) .anchor{display:none}

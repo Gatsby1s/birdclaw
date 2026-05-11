@@ -3,10 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
-	brandIconSvg,
 	css,
-	faviconSvg,
-	featherSvg,
 	js,
 	preThemeScript,
 	themeToggleHtml,
@@ -101,7 +98,8 @@ for (const page of pages) {
 	);
 }
 
-fs.writeFileSync(path.join(outDir, "favicon.svg"), faviconSvg(), "utf8");
+copyStaticAsset("birdclaw-mark.png");
+copyStaticAsset("favicon.ico");
 copyStaticAsset("social-card.svg");
 copyStaticAsset("social-card.png");
 fs.writeFileSync(path.join(outDir, ".nojekyll"), "", "utf8");
@@ -534,7 +532,7 @@ function homeHero(page) {
 		"Graph",
 	];
 	return `<header class="home-hero">
-        <div class="feather">${featherSvg()}</div>
+        <img class="home-mark" src="birdclaw-mark.png" alt="" aria-hidden="true">
         <p class="eyebrow">Local-first · CLI + Web · SQLite</p>
         <h1>Your Twitter, <span class="accent">your bird</span>.</h1>
         <p class="lede">${escapeHtml(description)}</p>
@@ -615,7 +613,7 @@ function layout({ page, html, toc, prev, next, sectionName }) {
   <title>${escapeHtml(titleSuffix)}</title>
   <meta name="description" content="${escapeAttr(description)}">
   ${socialMeta}
-  <link rel="icon" href="${rootPrefix}favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="${rootPrefix}favicon.ico" sizes="any">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -630,7 +628,7 @@ function layout({ page, html, toc, prev, next, sectionName }) {
     <aside class="sidebar">
       <div class="sidebar-head">
         <a class="brand" href="${hrefToOutRel("index.html", page.outRel)}" aria-label="${productName} docs home">
-          <span class="mark" aria-hidden="true">${brandIconSvg()}</span>
+          <span class="mark" aria-hidden="true"><img src="${rootPrefix}birdclaw-mark.png" alt=""></span>
           <span><strong>${escapeHtml(productName)}</strong><small>Local Twitter memory</small></span>
         </a>
         ${themeToggleHtml()}

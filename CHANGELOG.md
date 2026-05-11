@@ -5,6 +5,7 @@
 ### Fixed
 
 - Include expanded short URLs and link occurrences in Git-friendly backups so linked-tweet search survives backup restore.
+- Update the docs site and app icons to use the Birdclaw crab-bird mark instead of the generic bird logo.
 
 ## 0.4.1 - 2026-05-11
 
