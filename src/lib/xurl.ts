@@ -129,6 +129,12 @@ async function hasXurl(): Promise<boolean> {
 	}
 }
 
+function isUnauthenticatedXurlStatus(status: string) {
+	return /no apps registered|no authenticated user|not authenticated|not logged in/i.test(
+		status,
+	);
+}
+
 export async function getTransportStatus(): Promise<TransportStatus> {
 	const now = Date.now();
 	if (transportStatusCache?.value && transportStatusCache.expiresAt > now) {
@@ -151,11 +157,23 @@ export async function getTransportStatus(): Promise<TransportStatus> {
 
 		try {
 			const { stdout } = await execFileAsync("xurl", ["auth", "status"]);
+			const rawStatus = stdout.trim();
+
+			if (isUnauthenticatedXurlStatus(rawStatus)) {
+				return {
+					installed: true,
+					availableTransport: "local",
+					statusText:
+						"xurl installed but not authenticated. local (bird) mode active.",
+					rawStatus,
+				};
+			}
+
 			return {
 				installed: true,
 				availableTransport: "xurl",
 				statusText: "xurl available",
-				rawStatus: stdout.trim(),
+				rawStatus,
 			};
 		} catch (error) {
 			return {

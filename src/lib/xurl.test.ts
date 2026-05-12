@@ -51,6 +51,41 @@ describe("xurl transport wrapper", () => {
 		expect(execFileAsyncMock).toHaveBeenNthCalledWith(1, "xurl", ["version"]);
 	});
 
+	it("falls back to local mode when xurl has no registered apps", async () => {
+		execFileAsyncMock
+			.mockResolvedValueOnce({ stdout: "xurl 1.0", stderr: "" })
+			.mockResolvedValueOnce({
+				stdout:
+					"No apps registered. Use 'xurl auth apps add' to register one.\n",
+				stderr: "",
+			});
+		const { getTransportStatus } = await import("./xurl");
+
+		const result = await getTransportStatus();
+
+		expect(result.installed).toBe(true);
+		expect(result.availableTransport).toBe("local");
+		expect(result.statusText).toContain("not authenticated");
+		expect(result.rawStatus).toContain("No apps registered");
+	});
+
+	it("falls back to local mode when xurl has no authenticated user", async () => {
+		execFileAsyncMock
+			.mockResolvedValueOnce({ stdout: "xurl 1.0", stderr: "" })
+			.mockResolvedValueOnce({
+				stdout: "No authenticated user. Run xurl auth login.\n",
+				stderr: "",
+			});
+		const { getTransportStatus } = await import("./xurl");
+
+		const result = await getTransportStatus();
+
+		expect(result.installed).toBe(true);
+		expect(result.availableTransport).toBe("local");
+		expect(result.statusText).toContain("not authenticated");
+		expect(result.rawStatus).toContain("No authenticated user");
+	});
+
 	it("caches transport status for repeated callers", async () => {
 		execFileAsyncMock
 			.mockResolvedValueOnce({ stdout: "xurl 1.0", stderr: "" })
