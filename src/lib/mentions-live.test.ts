@@ -409,43 +409,81 @@ describe("cached live mentions", () => {
 		);
 	});
 
-	it("keeps local since_id seeding when stale cached pagination remains", async () => {
+	it("resumes partial mention syncs with cached pagination instead of advancing since_id", async () => {
 		makeTempHome();
 		clearLocalMentionRows();
-		insertLocalMentionBaseline();
+		insertLocalMentionBaseline({ tweetId: "100" });
 		listMentionsViaXurlMock
 			.mockResolvedValueOnce({
-				data: [],
+				data: [
+					{
+						id: "200",
+						author_id: "7",
+						text: "new page one mention",
+						created_at: "2026-03-09T02:00:00.000Z",
+					},
+					{
+						id: "250",
+						author_id: "8",
+						text: "newest page one mention",
+						created_at: "2026-03-09T02:01:00.000Z",
+					},
+				],
 				meta: { result_count: 0, next_token: "page-2" },
 			})
 			.mockResolvedValueOnce({
-				data: [],
+				data: [
+					{
+						id: "180",
+						author_id: "9",
+						text: "older page two mention",
+						created_at: "2026-03-09T01:58:00.000Z",
+					},
+					{
+						id: "220",
+						author_id: "10",
+						text: "middle page two mention",
+						created_at: "2026-03-09T01:59:00.000Z",
+					},
+				],
 				meta: { result_count: 0 },
 			});
 		const { syncMentions } = await import("./mentions-live");
 
 		await syncMentions({
-			account: "acct_primary",
 			mode: "xurl",
-			limit: 5,
 			maxPages: 1,
 			refresh: true,
 		});
-		getNativeDb()
-			.prepare("update sync_cache set updated_at = ?")
-			.run("2000-01-01T00:00:00.000Z");
-		await syncMentions({
-			account: "acct_primary",
-			mode: "xurl",
-			limit: 5,
-			maxPages: 1,
+		const db = getNativeDb();
+		const firstRunRows = db
+			.prepare(
+				"select id from tweets where id in ('100', '200', '250') order by id",
+			)
+			.all() as Array<{ id: string }>;
+		const cacheRow = db
+			.prepare("select value_json from sync_cache where value_json like ?")
+			.get("%page-2%") as { value_json: string } | undefined;
+
+		expect(firstRunRows.map((row) => row.id)).toEqual(["100", "200", "250"]);
+		expect(JSON.parse(cacheRow?.value_json ?? "{}")).toMatchObject({
+			meta: { next_token: "page-2" },
 		});
+		await syncMentions({ mode: "xurl" });
 
 		expect(listMentionsViaXurlMock).toHaveBeenCalledTimes(2);
-		expect(listMentionsViaXurlMock.mock.calls[1]?.[0]).toMatchObject({
-			paginationToken: undefined,
-			sinceId: "1000",
+		expect(listMentionsViaXurlMock.mock.calls[0]?.[0]).toMatchObject({
+			sinceId: "100",
 		});
+		expect(listMentionsViaXurlMock.mock.calls[1]?.[0]).toMatchObject({
+			paginationToken: "page-2",
+		});
+		expect(listMentionsViaXurlMock.mock.calls[1]?.[0]).not.toHaveProperty(
+			"sinceId",
+		);
+		expect(
+			db.prepare("select kind from tweets where id = ?").get("180"),
+		).toEqual({ kind: "mention" });
 	});
 
 	it("seeds from mention edges even when the tweet belongs to another account", async () => {

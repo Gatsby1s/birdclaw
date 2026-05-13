@@ -4,7 +4,7 @@ import type { MentionsDataSource } from "./config";
 import { getNativeDb } from "./db";
 import { serializeMentionItemsAsXurlCompatible } from "./mentions-export";
 import { listTimelineItems } from "./queries";
-import { readSyncCache, writeSyncCache } from "./sync-cache";
+import { deleteSyncCache, readSyncCache, writeSyncCache } from "./sync-cache";
 import type {
 	ReplyFilter,
 	TweetEntities,
@@ -22,6 +22,7 @@ const MAX_XURL_MENTIONS_LIMIT = 100;
 type MentionSyncMode = Exclude<MentionsDataSource, "birdclaw">;
 
 function getMentionsFetchModeKey({
+	scope,
 	mode,
 	accountId,
 	pageSize,
@@ -29,6 +30,7 @@ function getMentionsFetchModeKey({
 	maxPages,
 	sinceId,
 }: {
+	scope: "sync" | "export";
 	mode: MentionsDataSource;
 	accountId: string;
 	pageSize: number;
@@ -36,7 +38,7 @@ function getMentionsFetchModeKey({
 	maxPages: number | null;
 	sinceId: string | null;
 }) {
-	return `mentions:${mode}:${accountId}:${String(pageSize)}:${all ? "all" : "single"}:${maxPages === null ? "all-pages" : String(maxPages)}:${sinceId ?? "no-since"}`;
+	return `mentions:${scope}:${mode}:${accountId}:${String(pageSize)}:${all ? "all" : "single"}:${maxPages === null ? "all-pages" : String(maxPages)}:${sinceId ?? "no-since"}`;
 }
 
 function parseCacheTtlMs(value?: number) {
@@ -74,6 +76,13 @@ function parseSyncMode(value?: string): MentionSyncMode {
 		throw new Error("--mode must be bird or xurl");
 	}
 	return mode;
+}
+
+function getCachedPaginationToken(cached?: { value: XurlMentionsResponse }) {
+	return typeof cached?.value.meta?.next_token === "string" &&
+		cached.value.meta.next_token.length > 0
+		? cached.value.meta.next_token
+		: undefined;
 }
 
 function resolveAccount(db: Database, accountId?: string) {
@@ -343,12 +352,14 @@ async function fetchMentionsViaXurl({
 	all,
 	parsedMaxPages,
 	sinceId,
+	startPaginationToken,
 }: {
 	resolvedAccount: ReturnType<typeof resolveAccount>;
 	limit: number;
 	all: boolean;
 	parsedMaxPages: number | null;
 	sinceId?: string;
+	startPaginationToken?: string;
 }) {
 	const [accountUser] = await lookupUsersByHandles([resolvedAccount.username]);
 	if (!accountUser?.id) {
@@ -358,7 +369,7 @@ async function fetchMentionsViaXurl({
 	}
 
 	const pages: XurlMentionsResponse[] = [];
-	let nextToken: string | undefined;
+	let nextToken: string | undefined = startPaginationToken;
 	let pageCount = 0;
 	do {
 		const payload = await listMentionsViaXurl({
@@ -430,26 +441,45 @@ export async function syncMentions({
 	const fetchAll = parsedMode === "xurl" && parsedMaxPages !== null;
 	const db = getNativeDb();
 	const resolvedAccount = resolveAccount(db, account);
-	const seededSinceId =
-		parsedMode === "xurl" && !explicitSinceId
-			? findNewestLocalMentionId(db, resolvedAccount.accountId)
-			: undefined;
-	const resolvedSinceId = explicitSinceId ?? seededSinceId;
-	const cacheKey = getMentionsFetchModeKey({
+	const resumeCacheKey = getMentionsFetchModeKey({
+		scope: "sync",
 		mode: parsedMode,
 		accountId: resolvedAccount.accountId,
 		pageSize: limit,
-		all: fetchAll,
-		maxPages: parsedMaxPages,
-		sinceId: resolvedSinceId ?? null,
+		all: false,
+		maxPages: null,
+		sinceId: null,
 	});
+	const resumeCached =
+		parsedMode === "xurl" && !explicitSinceId
+			? readSyncCache<XurlMentionsResponse>(resumeCacheKey, db)
+			: undefined;
+	const startPaginationToken = getCachedPaginationToken(resumeCached);
+	const seededSinceId =
+		parsedMode === "xurl" && !explicitSinceId && !startPaginationToken
+			? findNewestLocalMentionId(db, resolvedAccount.accountId)
+			: undefined;
+	const resolvedSinceId = explicitSinceId ?? seededSinceId;
+	const cacheKey = startPaginationToken
+		? resumeCacheKey
+		: getMentionsFetchModeKey({
+				scope: "sync",
+				mode: parsedMode,
+				accountId: resolvedAccount.accountId,
+				pageSize: limit,
+				all: fetchAll,
+				maxPages: parsedMaxPages,
+				sinceId: resolvedSinceId ?? null,
+			});
 	const ttlMs = parseCacheTtlMs(cacheTtlMs);
-	const cached = readSyncCache<XurlMentionsResponse>(cacheKey, db);
+	const cached = startPaginationToken
+		? resumeCached
+		: readSyncCache<XurlMentionsResponse>(cacheKey, db);
 	const cacheAgeMs = cached
 		? Date.now() - new Date(cached.updatedAt).getTime()
 		: Number.POSITIVE_INFINITY;
 
-	if (!refresh && cached && cacheAgeMs <= ttlMs) {
+	if (!startPaginationToken && !refresh && cached && cacheAgeMs <= ttlMs) {
 		mergeMentionsIntoLocalStore(
 			db,
 			resolvedAccount.accountId,
@@ -485,6 +515,7 @@ export async function syncMentions({
 					all: fetchAll,
 					parsedMaxPages,
 					sinceId: resolvedSinceId,
+					startPaginationToken,
 				});
 	mergeMentionsIntoLocalStore(
 		db,
@@ -493,6 +524,13 @@ export async function syncMentions({
 		parsedMode,
 	);
 	writeSyncCache(cacheKey, payload, db);
+	if (parsedMode === "xurl" && !explicitSinceId) {
+		if (getCachedPaginationToken({ value: payload })) {
+			writeSyncCache(resumeCacheKey, payload, db);
+		} else if (startPaginationToken) {
+			deleteSyncCache(resumeCacheKey, db);
+		}
+	}
 
 	return {
 		ok: true,
@@ -537,6 +575,7 @@ async function exportMentionsViaCachedLiveSource({
 	const db = getNativeDb();
 	const resolvedAccount = resolveAccount(db, account);
 	const cacheKey = getMentionsFetchModeKey({
+		scope: "export",
 		mode,
 		accountId: resolvedAccount.accountId,
 		pageSize: limit,
