@@ -566,6 +566,8 @@ describe("cli", () => {
 			"xurl",
 			"--limit",
 			"5",
+			"--start-time",
+			"2026-03-01T00:00:00Z",
 		]);
 
 		expect(syncMentionsMock).toHaveBeenCalledWith({
@@ -574,6 +576,7 @@ describe("cli", () => {
 			limit: 5,
 			maxPages: undefined,
 			sinceId: undefined,
+			startTime: "2026-03-01T00:00:00Z",
 			refresh: false,
 			cacheTtlMs: 120_000,
 		});

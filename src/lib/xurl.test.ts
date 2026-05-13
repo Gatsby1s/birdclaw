@@ -223,6 +223,27 @@ describe("xurl transport wrapper", () => {
 		]);
 	});
 
+	it("passes start_time for mention backfills when present", async () => {
+		execFileAsyncMock.mockResolvedValueOnce({
+			stdout: JSON.stringify({
+				data: [],
+				meta: { result_count: 0 },
+			}),
+			stderr: "",
+		});
+		const { listMentionsViaXurl } = await import("./xurl");
+
+		await listMentionsViaXurl({
+			maxResults: 100,
+			userId: "25401953",
+			startTime: "2026-03-01T00:00:00Z",
+		});
+
+		expect(execFileAsyncMock).toHaveBeenCalledWith("xurl", [
+			`/2/users/25401953/mentions?max_results=100&expansions=author_id&tweet.fields=created_at%2Cconversation_id%2Centities%2Cpublic_metrics&user.fields=${RICH_USER_FIELDS}&start_time=2026-03-01T00%3A00%3A00Z`,
+		]);
+	});
+
 	it("returns null when whoami payload is not an object", async () => {
 		execFileAsyncMock.mockResolvedValueOnce({
 			stdout: JSON.stringify({ data: "not-an-object" }),

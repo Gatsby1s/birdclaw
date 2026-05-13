@@ -685,6 +685,7 @@ syncCommand
 	.option("--limit <n>", "Result limit per page", "20")
 	.option("--max-pages <n>", "Stop after N pages")
 	.option("--since-id <id>", "Fetch mentions newer than this tweet id")
+	.option("--start-time <iso>", "Fetch mentions created at or after this time")
 	.option("--refresh", "Bypass live-cache freshness window")
 	.option("--cache-ttl <seconds>", "Live-cache freshness window", "120")
 	.action(async (options) => {
@@ -695,6 +696,7 @@ syncCommand
 				limit: Number(options.limit),
 				maxPages: options.maxPages ? Number(options.maxPages) : undefined,
 				sinceId: options.sinceId,
+				startTime: options.startTime,
 				refresh: Boolean(options.refresh),
 				cacheTtlMs: Number(options.cacheTtl) * 1000,
 			});

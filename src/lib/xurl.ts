@@ -354,12 +354,14 @@ export async function listMentionsViaXurl({
 	userId,
 	paginationToken,
 	sinceId,
+	startTime,
 }: {
 	maxResults: number;
 	username?: string;
 	userId?: string;
 	paginationToken?: string;
 	sinceId?: string;
+	startTime?: string;
 }): Promise<XurlMentionsResponse> {
 	let resolvedUserId = userId;
 	if (!resolvedUserId) {
@@ -390,6 +392,9 @@ export async function listMentionsViaXurl({
 	}
 	if (sinceId) {
 		query.set("since_id", sinceId);
+	}
+	if (startTime) {
+		query.set("start_time", startTime);
 	}
 
 	const payload = await runJsonCommand([

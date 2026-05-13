@@ -356,6 +356,372 @@ describe("cached live mentions", () => {
 		expect(call).not.toHaveProperty("sinceId");
 	});
 
+	it("uses explicit start_time for xurl mention backfills instead of local since_id seeding", async () => {
+		makeTempHome();
+		clearLocalMentionRows();
+		insertLocalMentionBaseline();
+		listMentionsViaXurlMock.mockResolvedValueOnce({
+			data: [
+				{
+					id: "900",
+					author_id: "7",
+					text: "historical backfill mention",
+					created_at: "2026-03-09T02:00:00.000Z",
+				},
+			],
+			meta: { result_count: 1 },
+		});
+		const { syncMentions } = await import("./mentions-live");
+
+		await syncMentions({
+			account: "acct_primary",
+			mode: "xurl",
+			limit: 5,
+			startTime: "2026-03-01T00:00:00Z",
+			refresh: true,
+		});
+
+		const call = listMentionsViaXurlMock.mock.calls[0]?.[0] as Record<
+			string,
+			unknown
+		>;
+		expect(call).toMatchObject({
+			maxResults: 5,
+			username: "steipete",
+			userId: "25401953",
+			paginationToken: undefined,
+			startTime: "2026-03-01T00:00:00Z",
+		});
+		expect(call).not.toHaveProperty("sinceId");
+	});
+
+	it("bypasses stale resume pagination when start_time is explicit", async () => {
+		makeTempHome();
+		clearLocalMentionRows();
+		insertLocalMentionBaseline({ tweetId: "100" });
+		listMentionsViaXurlMock.mockResolvedValueOnce({
+			data: [],
+			meta: { result_count: 0, next_token: "stale-page" },
+		});
+		const { syncMentions } = await import("./mentions-live");
+
+		await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			refresh: true,
+		});
+		listMentionsViaXurlMock.mockResolvedValueOnce({
+			data: [],
+			meta: { result_count: 0, next_token: "backfill-page-2" },
+		});
+		await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			startTime: "2026-03-01T00:00:00Z",
+			refresh: true,
+		});
+
+		const secondCall = listMentionsViaXurlMock.mock.calls[1]?.[0] as Record<
+			string,
+			unknown
+		>;
+		const resumeRow = getNativeDb()
+			.prepare("select value_json from sync_cache where cache_key like ?")
+			.get("%cursor:v2:%boundary=auto") as { value_json: string };
+		expect(secondCall).toMatchObject({
+			paginationToken: undefined,
+			startTime: "2026-03-01T00:00:00Z",
+		});
+		expect(secondCall).not.toHaveProperty("sinceId");
+		expect(JSON.parse(resumeRow.value_json)).toMatchObject({
+			meta: { next_token: "stale-page" },
+		});
+	});
+
+	it("resumes explicit start_time backfills with scoped pagination", async () => {
+		makeTempHome();
+		clearLocalMentionRows();
+		insertLocalMentionBaseline({ tweetId: "100" });
+		listMentionsViaXurlMock
+			.mockResolvedValueOnce({
+				data: [],
+				meta: { result_count: 0, next_token: "generic-page-2" },
+			})
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "start_page_1",
+						author_id: "7",
+						text: "start time page one",
+						created_at: "2026-03-09T02:00:00.000Z",
+					},
+				],
+				meta: { result_count: 1, next_token: "start-page-2" },
+			})
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "start_page_2",
+						author_id: "8",
+						text: "start time page two",
+						created_at: "2026-03-09T01:59:00.000Z",
+					},
+				],
+				meta: { result_count: 1 },
+			});
+		const { syncMentions } = await import("./mentions-live");
+
+		await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			refresh: true,
+		});
+		await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			startTime: "2026-03-01T00:00:00Z",
+			refresh: true,
+		});
+		await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			startTime: "2026-03-01T00:00:00Z",
+		});
+
+		const genericResumeRow = getNativeDb()
+			.prepare("select value_json from sync_cache where cache_key like ?")
+			.get("%cursor:v2:%boundary=auto") as { value_json: string };
+		const thirdCall = listMentionsViaXurlMock.mock.calls[2]?.[0] as Record<
+			string,
+			unknown
+		>;
+		expect(JSON.parse(genericResumeRow.value_json)).toMatchObject({
+			meta: { next_token: "generic-page-2" },
+		});
+		expect(thirdCall).toMatchObject({
+			paginationToken: "start-page-2",
+		});
+		expect(thirdCall).not.toHaveProperty("sinceId");
+		expect(thirdCall).not.toHaveProperty("startTime");
+		expect(
+			getNativeDb()
+				.prepare("select kind from tweets where id = ?")
+				.get("start_page_2"),
+		).toEqual({ kind: "mention" });
+	});
+
+	it("does not reuse stale scoped partial cache after start_time resume completes", async () => {
+		makeTempHome();
+		clearLocalMentionRows();
+		listMentionsViaXurlMock
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "partial_start_page_1",
+						author_id: "7",
+						text: "partial start time page one",
+						created_at: "2026-03-09T02:00:00.000Z",
+					},
+				],
+				meta: { result_count: 1, next_token: "start-page-2" },
+			})
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "partial_start_page_2",
+						author_id: "8",
+						text: "partial start time page two",
+						created_at: "2026-03-09T01:59:00.000Z",
+					},
+				],
+				meta: { result_count: 1 },
+			})
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "partial_start_fresh",
+						author_id: "9",
+						text: "fresh start time page",
+						created_at: "2026-03-09T01:58:00.000Z",
+					},
+				],
+				meta: { result_count: 1 },
+			});
+		const { syncMentions } = await import("./mentions-live");
+
+		await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			startTime: "2026-03-01T00:00:00Z",
+			refresh: true,
+		});
+		await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			startTime: "2026-03-01T00:00:00Z",
+		});
+		const thirdResult = await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			startTime: "2026-03-01T00:00:00Z",
+		});
+
+		const thirdCall = listMentionsViaXurlMock.mock.calls[2]?.[0] as Record<
+			string,
+			unknown
+		>;
+		expect(listMentionsViaXurlMock).toHaveBeenCalledTimes(3);
+		expect(thirdResult.source).toBe("xurl");
+		expect(thirdCall).toMatchObject({
+			paginationToken: undefined,
+			startTime: "2026-03-01T00:00:00Z",
+		});
+		expect(thirdCall).not.toHaveProperty("sinceId");
+	});
+
+	it("clears completed scoped result cache when refresh writes a cursor", async () => {
+		makeTempHome();
+		clearLocalMentionRows();
+		listMentionsViaXurlMock
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "completed_start_page",
+						author_id: "7",
+						text: "completed start time result",
+						created_at: "2026-03-09T02:00:00.000Z",
+					},
+				],
+				meta: { result_count: 1 },
+			})
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "refreshed_start_page_1",
+						author_id: "8",
+						text: "refreshed start time page one",
+						created_at: "2026-03-09T02:01:00.000Z",
+					},
+				],
+				meta: { result_count: 1, next_token: "refresh-page-2" },
+			})
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "refreshed_start_page_2",
+						author_id: "9",
+						text: "refreshed start time page two",
+						created_at: "2026-03-09T01:59:00.000Z",
+					},
+				],
+				meta: { result_count: 1 },
+			})
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "fresh_after_refresh_resume",
+						author_id: "10",
+						text: "fresh after refresh resume",
+						created_at: "2026-03-09T01:58:00.000Z",
+					},
+				],
+				meta: { result_count: 1 },
+			});
+		const { syncMentions } = await import("./mentions-live");
+
+		await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			startTime: "2026-03-01T00:00:00Z",
+			refresh: true,
+		});
+		await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			startTime: "2026-03-01T00:00:00Z",
+			refresh: true,
+		});
+		await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			startTime: "2026-03-01T00:00:00Z",
+		});
+		const fourthResult = await syncMentions({
+			mode: "xurl",
+			maxPages: 1,
+			startTime: "2026-03-01T00:00:00Z",
+		});
+
+		const fourthCall = listMentionsViaXurlMock.mock.calls[3]?.[0] as Record<
+			string,
+			unknown
+		>;
+		expect(listMentionsViaXurlMock).toHaveBeenCalledTimes(4);
+		expect(fourthResult.source).toBe("xurl");
+		expect(fourthResult.payload.data.map((tweet) => tweet.id)).toEqual([
+			"fresh_after_refresh_resume",
+		]);
+		expect(fourthCall).toMatchObject({
+			paginationToken: undefined,
+			startTime: "2026-03-01T00:00:00Z",
+		});
+		expect(fourthCall).not.toHaveProperty("sinceId");
+	});
+
+	it("resumes legacy mention cursors instead of reseeding from newest local mention", async () => {
+		makeTempHome();
+		clearLocalMentionRows();
+		insertLocalMentionBaseline({ tweetId: "100" });
+		insertLocalMentionBaseline({ tweetId: "250" });
+		const db = getNativeDb();
+		const legacyCursorKey =
+			"mentions:sync:xurl:acct_primary:20:single:all-pages:no-since:no-start";
+		db.prepare(
+			`
+      insert into sync_cache (cache_key, value_json, updated_at)
+      values (?, ?, ?)
+      `,
+		).run(
+			legacyCursorKey,
+			JSON.stringify({
+				data: [],
+				meta: { result_count: 0, next_token: "legacy-page-2" },
+			}),
+			"2026-03-09T02:00:00.000Z",
+		);
+		listMentionsViaXurlMock.mockResolvedValueOnce({
+			data: [
+				{
+					id: "180",
+					author_id: "9",
+					text: "legacy cursor page two mention",
+					created_at: "2026-03-09T01:58:00.000Z",
+				},
+			],
+			meta: { result_count: 1 },
+		});
+		const { syncMentions } = await import("./mentions-live");
+
+		await syncMentions({ mode: "xurl" });
+
+		const call = listMentionsViaXurlMock.mock.calls[0]?.[0] as Record<
+			string,
+			unknown
+		>;
+		expect(call).toMatchObject({
+			paginationToken: "legacy-page-2",
+		});
+		expect(call).not.toHaveProperty("sinceId");
+		expect(
+			db.prepare("select kind from tweets where id = ?").get("180"),
+		).toEqual({ kind: "mention" });
+		expect(
+			db
+				.prepare("select cache_key from sync_cache where cache_key = ?")
+				.get(legacyCursorKey),
+		).toBeUndefined();
+	});
+
 	it("keeps seeded sync mentions cache separate from unseeded exports", async () => {
 		makeTempHome();
 		clearLocalMentionRows();

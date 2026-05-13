@@ -76,10 +76,11 @@ Flags:
 - `--limit <n>` — page size
 - `--max-pages <n>` — cap a paged scan; partial truncation exits with code `5`
 - `--since-id <id>` — explicitly fetch mentions newer than a known tweet ID
+- `--start-time <iso>` — backfill mentions from an explicit UTC timestamp
 - `--refresh` — bypass the live-cache freshness window
 - `--cache-ttl <seconds>` — tune the live-cache freshness window (default `120`)
 
-On a first xurl run without `--since-id`, Birdclaw seeds `since_id` from the newest local mention row for that account so archive-backed stores do not re-fetch old mentions. If no local mention baseline exists, it writes a one-line stderr hint and performs the full scan; an explicit `--since-id` always wins.
+On a first xurl run without `--since-id` or `--start-time`, Birdclaw seeds `since_id` from the newest local mention row for that account so archive-backed stores do not re-fetch old mentions. Use `--start-time` for deliberate historical backfills; an explicit `--since-id` always wins.
 
 `sync mentions` and [`mentions export`](mentions.md) are now distinct: `sync mentions` is the ingest, `mentions export` is the DB-backed export-to-script view. Run `sync mentions` first, then [`sync mention-threads`](#sync-mention-threads) to backfill parent/root conversation context.
 
