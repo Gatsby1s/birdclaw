@@ -151,26 +151,33 @@ function findArchiveAuthoredSinceSeed(db: Database, accountId: string) {
 			`
     select t.id
     from tweets t
-    join accounts a on a.id = t.account_id
-    where a.id = ?
-      and (
-        exists (
-          select 1
-          from tweet_account_edges e
-          where e.account_id = t.account_id
-            and e.tweet_id = t.id
-            and e.kind = 'authored'
-        )
-        or (
-          t.kind = 'home'
-          and t.author_profile_id in ('profile_me', 'profile_user_' || a.external_user_id)
-        )
+    join accounts a on a.id = ?
+    where (
+      exists (
+        select 1
+        from tweet_account_edges e
+        where e.account_id = ?
+          and e.tweet_id = t.id
+          and e.kind = 'authored'
       )
+      or (
+        t.kind = 'home'
+        and exists (
+          select 1
+          from tweet_account_edges e2
+          where e2.account_id = ?
+            and e2.tweet_id = t.id
+            and e2.source = 'archive'
+            and e2.kind = 'home'
+        )
+        and t.author_profile_id in ('profile_me', 'profile_user_' || a.external_user_id)
+      )
+    )
     order by length(t.id) desc, t.id desc
     limit 1
     `,
 		)
-		.get(accountId) as { id: string } | undefined;
+		.get(accountId, accountId, accountId) as { id: string } | undefined;
 	return row?.id ?? null;
 }
 

@@ -62,7 +62,17 @@ function authoredCursor(accountId = "acct_primary") {
 	return row ? JSON.parse(row.value_json) : null;
 }
 
-function insertArchiveAuthoredTweet(id: string) {
+function insertLocalAuthoredHomeTweet({
+	id,
+	source = "archive",
+	tweetAccountId = "acct_primary",
+	edgeAccountId = "acct_primary",
+}: {
+	id: string;
+	source?: string;
+	tweetAccountId?: string;
+	edgeAccountId?: string;
+}) {
 	getNativeDb()
 		.prepare(
 			`
@@ -70,10 +80,46 @@ function insertArchiveAuthoredTweet(id: string) {
         id, account_id, author_profile_id, kind, text, created_at, is_replied,
         reply_to_id, like_count, media_count, bookmarked, liked, entities_json,
         media_json, quoted_tweet_id
-      ) values (?, 'acct_primary', 'profile_user_25401953', 'home', ?, ?, 0, null, 0, 0, 0, 0, '{}', '[]', null)
+      ) values (?, ?, 'profile_user_25401953', 'home', ?, ?, 0, null, 0, 0, 0, 0, '{}', '[]', null)
       `,
 		)
-		.run(id, `archive tweet ${id}`, "2026-05-10T12:00:00.000Z");
+		.run(id, tweetAccountId, `archive tweet ${id}`, "2026-05-10T12:00:00.000Z");
+	getNativeDb()
+		.prepare(
+			`
+      insert into tweet_account_edges (
+        account_id, tweet_id, kind, first_seen_at, last_seen_at, seen_count,
+        source, raw_json, updated_at
+      ) values (?, ?, 'home', ?, ?, 1, ?, '{}', ?)
+      `,
+		)
+		.run(
+			edgeAccountId,
+			id,
+			"2026-05-10T12:00:00.000Z",
+			"2026-05-10T12:00:00.000Z",
+			source,
+			"2026-05-10T12:00:00.000Z",
+		);
+}
+
+function insertAuthoredEdge(tweetId: string, accountId = "acct_primary") {
+	getNativeDb()
+		.prepare(
+			`
+      insert into tweet_account_edges (
+        account_id, tweet_id, kind, first_seen_at, last_seen_at, seen_count,
+        source, raw_json, updated_at
+      ) values (?, ?, 'authored', ?, ?, 1, 'xurl', '{}', ?)
+      `,
+		)
+		.run(
+			accountId,
+			tweetId,
+			"2026-05-10T12:00:00.000Z",
+			"2026-05-10T12:00:00.000Z",
+			"2026-05-10T12:00:00.000Z",
+		);
 }
 
 describe("live authored tweet sync", () => {
@@ -454,7 +500,7 @@ describe("live authored tweet sync", () => {
 
 	it("seeds a first authored sync from local archive rows unless since_id is explicit", async () => {
 		makeTempHome();
-		insertArchiveAuthoredTweet("1000");
+		insertLocalAuthoredHomeTweet({ id: "1000" });
 		mocks.listUserTweets
 			.mockResolvedValueOnce({
 				items: [],
@@ -478,6 +524,53 @@ describe("live authored tweet sync", () => {
 			2,
 			"25401953",
 			expect.objectContaining({ sinceId: "0" }),
+		);
+	});
+
+	it("does not seed a first authored sync from live timeline home rows", async () => {
+		makeTempHome();
+		insertLocalAuthoredHomeTweet({ id: "1001", source: "bird" });
+		const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+		mocks.listUserTweets.mockResolvedValueOnce({
+			items: [],
+			nextToken: null,
+		});
+		const { syncAuthoredTweets } = await import("./authored-live");
+
+		try {
+			await syncAuthoredTweets({ limit: 5 });
+			const requestOptions = mocks.listUserTweets.mock.calls[0]?.[1] as
+				| Record<string, unknown>
+				| undefined;
+			expect(requestOptions?.sinceId).toBeUndefined();
+			expect(stderr).toHaveBeenCalledWith(
+				"birdclaw sync authored: no archive baseline found; starting a full backwards scan",
+			);
+		} finally {
+			stderr.mockRestore();
+		}
+	});
+
+	it("seeds from selected account authored edges when the tweet belongs to another account", async () => {
+		makeTempHome();
+		insertLocalAuthoredHomeTweet({
+			id: "1100",
+			source: "bird",
+			tweetAccountId: "acct_studio",
+			edgeAccountId: "acct_studio",
+		});
+		insertAuthoredEdge("1100");
+		mocks.listUserTweets.mockResolvedValueOnce({
+			items: [],
+			nextToken: null,
+		});
+		const { syncAuthoredTweets } = await import("./authored-live");
+
+		await syncAuthoredTweets({ limit: 5 });
+
+		expect(mocks.listUserTweets).toHaveBeenCalledWith(
+			"25401953",
+			expect.objectContaining({ sinceId: "1100" }),
 		);
 	});
 
