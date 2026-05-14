@@ -449,6 +449,25 @@ function createArchiveMediaFileCounts(): ArchiveMediaFileCounts {
 	};
 }
 
+function selectedArchiveMediaKinds(selection: Set<ArchiveImportSlice> | null) {
+	if (!selection) return null;
+	const kinds = new Set<ArchiveMediaKind>();
+	if (selection.has("tweets")) {
+		for (const kind of ["tweets", "community", "deleted", "moments"] as const) {
+			kinds.add(kind);
+		}
+	}
+	if (selection.has("directMessages")) {
+		for (const kind of ["dms", "dmGroup"] as const) {
+			kinds.add(kind);
+		}
+	}
+	if (selection.has("profiles")) {
+		kinds.add("profile");
+	}
+	return kinds;
+}
+
 function getArchiveMediaKind(entryPath: string) {
 	const normalized = normalizeArchivePath(entryPath);
 	if (normalized.endsWith("/")) return undefined;
@@ -519,11 +538,18 @@ async function copyArchiveEntryToFile(
 	}
 }
 
-async function extractArchiveMediaFiles(archivePath: string) {
+async function extractArchiveMediaFiles(
+	archivePath: string,
+	selectedKinds: Set<ArchiveMediaKind> | null,
+) {
 	const counts = createArchiveMediaFileCounts();
+	if (selectedKinds?.size === 0) {
+		return counts;
+	}
 	for (const entry of await listArchiveEntryDetails(archivePath)) {
 		const mediaKind = getArchiveMediaKind(entry.path);
 		if (!mediaKind) continue;
+		if (selectedKinds && !selectedKinds.has(mediaKind.kind)) continue;
 
 		counts[mediaKind.kind] += 1;
 		const destinationPath = getArchiveMediaDestination(
@@ -1442,7 +1468,10 @@ export async function importArchive(
 		bookmarkCount += bookmarks.length;
 	}
 
-	const mediaFileCounts = await extractArchiveMediaFiles(archivePath);
+	const mediaFileCounts = await extractArchiveMediaFiles(
+		archivePath,
+		selectedArchiveMediaKinds(selection),
+	);
 
 	for (const entry of followerEntries) {
 		const content = await readArchiveEntry(archivePath, entry);

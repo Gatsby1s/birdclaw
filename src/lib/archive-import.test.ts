@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { execFileSync } from "node:child_process";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -669,6 +670,35 @@ describe("archive import", () => {
 
 		await importArchive(archivePath);
 		expect(statSync(tweetMediaPath).mtimeMs).toBe(tweetMediaMtime);
+	});
+
+	it("skips archive media extraction for unrelated selected slices", async () => {
+		const archivePath = makeRootDataArchive();
+		const homeDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-home-"));
+		createdDirs.push(homeDir);
+		process.env.BIRDCLAW_HOME = homeDir;
+
+		const result = await importArchive(archivePath, {
+			select: ["followers", "following"],
+		});
+		const rootMediaPath = path.join(
+			getBirdclawPaths().mediaOriginalsDir,
+			"archive",
+			"tweets",
+			"rootmedia",
+			"rootmedia-archive.jpg",
+		);
+
+		expect(result.counts.mediaFiles).toEqual({
+			tweets: 0,
+			dms: 0,
+			community: 0,
+			profile: 0,
+			deleted: 0,
+			moments: 0,
+			dmGroup: 0,
+		});
+		expect(existsSync(rootMediaPath)).toBe(false);
 	});
 
 	it("imports archive video variants into tweet media json", async () => {
