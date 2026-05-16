@@ -6,9 +6,15 @@
 
 - Add a streaming `What happened` AI digest in the web UI and CLI (`birdclaw today`, `birdclaw digest`) backed by OpenAI Responses API, GPT-5.5 by default, medium reasoning, priority service tier, local context hashing, and cached final structured results.
 - Add a global web account switcher plus `jobs sync-account`/`install-account-launchd` so multi-account Birdclaw installs can refresh home, mentions, likes, bookmarks, and DMs from launchd.
+
 ### Changed
 
 - Start the Effect rewrite by making `effect` a first-class runtime dependency and moving web API fetches, web sync orchestration, live command helpers, action transport, `bird`/`xurl` JSON/action transports and public adapters, backup export/import/validation and Git orchestration, moderation target resolution, blocks/mutes write helpers, remote block sync, batch blocklist imports, x-web mutations, authored/mentions/mention-thread sync including xurl recent-search and parent-walk fallback internals, conversation loading, home timeline, saved collection, DM live sync, profile hydration/resolution/affiliation/reply inspection, shared tweet lookup, research and whois report generation, follow graph live sync, link preview/index fetches, archive discovery/import subprocesses, avatar/URL caches, OpenAI/inbox scoring, scheduled bookmark sync locking/audit/launchd install, and media-fetch archive reuse/download concurrency onto Effect programs with Promise-compatible public wrappers.
+
+### Fixed
+
+- Remove the duplicate inline sync account picker now that the global web account switcher controls manual sync account state.
+
 ## 0.5.1 - 2026-05-15
 
 ### Fixed

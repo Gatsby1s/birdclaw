@@ -15,6 +15,7 @@ interface SyncNowButtonProps {
 	label: string;
 	accounts?: AccountRecord[];
 	onSynced: (result: WebSyncResponse) => void;
+	showAccountPicker?: boolean;
 }
 
 export function SyncNowButton({
@@ -22,6 +23,7 @@ export function SyncNowButton({
 	label,
 	accounts = [],
 	onSynced,
+	showAccountPicker = false,
 }: SyncNowButtonProps) {
 	const [syncing, setSyncing] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
@@ -68,7 +70,7 @@ export function SyncNowButton({
 
 	return (
 		<div className="flex shrink-0 items-center gap-2">
-			{accountAwareSync && accounts.length > 1 ? (
+			{showAccountPicker && accountAwareSync && accounts.length > 1 ? (
 				<select
 					aria-label="Sync account"
 					className={cx(selectFieldClass, "h-9 w-[132px]")}
