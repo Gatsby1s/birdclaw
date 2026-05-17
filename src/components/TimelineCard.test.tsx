@@ -185,7 +185,7 @@ describe("TimelineCard", () => {
 		expect(screen.getAllByText("@ava").length).toBeGreaterThan(0);
 		expect(screen.getByLabelText("We replied")).toBeInTheDocument();
 		expect(screen.getByText("7")).toBeInTheDocument();
-		expect(screen.getByText("not bookmarked")).toBeInTheDocument();
+		expect(screen.queryByText("not bookmarked")).not.toBeInTheDocument();
 		expect(screen.queryByText("Reposted tweet")).not.toBeInTheDocument();
 		expect(screen.queryByText(/RT @ava/)).not.toBeInTheDocument();
 
@@ -385,7 +385,7 @@ describe("TimelineCard", () => {
 		).not.toBeNull();
 	});
 
-	it("renders replied and unbookmarked state", () => {
+	it("hides empty passive metadata", () => {
 		render(
 			<TimelineCard
 				item={{
@@ -405,8 +405,9 @@ describe("TimelineCard", () => {
 
 		expect(screen.getByText("replied")).toBeInTheDocument();
 		expect(screen.getByLabelText("We replied")).toBeInTheDocument();
-		expect(screen.getByText("not bookmarked")).toBeInTheDocument();
-		expect(screen.getByText("0 media")).toBeInTheDocument();
+		expect(screen.queryByText("not bookmarked")).not.toBeInTheDocument();
+		expect(screen.queryByText("0 media")).not.toBeInTheDocument();
+		expect(screen.queryByText("@steipete")).not.toBeInTheDocument();
 	});
 
 	it("does not render reply state or actions for likes and bookmarks", () => {

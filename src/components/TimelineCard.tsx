@@ -1,9 +1,9 @@
 import {
-	Bookmark,
 	BookmarkCheck,
 	CheckCircle2,
 	Circle,
 	Heart,
+	Image,
 	MessageCircle,
 	Repeat2,
 } from "lucide-react";
@@ -21,8 +21,6 @@ import {
 	feedActionButtonClass,
 	feedActionIconClass,
 	feedActionIconWrapClass,
-	feedActionIconWrapLikeClass,
-	feedActionLikeClass,
 	feedRowActionsClass,
 	feedRowBodyClass,
 	feedRowClass,
@@ -35,7 +33,6 @@ import {
 	feedRowStatePillOpenClass,
 	feedRowTextClass,
 	feedRowTimestampClass,
-	mutedDotClass,
 } from "#/lib/ui";
 import { AvatarChip } from "./AvatarChip";
 import { ConversationThread } from "./ConversationThread";
@@ -267,6 +264,8 @@ export function TimelineCard({
 	const displayLikeCount = displayTweet.likeCount ?? item.likeCount;
 	const displayBookmarked = displayTweet.bookmarked ?? item.bookmarked;
 	const displayLiked = displayTweet.liked ?? item.liked;
+	const showLikeIndicator = displayLiked || displayLikeCount > 0;
+	const showMediaIndicator = displayMediaCount > 0;
 	const hasConversation = Boolean(
 		item.retweetedTweet
 			? displayTweet.replyToId
@@ -445,52 +444,45 @@ export function TimelineCard({
 								<span className="text-[13px]">Reply</span>
 							</button>
 						) : null}
-						<span className={cx(feedActionButtonClass, "cursor-default")}>
-							<span className={feedActionIconWrapClass}>
-								<Repeat2 className={feedActionIconClass} strokeWidth={1.7} />
-							</span>
-						</span>
-						<span
-							className={cx(
-								feedActionButtonClass,
-								feedActionLikeClass,
-								"cursor-default",
-								displayLiked && "text-[var(--like)]",
-							)}
-						>
+						{showLikeIndicator ? (
 							<span
+								aria-label={`${formatCompactNumber(displayLikeCount)} likes`}
 								className={cx(
-									feedActionIconWrapClass,
-									feedActionIconWrapLikeClass,
+									"inline-flex items-center gap-1 px-2 py-1 text-[13px]",
+									displayLiked && "text-[var(--like)]",
 								)}
+								title={`${formatCompactNumber(displayLikeCount)} likes`}
 							>
 								<Heart
 									className={feedActionIconClass}
 									strokeWidth={1.7}
 									fill={displayLiked ? "currentColor" : "none"}
 								/>
+								<span>{formatCompactNumber(displayLikeCount)}</span>
 							</span>
-							<span>{formatCompactNumber(displayLikeCount)}</span>
-						</span>
-						<span className={cx(feedActionButtonClass, "cursor-default")}>
-							<span className={feedActionIconWrapClass}>
-								{displayBookmarked ? (
-									<BookmarkCheck
-										className={feedActionIconClass}
-										strokeWidth={1.7}
-									/>
-								) : (
-									<Bookmark className={feedActionIconClass} strokeWidth={1.7} />
-								)}
+						) : null}
+						{displayBookmarked ? (
+							<span
+								aria-label="Bookmarked"
+								className="inline-flex items-center px-2 py-1"
+								title="Bookmarked"
+							>
+								<BookmarkCheck
+									className={feedActionIconClass}
+									strokeWidth={1.7}
+								/>
 							</span>
-						</span>
-					</div>
-					<div className="flex items-center gap-2 text-[12px] text-[var(--ink-soft)]">
-						<span>{displayMediaCount} media</span>
-						<span className={mutedDotClass} />
-						<span>{displayBookmarked ? "bookmarked" : "not bookmarked"}</span>
-						<span className={mutedDotClass} />
-						<span>{item.accountHandle}</span>
+						) : null}
+						{showMediaIndicator ? (
+							<span
+								aria-label={`${String(displayMediaCount)} media attachments`}
+								className="inline-flex items-center gap-1 px-2 py-1 text-[13px]"
+								title={`${String(displayMediaCount)} media attachments`}
+							>
+								<Image className={feedActionIconClass} strokeWidth={1.7} />
+								<span>{displayMediaCount}</span>
+							</span>
+						) : null}
 					</div>
 				</footer>
 				{conversation.isOpen ? (
