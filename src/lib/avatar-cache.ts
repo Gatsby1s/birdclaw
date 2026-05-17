@@ -5,9 +5,20 @@ import { Effect } from "effect";
 import { getBirdclawPaths } from "./config";
 import { getNativeDb } from "./db";
 import { runEffectPromise, tryPromise } from "./effect-runtime";
+import { assertSafePreviewUrl } from "./url-safety";
 
 const AVATAR_SIZE_SUFFIX =
 	/(?:(?:_normal|_bigger|_mini))(?=\.(?:jpg|jpeg|png|webp|gif)(?:$|\?))/i;
+const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+const MAX_AVATAR_DATA_URL_CHARS = MAX_AVATAR_BYTES * 4;
+const REMOTE_AVATAR_TIMEOUT_MS = 10_000;
+const ALLOWED_REMOTE_AVATAR_HOSTS = new Set(["pbs.twimg.com"]);
+const RASTER_CONTENT_TYPES = new Set([
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+	"image/gif",
+]);
 
 function sanitizeFileToken(value: string) {
 	return value.replace(/[^a-zA-Z0-9_-]+/g, "_");
@@ -25,7 +36,6 @@ function getExtensionFromContentType(contentType: string | null) {
 	if (mime === "image/png") return ".png";
 	if (mime === "image/webp") return ".webp";
 	if (mime === "image/gif") return ".gif";
-	if (mime === "image/svg+xml") return ".svg";
 	return ".jpg";
 }
 
@@ -37,8 +47,6 @@ function getContentTypeFromExtension(extension: string) {
 			return "image/webp";
 		case ".gif":
 			return "image/gif";
-		case ".svg":
-			return "image/svg+xml";
 		default:
 			return "image/jpeg";
 	}
@@ -51,7 +59,7 @@ function getExtensionFromAvatarUrl(avatarUrl: string) {
 		if (extension === ".png" || extension === ".webp" || extension === ".gif") {
 			return extension;
 		}
-		return extension === ".svg" ? ".svg" : ".jpg";
+		return ".jpg";
 	} catch {
 		return ".jpg";
 	}
@@ -60,6 +68,9 @@ function getExtensionFromAvatarUrl(avatarUrl: string) {
 function decodeDataUrl(dataUrl: string) {
 	if (!dataUrl.startsWith("data:")) {
 		throw new Error("Invalid avatar data URL");
+	}
+	if (dataUrl.length > MAX_AVATAR_DATA_URL_CHARS) {
+		throw new Error("Avatar data URL is too large");
 	}
 
 	const separatorIndex = dataUrl.indexOf(",");
@@ -70,12 +81,19 @@ function decodeDataUrl(dataUrl: string) {
 	const metadata = dataUrl.slice(5, separatorIndex);
 	const payload = dataUrl.slice(separatorIndex + 1);
 	const contentType = metadata.split(";")[0] || "application/octet-stream";
+	if (!RASTER_CONTENT_TYPES.has(contentType.toLowerCase())) {
+		throw new Error("Avatar data URL must be a raster image");
+	}
 	const isBase64 = metadata.includes(";base64");
+	const buffer = isBase64
+		? Buffer.from(payload, "base64")
+		: Buffer.from(decodeURIComponent(payload), "utf8");
+	if (buffer.byteLength > MAX_AVATAR_BYTES) {
+		throw new Error("Avatar data URL is too large");
+	}
 	return {
 		contentType,
-		buffer: isBase64
-			? Buffer.from(payload, "base64")
-			: Buffer.from(decodeURIComponent(payload), "utf8"),
+		buffer,
 	};
 }
 
@@ -95,6 +113,59 @@ function trySync<T>(try_: () => T) {
 		try: try_,
 		catch: toError,
 	});
+}
+
+function assertSafeRemoteAvatarUrl(avatarUrl: string) {
+	const parsed = assertSafePreviewUrl(avatarUrl);
+	if (parsed.protocol !== "https:") {
+		throw new Error("Remote avatar URL must use https");
+	}
+	if (!ALLOWED_REMOTE_AVATAR_HOSTS.has(parsed.hostname.toLowerCase())) {
+		throw new Error("Remote avatar host is not allowed");
+	}
+	return parsed.toString();
+}
+
+function normalizeContentType(value: string | null) {
+	return value?.split(";")[0]?.trim().toLowerCase() ?? "image/jpeg";
+}
+
+function detectRasterContentType(buffer: Buffer, declared: string) {
+	if (
+		buffer.length >= 3 &&
+		buffer[0] === 0xff &&
+		buffer[1] === 0xd8 &&
+		buffer[2] === 0xff
+	) {
+		return "image/jpeg";
+	}
+	if (
+		buffer.length >= 4 &&
+		buffer[0] === 0x89 &&
+		buffer[1] === 0x50 &&
+		buffer[2] === 0x4e &&
+		buffer[3] === 0x47
+	) {
+		return "image/png";
+	}
+	if (
+		buffer.length >= 12 &&
+		buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+		buffer.subarray(8, 12).toString("ascii") === "WEBP"
+	) {
+		return "image/webp";
+	}
+	if (
+		buffer.length >= 6 &&
+		(buffer.subarray(0, 6).toString("ascii") === "GIF87a" ||
+			buffer.subarray(0, 6).toString("ascii") === "GIF89a")
+	) {
+		return "image/gif";
+	}
+	if (declared === "image/jpeg") {
+		return "image/jpeg";
+	}
+	throw new Error("Avatar response is not a supported raster image");
 }
 
 export function normalizeAvatarUrl(value: unknown) {
@@ -137,11 +208,14 @@ export function getAvatarCachePath(profileId: string, avatarUrl: string) {
 
 function fetchRemoteAvatarEffect(avatarUrl: string) {
 	return Effect.gen(function* () {
+		const safeUrl = yield* trySync(() => assertSafeRemoteAvatarUrl(avatarUrl));
 		const response = yield* tryPromise(() =>
-			fetch(avatarUrl, {
+			fetch(safeUrl, {
 				headers: {
 					"user-agent": "birdclaw/avatar-cache",
 				},
+				redirect: "error",
+				signal: AbortSignal.timeout(REMOTE_AVATAR_TIMEOUT_MS),
 			}),
 		);
 		if (!response.ok) {
@@ -151,8 +225,17 @@ function fetchRemoteAvatarEffect(avatarUrl: string) {
 		}
 
 		const buffer = Buffer.from(yield* tryPromise(() => response.arrayBuffer()));
+		if (buffer.byteLength > MAX_AVATAR_BYTES) {
+			return yield* Effect.fail(new Error("Avatar response is too large"));
+		}
+		const contentType = yield* trySync(() =>
+			detectRasterContentType(
+				buffer,
+				normalizeContentType(response.headers.get("content-type")),
+			),
+		);
 		return {
-			contentType: response.headers.get("content-type") ?? "image/jpeg",
+			contentType,
 			buffer,
 		};
 	});
@@ -208,6 +291,7 @@ export function readCachedAvatar(profileId: string) {
 
 export const __test__ = {
 	decodeDataUrl,
+	detectRasterContentType,
 	getAvatarCacheDir,
 	getContentTypeFromExtension,
 	getExtensionFromAvatarUrl,

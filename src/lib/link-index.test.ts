@@ -508,7 +508,8 @@ describe("link index", () => {
 			entityExpansions: 1,
 			networkExpansions: 5,
 			misses: 1,
-			remainingUnexpanded: 1,
+			errors: 1,
+			remainingUnexpanded: 2,
 		});
 		expect(
 			db
@@ -525,7 +526,7 @@ describe("link index", () => {
 			},
 			{
 				short_url: "https://t.co/invalid",
-				status: "hit",
+				status: "error",
 				expanded_tweet_id: null,
 				expanded_handle: null,
 			},

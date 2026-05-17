@@ -3,9 +3,11 @@ import { execFileSync } from "node:child_process";
 import {
 	appendFileSync,
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -132,7 +134,7 @@ function seedBackupFixture() {
       reply_to_id, like_count, media_count, bookmarked, liked, entities_json,
       media_json, quoted_tweet_id
     ) values
-      ('tweet_2024', 'acct_primary', 'profile_me', 'home', 'Shipping text backups', '2024-12-31T23:59:00.000Z', 0, null, 12, 0, 0, 0, '{"hashtags":[{"text":"backup"}]}', '[]', null),
+      ('tweet_2024', 'acct_primary', 'profile_me', 'home', 'Shipping text backups https://t.co/shared', '2024-12-31T23:59:00.000Z', 0, null, 12, 0, 0, 0, '{"hashtags":[{"text":"backup"}],"urls":[{"url":"https://t.co/shared","expandedUrl":"https://example.com/demo","displayUrl":"example.com/demo","start":22,"end":41}]}', '[]', null),
       ('tweet_2025', 'acct_primary', 'profile_friend', 'bookmark', 'Saved useful thing', '2025-01-02T08:00:00.000Z', 0, null, 5, 1, 1, 1, '{}', '[{"type":"photo"}]', 'tweet_quote'),
       ('tweet_unknown_date', 'acct_primary', 'profile_friend', 'like', 'Unknown creation date like', '1970-01-01T00:00:00.000Z', 0, null, 1, 0, 0, 1, '{}', '[]', null);
 
@@ -314,6 +316,52 @@ describe("text backup", () => {
 		expect(imported.mode).toBe("replace");
 	}, 20000);
 
+	it("rejects backup export paths that traverse symlinked managed directories", async () => {
+		process.env.BIRDCLAW_HOME = makeTempDir("birdclaw-backup-symlink-src-");
+		seedBackupFixture();
+		const repoPath = makeTempDir("birdclaw-backup-symlink-store-");
+		const targetPath = makeTempDir("birdclaw-backup-symlink-target-");
+		symlinkSync(targetPath, path.join(repoPath, "data"), "dir");
+
+		await expect(
+			Effect.runPromise(exportBackupEffect({ repoPath })),
+		).rejects.toThrow("Backup path contains symlink");
+		expect(existsSync(path.join(targetPath, "tweets"))).toBe(false);
+	}, 20000);
+
+	it("rejects backup validation paths that traverse symlinked directories", async () => {
+		const repoPath = makeTempDir("birdclaw-backup-read-symlink-store-");
+		const targetPath = makeTempDir("birdclaw-backup-read-symlink-target-");
+		mkdirSync(path.join(targetPath, "tweets"), { recursive: true });
+		writeFileSync(path.join(targetPath, "tweets", "2026.jsonl"), "{}\n");
+		symlinkSync(targetPath, path.join(repoPath, "data"), "dir");
+		writeFileSync(
+			path.join(repoPath, "manifest.json"),
+			JSON.stringify({
+				app: "birdclaw",
+				schemaVersion: 1,
+				generatedAt: "2026-05-17T00:00:00.000Z",
+				counts: {},
+				files: [
+					{
+						path: "data/tweets/2026.jsonl",
+						rows: 1,
+						sha256: "bad",
+						bytes: 3,
+					},
+				],
+				backupHash: "bad",
+			}) + "\n",
+		);
+
+		const validation = await Effect.runPromise(validateBackupEffect(repoPath));
+
+		expect(validation.ok).toBe(false);
+		expect(validation.errors.join("\n")).toContain(
+			"Backup path contains symlink",
+		);
+	});
+
 	it("builds backup import effects lazily", async () => {
 		process.env.BIRDCLAW_HOME = makeTempDir("birdclaw-backup-import-src-");
 		seedBackupFixture();
@@ -453,6 +501,14 @@ describe("text backup", () => {
 				short_url: "https://t.co/shared",
 			},
 		]);
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare("select entities_json from tweets where id = 'tweet_2024'")
+				.get(),
+		).toEqual({
+			entities_json:
+				'{"hashtags":[{"text":"backup"}],"urls":[{"url":"https://t.co/shared","expandedUrl":"https://example.com/demo","displayUrl":"example.com/demo","start":22,"end":41}]}',
+		});
 		expect(
 			getNativeDb({ seedDemoData: false })
 				.prepare(

@@ -15,6 +15,7 @@ import { Effect } from "effect";
 import { getBirdclawPaths } from "./config";
 import { getNativeDb } from "./db";
 import { runEffectPromise, tryPromise } from "./effect-runtime";
+import { safeHttpUrl } from "./url-safety";
 
 const execFileAsync = promisify(execFile);
 const ARCHIVE_JSON_PAYLOAD = /=\s*(\[[\s\S]*\]|\{[\s\S]*\})/s;
@@ -230,6 +231,10 @@ function toFiniteNumber(value: unknown) {
 	return Number.isFinite(number) ? number : undefined;
 }
 
+function archiveHttpUrl(value: unknown) {
+	return safeHttpUrl(typeof value === "string" ? value : String(value ?? ""));
+}
+
 function extractTweetEntities(tweet: Record<string, unknown>) {
 	const entities = asRecord(tweet.entities);
 	const urlEntries = [
@@ -239,10 +244,10 @@ function extractTweetEntities(tweet: Record<string, unknown>) {
 	const seenUrls = new Set<string>();
 	const urls = urlEntries
 		.map((entry) => ({
-			url: String(entry.url ?? ""),
-			expandedUrl: String(
-				entry.expanded_url ?? entry.expandedUrl ?? entry.url ?? "",
-			),
+			url: archiveHttpUrl(entry.url) ?? "",
+			expandedUrl:
+				archiveHttpUrl(entry.expanded_url ?? entry.expandedUrl ?? entry.url) ??
+				"",
 			displayUrl: String(
 				entry.display_url ??
 					entry.displayUrl ??
@@ -256,17 +261,13 @@ function extractTweetEntities(tweet: Record<string, unknown>) {
 			description:
 				typeof entry.description === "string" ? entry.description : null,
 			imageUrl:
-				typeof entry.image_url === "string"
-					? entry.image_url
-					: typeof entry.imageUrl === "string"
-						? entry.imageUrl
-						: typeof entry.thumbnail_url === "string"
-							? entry.thumbnail_url
-							: typeof entry.media_url_https === "string"
-								? entry.media_url_https
-								: typeof entry.media_url === "string"
-									? entry.media_url
-									: undefined,
+				archiveHttpUrl(
+					entry.image_url ??
+						entry.imageUrl ??
+						entry.thumbnail_url ??
+						entry.media_url_https ??
+						entry.media_url,
+				) ?? undefined,
 			siteName:
 				typeof entry.site_name === "string"
 					? entry.site_name
@@ -370,12 +371,11 @@ function extractTweetMedia(tweet: Record<string, unknown>) {
 
 	return sourceMedia
 		.map((entry) => {
-			const url = String(
-				entry.media_url_https ?? entry.media_url ?? entry.url ?? "",
-			);
-			const thumbnailUrl = String(
-				entry.media_url_https ?? entry.media_url ?? url,
-			);
+			const url =
+				archiveHttpUrl(entry.media_url_https ?? entry.media_url ?? entry.url) ??
+				"";
+			const thumbnailUrl =
+				archiveHttpUrl(entry.media_url_https ?? entry.media_url ?? url) ?? url;
 			const videoInfo = asRecord(entry.video_info);
 			const durationMs = toFiniteNumber(videoInfo?.duration_millis);
 			const variants = archiveMp4Variants(entry);
@@ -620,8 +620,7 @@ function getArchiveFollowRows(content: string, key: ArchiveFollowKey) {
 	return rows;
 }
 
-function clearImportedData() {
-	const db = getNativeDb();
+function clearImportedData(db = getNativeDb()) {
 	db.exec(`
     delete from ai_scores;
     delete from tweet_actions;
@@ -1619,11 +1618,6 @@ function importArchiveInternalEffect(
 			);
 		}
 
-		if (!selection) {
-			clearImportedData();
-			clearMentionSyncState();
-		}
-
 		const db = getNativeDb();
 		const insertAccount = db.prepare(`
     insert into accounts (id, name, handle, external_user_id, transport, is_default, created_at)
@@ -2262,6 +2256,11 @@ function importArchiveInternalEffect(
 		}
 
 		db.transaction(() => {
+			if (!selection) {
+				clearImportedData(db);
+				clearMentionSyncState(db);
+			}
+
 			if (selection) {
 				if (includeTweets) {
 					clearAuthoredSyncCursors(db, "acct_primary");

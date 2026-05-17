@@ -9,6 +9,7 @@ import {
 	linkPreviewHostClass,
 	linkPreviewTitleClass,
 } from "#/lib/ui";
+import { safeHttpUrl } from "#/lib/url-safety";
 
 type LinkPreviewState = Pick<
 	TweetUrlEntity,
@@ -21,7 +22,6 @@ type LinkPreviewState = Pick<
 >;
 
 const previewCache = new Map<string, Promise<LinkPreviewMetadata | null>>();
-const IMAGE_EXTENSION_PATTERN = /\.(?:avif|gif|jpe?g|png|webp)(?:[?#].*)?$/i;
 const MAX_CONCURRENT_PREVIEW_FETCHES = 2;
 let activePreviewFetches = 0;
 const queuedPreviewFetches: Array<() => void> = [];
@@ -72,16 +72,13 @@ function schedulePreviewFetch(task: () => Promise<LinkPreviewMetadata | null>) {
 }
 
 function fetchPreview(entry: TweetUrlEntity) {
-	const targetUrl = entry.expandedUrl || entry.url;
+	const targetUrl = safeHttpUrl(entry.expandedUrl || entry.url);
 	if (!targetUrl) return Promise.resolve(null);
 	const key = `${entry.url} ${targetUrl}`;
 	const cached = previewCache.get(key);
 	if (cached) return cached;
 
 	const params = new URLSearchParams({ url: targetUrl });
-	if (entry.url && entry.url !== targetUrl) {
-		params.set("shortUrl", entry.url);
-	}
 	const promise = schedulePreviewFetch(() =>
 		fetch(`/api/link-preview?${params.toString()}`)
 			.then(async (response) => {
@@ -109,14 +106,32 @@ function displayHost(url: string, fallback: string) {
 function isDirectImageUrl(url: string) {
 	try {
 		const parsed = new URL(url);
-		if (IMAGE_EXTENSION_PATTERN.test(parsed.pathname)) return true;
 		return (
+			parsed.protocol === "https:" &&
 			parsed.hostname === "pbs.twimg.com" &&
 			(parsed.pathname.startsWith("/media/") ||
 				parsed.pathname.startsWith("/amplify_video_thumb/"))
 		);
 	} catch {
-		return IMAGE_EXTENSION_PATTERN.test(url);
+		return false;
+	}
+}
+
+function safePreviewImageUrl(url: string | null | undefined) {
+	if (!url) return null;
+	try {
+		const parsed = new URL(url);
+		if (
+			parsed.protocol === "https:" &&
+			parsed.hostname === "pbs.twimg.com" &&
+			(parsed.pathname.startsWith("/media/") ||
+				parsed.pathname.startsWith("/amplify_video_thumb/"))
+		) {
+			return parsed.toString();
+		}
+		return null;
+	} catch {
+		return null;
 	}
 }
 
@@ -127,22 +142,25 @@ export function LinkPreviewCard({
 	entry: TweetUrlEntity;
 	index: number;
 }) {
-	const targetUrl = entry.expandedUrl || entry.url;
-	const displayUrl = entry.displayUrl || displayHost(targetUrl, targetUrl);
-	const directImageUrl = isDirectImageUrl(targetUrl) ? targetUrl : null;
+	const targetUrl = safeHttpUrl(entry.expandedUrl || entry.url);
+	const previewUrl = targetUrl ?? "";
+	const displayUrl =
+		entry.displayUrl || (targetUrl ? displayHost(targetUrl, targetUrl) : "");
+	const directImageUrl =
+		targetUrl && isDirectImageUrl(targetUrl) ? targetUrl : null;
 	const initialPreview = useMemo<LinkPreviewState>(
 		() => ({
-			expandedUrl: targetUrl,
+			expandedUrl: previewUrl,
 			displayUrl,
 			title:
 				entry.title ??
-				(directImageUrl ? displayHost(targetUrl, displayUrl) : undefined),
+				(directImageUrl ? displayHost(previewUrl, displayUrl) : undefined),
 			description:
 				entry.description ?? (directImageUrl ? displayUrl : undefined),
 			imageUrl: entry.imageUrl ?? directImageUrl,
 			siteName:
 				entry.siteName ??
-				(directImageUrl ? displayHost(targetUrl, displayUrl) : undefined),
+				(directImageUrl ? displayHost(previewUrl, displayUrl) : undefined),
 		}),
 		[
 			directImageUrl,
@@ -151,7 +169,7 @@ export function LinkPreviewCard({
 			entry.imageUrl,
 			entry.siteName,
 			entry.title,
-			targetUrl,
+			previewUrl,
 		],
 	);
 	const [preview, setPreview] = useState(initialPreview);
@@ -199,7 +217,7 @@ export function LinkPreviewCard({
 			void fetchPreview(entry).then((metadata) => {
 				if (cancelled || !metadata) return;
 				setPreview((current) => ({
-					expandedUrl: metadata.url || current.expandedUrl,
+					expandedUrl: safeHttpUrl(metadata.url) ?? current.expandedUrl,
 					displayUrl: current.displayUrl,
 					title: metadata.title ?? current.title,
 					description: metadata.description ?? current.description,
@@ -214,6 +232,8 @@ export function LinkPreviewCard({
 		};
 	}, [cacheKey, canHydrate, entry, hydratedKey, preview, targetUrl]);
 
+	if (!targetUrl) return null;
+
 	const title = preview.title || entry.displayUrl;
 	const description =
 		preview.description && preview.description !== title
@@ -221,14 +241,16 @@ export function LinkPreviewCard({
 			: preview.siteName || displayHost(preview.expandedUrl, entry.displayUrl);
 	const host =
 		preview.siteName || displayHost(preview.expandedUrl, entry.displayUrl);
-	const showImage = Boolean(preview.imageUrl && !imageFailed);
+	const imageUrl = safePreviewImageUrl(preview.imageUrl);
+	const showImage = Boolean(imageUrl && !imageFailed);
+	const previewHref = safeHttpUrl(preview.expandedUrl) ?? targetUrl;
 
 	return (
 		<a
 			key={`${entry.expandedUrl}-${String(index)}`}
 			className={linkPreviewCardClass}
 			data-perf="link-preview-card"
-			href={preview.expandedUrl}
+			href={previewHref}
 			ref={cardRef}
 			rel="noreferrer"
 			target="_blank"
@@ -255,7 +277,7 @@ export function LinkPreviewCard({
 						className="size-full object-cover transition-transform duration-200 group-hover/link-preview:scale-[1.03]"
 						loading="lazy"
 						onError={() => setImageFailed(true)}
-						src={preview.imageUrl ?? ""}
+						src={imageUrl ?? ""}
 					/>
 				) : (
 					<ImageIcon

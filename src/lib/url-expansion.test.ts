@@ -214,4 +214,76 @@ describe("URL expansion cache", () => {
 		]);
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 	});
+
+	it("does not cache custom-fetch redirect loops as successful expansions", async () => {
+		const fetchImpl = vi.fn().mockImplementation((url: string) =>
+			Promise.resolve({
+				headers: new Headers({ location: `${url}/next` }),
+				ok: false,
+				status: 302,
+				url,
+			} as Response),
+		);
+		const { expandUrlsEffect } = await import("./url-expansion");
+
+		await expect(
+			Effect.runPromise(
+				expandUrlsEffect(["https://t.co/loop"], {
+					fetchImpl,
+					successMaxAgeMs: -1,
+				}),
+			),
+		).resolves.toEqual([
+			expect.objectContaining({
+				finalUrl: "https://t.co/loop",
+				source: "network",
+				status: "error",
+			}),
+		]);
+	});
+
+	it("keeps safe resolved-address expansion HEAD-first through redirects", async () => {
+		const fetchImpl = vi.fn().mockImplementation((url: string) =>
+			Promise.resolve(
+				url === "https://t.co/head"
+					? ({
+							headers: new Headers({
+								location: "https://example.com/final",
+							}),
+							ok: false,
+							status: 302,
+							url,
+						} as Response)
+					: ({
+							headers: new Headers(),
+							ok: true,
+							status: 200,
+							url: "https://example.com/final",
+						} as Response),
+			),
+		);
+		const resolveHost = vi.fn().mockResolvedValue(["93.184.216.34"]);
+		const { expandUrlsEffect } = await import("./url-expansion");
+
+		await expect(
+			Effect.runPromise(
+				expandUrlsEffect(["https://t.co/head"], {
+					fetchImpl,
+					resolveHost,
+					successMaxAgeMs: -1,
+				}),
+			),
+		).resolves.toEqual([
+			expect.objectContaining({
+				finalUrl: "https://example.com/final",
+				source: "network",
+				status: "hit",
+			}),
+		]);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual([
+			"HEAD",
+			"HEAD",
+		]);
+	});
 });

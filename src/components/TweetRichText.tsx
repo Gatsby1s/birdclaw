@@ -11,6 +11,7 @@ import {
 	tweetLinkClass,
 	tweetMentionClass,
 } from "#/lib/ui";
+import { safeHttpUrl } from "#/lib/url-safety";
 import { ProfilePreview } from "./ProfilePreview";
 
 export function TweetRichText({
@@ -65,17 +66,20 @@ export function TweetRichText({
 						</ProfilePreview>
 					);
 				} else if (segment.kind === "url") {
-					node = (
-						<a
-							key={`segment-${String(index)}`}
-							className={tweetLinkClass}
-							href={segment.expandedUrl}
-							rel="noreferrer"
-							target="_blank"
-						>
-							{segment.displayUrl}
-						</a>
-					);
+					const href = safeHttpUrl(segment.expandedUrl);
+					if (href) {
+						node = (
+							<a
+								key={`segment-${String(index)}`}
+								className={tweetLinkClass}
+								href={href}
+								rel="noreferrer"
+								target="_blank"
+							>
+								{segment.displayUrl}
+							</a>
+						);
+					}
 				} else if (segment.kind === "hashtag") {
 					node = (
 						<span

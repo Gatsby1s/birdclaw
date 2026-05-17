@@ -9,6 +9,11 @@ import { getNativeDb } from "./db";
 import { runEffectPromise, tryPromise } from "./effect-runtime";
 import type { Database } from "./sqlite";
 import {
+	__test__ as urlSafetyTest,
+	assertSafePreviewUrl,
+	isBlockedAddress,
+} from "./url-safety";
+import {
 	normalizeUrlExpansionForIndex,
 	upsertUrlExpansion,
 } from "./url-expansion-store";
@@ -17,22 +22,6 @@ const FETCH_TIMEOUT_MS = 12_000;
 const MAX_HTML_CHARS = 2_000_000;
 const MAX_REDIRECTS = 4;
 const NO_BODY_STATUS_CODES = new Set([204, 205, 304]);
-const PRIVATE_IPV4_RANGES = [
-	["0.0.0.0", 8],
-	["10.0.0.0", 8],
-	["100.64.0.0", 10],
-	["127.0.0.0", 8],
-	["169.254.0.0", 16],
-	["172.16.0.0", 12],
-	["192.0.0.0", 24],
-	["192.0.2.0", 24],
-	["192.168.0.0", 16],
-	["198.18.0.0", 15],
-	["198.51.100.0", 24],
-	["203.0.113.0", 24],
-	["224.0.0.0", 4],
-	["240.0.0.0", 4],
-] satisfies Array<[string, number]>;
 
 export interface LinkPreviewMetadata {
 	url: string;
@@ -49,6 +38,7 @@ export interface GetLinkPreviewOptions {
 	fetchImpl?: typeof fetch;
 	resolveHost?: (hostname: string) => Promise<string[]>;
 	timeoutMs?: number;
+	method?: "GET" | "HEAD";
 }
 
 interface ResolvedAddress {
@@ -163,197 +153,6 @@ function hostLabel(url: string) {
 	}
 }
 
-function ipv4ToNumber(value: string) {
-	const parts = value.split(".").map((part) => Number(part));
-	if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) {
-		return null;
-	}
-	if (parts.some((part) => part < 0 || part > 255)) return null;
-	return (
-		(parts[0] ?? 0) * 256 ** 3 +
-		(parts[1] ?? 0) * 256 ** 2 +
-		(parts[2] ?? 0) * 256 +
-		(parts[3] ?? 0)
-	);
-}
-
-function isIpv4InRange(address: string, range: string, prefix: number) {
-	const addressNumber = ipv4ToNumber(address);
-	const rangeNumber = ipv4ToNumber(range);
-	if (addressNumber === null || rangeNumber === null) return false;
-	const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-	return (addressNumber & mask) === (rangeNumber & mask);
-}
-
-function isPrivateIpv4(address: string) {
-	return PRIVATE_IPV4_RANGES.some(([range, prefix]) =>
-		isIpv4InRange(address, range, prefix),
-	);
-}
-
-function normalizeIpv6(address: string) {
-	return address.toLowerCase().replace(/^\[|\]$/g, "");
-}
-
-function parseIpv6Parts(address: string) {
-	let normalized = normalizeIpv6(address);
-	if (net.isIP(normalized) !== 6) return null;
-
-	if (normalized.includes(".")) {
-		const lastColon = normalized.lastIndexOf(":");
-		const ipv4 = normalized.slice(lastColon + 1);
-		const addressNumber = ipv4ToNumber(ipv4);
-		if (addressNumber === null) return null;
-		normalized = `${normalized.slice(0, lastColon + 1)}${(
-			(addressNumber >>> 16) &
-			0xffff
-		).toString(16)}:${(addressNumber & 0xffff).toString(16)}`;
-	}
-
-	const halves = normalized.split("::");
-	if (halves.length > 2) return null;
-	const parseGroups = (value: string) =>
-		value === ""
-			? []
-			: value.split(":").map((part) => Number.parseInt(part, 16));
-	const left = parseGroups(halves[0] ?? "");
-	const right = halves.length === 2 ? parseGroups(halves[1] ?? "") : [];
-	const missingGroups = 8 - left.length - right.length;
-	if (
-		(halves.length === 1 && missingGroups !== 0) ||
-		(halves.length === 2 && missingGroups < 0) ||
-		![...left, ...right].every(
-			(part) => Number.isInteger(part) && part >= 0 && part <= 0xffff,
-		)
-	) {
-		return null;
-	}
-	return [...left, ...Array.from({ length: missingGroups }, () => 0), ...right];
-}
-
-function ipv4FromHexPair(parts: string[]) {
-	if (parts.length !== 2) return null;
-	const high = Number.parseInt(parts[0] ?? "", 16);
-	const low = Number.parseInt(parts[1] ?? "", 16);
-	if (
-		![high, low].every(
-			(part) => Number.isInteger(part) && part >= 0 && part <= 0xffff,
-		)
-	) {
-		return null;
-	}
-	return [(high >> 8) & 255, high & 255, (low >> 8) & 255, low & 255].join(".");
-}
-
-function ipv4FromIpv6Parts(parts: number[]) {
-	const tailIpv4 = () =>
-		[
-			(parts[6] >> 8) & 255,
-			parts[6] & 255,
-			(parts[7] >> 8) & 255,
-			parts[7] & 255,
-		].join(".");
-	const hasZeroPrefix = (length: number) =>
-		parts.slice(0, length).every((part) => part === 0);
-	if (hasZeroPrefix(5) && parts[5] === 0xffff) return tailIpv4();
-	if (hasZeroPrefix(4) && parts[4] === 0xffff && parts[5] === 0) {
-		return tailIpv4();
-	}
-	if (hasZeroPrefix(6)) return tailIpv4();
-	if (parts[0] === 0x64 && parts[1] === 0xff9b && parts[2] === 0) {
-		return tailIpv4();
-	}
-	if (parts[0] === 0x64 && parts[1] === 0xff9b && parts[2] === 1) {
-		return tailIpv4();
-	}
-	if (parts[0] === 0x2002) {
-		return [
-			(parts[1] >> 8) & 255,
-			parts[1] & 255,
-			(parts[2] >> 8) & 255,
-			parts[2] & 255,
-		].join(".");
-	}
-	return null;
-}
-
-function ipv4FromIpv6Suffix(address: string) {
-	const normalized = normalizeIpv6(address);
-	const parts = parseIpv6Parts(normalized);
-	if (parts) return ipv4FromIpv6Parts(parts);
-	const prefix = ["::ffff:", "64:ff9b::", "64:ff9b:1::", "::"].find((value) =>
-		normalized.startsWith(value),
-	);
-	if (!prefix) return null;
-	const suffix = normalized.slice(prefix.length);
-	if (net.isIP(suffix) === 4) return suffix;
-	return ipv4FromHexPair(suffix.split(":"));
-}
-
-function isPrivateIpv6(address: string) {
-	const normalized = normalizeIpv6(address);
-	const parts = parseIpv6Parts(normalized);
-	const mappedIpv4 = parts
-		? ipv4FromIpv6Parts(parts)
-		: ipv4FromIpv6Suffix(normalized);
-	if (mappedIpv4) return isPrivateIpv4(mappedIpv4);
-	if (parts) {
-		const first = parts[0] ?? 0;
-		return (
-			parts.every((part) => part === 0) ||
-			parts.slice(0, 7).every((part) => part === 0) ||
-			(first & 0xfe00) === 0xfc00 ||
-			(first & 0xffc0) === 0xfe80 ||
-			(first & 0xffc0) === 0xfec0 ||
-			(first & 0xff00) === 0xff00
-		);
-	}
-	return (
-		normalized === "::" ||
-		normalized === "::1" ||
-		normalized.startsWith("fc") ||
-		normalized.startsWith("fd") ||
-		normalized.startsWith("fe8") ||
-		normalized.startsWith("fe9") ||
-		normalized.startsWith("fea") ||
-		normalized.startsWith("feb") ||
-		normalized.startsWith("ff")
-	);
-}
-
-function isBlockedAddress(address: string) {
-	const normalized = address.replace(/^\[|\]$/g, "");
-	const family = net.isIP(normalized);
-	if (family === 4) return isPrivateIpv4(normalized);
-	if (family === 6) return isPrivateIpv6(normalized);
-	return false;
-}
-
-function isLocalHostname(hostname: string) {
-	const normalized = hostname.toLowerCase().replace(/\.$/, "");
-	return (
-		normalized === "localhost" ||
-		normalized.endsWith(".localhost") ||
-		normalized.endsWith(".local") ||
-		normalized.endsWith(".internal") ||
-		normalized.endsWith(".test")
-	);
-}
-
-function assertSafePreviewUrl(url: string) {
-	const parsed = new URL(url);
-	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-		throw new Error("Link preview URL must use http or https");
-	}
-	if (parsed.username || parsed.password) {
-		throw new Error("Link preview URL must not include credentials");
-	}
-	if (isLocalHostname(parsed.hostname) || isBlockedAddress(parsed.hostname)) {
-		throw new Error("Link preview URL points to a private host");
-	}
-	return parsed;
-}
-
 function isInjectedFetchAllowed() {
 	return process.env.NODE_ENV === "test" || process.env.VITEST === "true";
 }
@@ -375,7 +174,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number) {
 	});
 }
 
-async function resolvePublicAddresses(hostname: string): Promise<string[]> {
+export async function resolvePublicAddresses(
+	hostname: string,
+): Promise<string[]> {
 	const normalized = stripAddressBrackets(hostname);
 	if (net.isIP(normalized)) return [normalized];
 	const records = await lookup(normalized, { all: true, verbatim: true });
@@ -478,6 +279,7 @@ function nodeSafeFetch(
 	options: {
 		addresses: ResolvedAddress[];
 		headers: Record<string, string>;
+		method: "GET" | "HEAD";
 		timeoutMs: number;
 	},
 ) {
@@ -516,6 +318,7 @@ function nodeSafeFetch(
 				url,
 				{
 					headers: options.headers,
+					method: options.method,
 					lookup: (_hostname, lookupOptions, callback) => {
 						respondWithResolvedAddress(address, lookupOptions, callback);
 					},
@@ -573,11 +376,11 @@ function nodeSafeFetch(
 	);
 }
 
-function safePreviewFetchEffect(
+export function safePreviewFetchEffect(
 	url: string,
 	options: Pick<
 		GetLinkPreviewOptions,
-		"fetchImpl" | "resolveHost" | "timeoutMs"
+		"fetchImpl" | "method" | "resolveHost" | "timeoutMs"
 	>,
 ) {
 	const resolveHost =
@@ -586,6 +389,7 @@ function safePreviewFetchEffect(
 			? null
 			: (hostname: string) => resolvePublicAddresses(hostname));
 	const timeoutMs = options.timeoutMs ?? FETCH_TIMEOUT_MS;
+	const method = options.method ?? "GET";
 	const deadline = Date.now() + timeoutMs;
 	const remainingTimeoutMs = () => Math.max(1, deadline - Date.now());
 	const headers: Record<string, string> = {
@@ -628,6 +432,7 @@ function safePreviewFetchEffect(
 						() =>
 							options.fetchImpl?.(parsed.toString(), {
 								headers,
+								method,
 								redirect: "manual",
 								signal: AbortSignal.timeout(remainingMs),
 							}) as Promise<Response>,
@@ -643,6 +448,7 @@ function safePreviewFetchEffect(
 								: nodeSafeFetch(parsed, {
 										addresses,
 										headers,
+										method,
 										timeoutMs: remainingTimeoutMs(),
 									}),
 						),
@@ -859,18 +665,29 @@ function readCachedPreview(
 }
 
 function hasUsefulPreview(row: UrlExpansionPreviewRow) {
+	if (row.status !== "hit") return false;
+	try {
+		assertSafePreviewUrl(row.final_url || row.expanded_url || row.short_url);
+		if (row.image_url) assertSafePreviewUrl(row.image_url);
+	} catch {
+		return false;
+	}
 	return Boolean(
 		row.title || row.description || row.image_url || row.site_name,
 	);
 }
 
 function rowToPreview(row: UrlExpansionPreviewRow): LinkPreviewMetadata {
-	const url = row.final_url || row.expanded_url || row.short_url;
+	const url = assertSafePreviewUrl(
+		row.final_url || row.expanded_url || row.short_url,
+	).toString();
 	return {
 		url,
 		title: row.title ?? null,
 		description: row.description ?? null,
-		imageUrl: row.image_url ?? null,
+		imageUrl: row.image_url
+			? assertSafePreviewUrl(row.image_url).toString()
+			: null,
 		siteName: row.site_name ?? null,
 		...(row.error ? { error: row.error } : {}),
 	};
@@ -930,14 +747,8 @@ export function getOrFetchLinkPreview(
 }
 
 export const __test__ = {
-	assertSafePreviewUrl,
+	...urlSafetyTest,
 	decodeHtmlEntities,
-	ipv4FromIpv6Suffix,
-	ipv4ToNumber,
-	isBlockedAddress,
-	isIpv4InRange,
-	isPrivateIpv6,
-	parseIpv6Parts,
 	respondWithResolvedAddress,
 	youtubeThumbnail,
 };

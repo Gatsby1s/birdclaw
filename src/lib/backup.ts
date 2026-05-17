@@ -9,6 +9,7 @@ import type { Database } from "./sqlite";
 import { getBirdclawConfig } from "./config";
 import { getNativeDb } from "./db";
 import { runEffectPromise, tryPromise } from "./effect-runtime";
+import { safeHttpUrl } from "./url-safety";
 
 const execFileAsync = promisify(execFile);
 const BACKUP_SCHEMA_VERSION = 1;
@@ -16,6 +17,7 @@ const MANIFEST_PATH = "manifest.json";
 const DATA_DIR = "data";
 const AUTO_SYNC_CACHE_KEY = "backup:auto-sync";
 const DEFAULT_STALE_AFTER_SECONDS = 15 * 60;
+let autoUpdateInFlight: Promise<BackupAutoUpdateResult> | null = null;
 
 type JsonValue =
 	| null
@@ -138,14 +140,25 @@ function getErrorOutput(error: unknown, key: "stdout" | "stderr") {
 	return typeof output === "string" ? output : undefined;
 }
 
+function redactSecretUrl(value: string) {
+	return value.replace(
+		/([a-z][a-z0-9+.-]*:\/\/)([^/@:\s]+)(?::([^/@\s]+))?@/gi,
+		(_match, protocol: string, username: string, password?: string) =>
+			`${protocol}${username ? "REDACTED" : ""}${password ? ":REDACTED" : ""}@`,
+	);
+}
+
 function gitCommandError(args: readonly string[], cause: unknown) {
-	const command = `git ${args.join(" ")}`;
-	const message = cause instanceof Error ? cause.message : `${command} failed`;
+	const redactedArgs = args.map((arg) => redactSecretUrl(arg));
+	const command = `git ${redactedArgs.join(" ")}`;
+	const message = redactSecretUrl(
+		cause instanceof Error ? cause.message : `${command} failed`,
+	);
 	return new BackupGitCommandError({
 		message,
-		args,
-		stdout: getErrorOutput(cause, "stdout"),
-		stderr: getErrorOutput(cause, "stderr"),
+		args: redactedArgs,
+		stdout: redactSecretUrl(getErrorOutput(cause, "stdout") ?? ""),
+		stderr: redactSecretUrl(getErrorOutput(cause, "stderr") ?? ""),
 		cause,
 	});
 }
@@ -586,13 +599,29 @@ function writeJsonlFileEffect(
 	rows: JsonRecord[],
 ): Effect.Effect<BackupFileManifest, unknown> {
 	return Effect.gen(function* () {
-		const fullPath = yield* trySync(() => path.join(repoPath, relativePath));
+		const fullPath = yield* trySync(() =>
+			resolveBackupFilePath(repoPath, relativePath),
+		);
 		const content = yield* trySync(
 			() => `${rows.map((row) => jsonlStringify(row)).join("\n")}\n`,
 		);
+		yield* assertNoSymlinkAncestorEffect(repoPath, path.dirname(fullPath));
 		yield* tryPromise(() =>
 			fs.mkdir(path.dirname(fullPath), { recursive: true }),
 		);
+		yield* assertNoSymlinkAncestorEffect(repoPath, path.dirname(fullPath));
+		yield* assertBackupPathInsideRealRootEffect(
+			repoPath,
+			path.dirname(fullPath),
+		);
+		const outputStat = yield* tryPromise(() => fs.lstat(fullPath)).pipe(
+			Effect.option,
+		);
+		if (outputStat._tag === "Some" && !outputStat.value.isFile()) {
+			return yield* Effect.fail(
+				new Error(`Backup output path is not a regular file: ${relativePath}`),
+			);
+		}
 		const current = yield* tryPromise(() => fs.readFile(fullPath, "utf8")).pipe(
 			Effect.option,
 		);
@@ -614,7 +643,16 @@ function removeStaleBackupFilesEffect(
 	directory = DATA_DIR,
 ): Effect.Effect<void, unknown> {
 	return Effect.gen(function* () {
-		const fullDirectory = yield* trySync(() => path.join(repoPath, directory));
+		const fullDirectory = yield* trySync(() =>
+			resolveBackupFilePath(repoPath, directory),
+		);
+		const directoryStat = yield* tryPromise(() => fs.lstat(fullDirectory)).pipe(
+			Effect.option,
+		);
+		if (directoryStat._tag === "None" || !directoryStat.value.isDirectory()) {
+			return;
+		}
+		yield* assertBackupPathInsideRealRootEffect(repoPath, fullDirectory);
 		const entries = yield* tryPromise(() =>
 			fs.readdir(fullDirectory, { withFileTypes: true }),
 		).pipe(Effect.catchAll(() => Effect.succeed([])));
@@ -624,7 +662,9 @@ function removeStaleBackupFilesEffect(
 			(entry) =>
 				Effect.gen(function* () {
 					const relativePath = path.posix.join(directory, entry.name);
-					const fullPath = path.join(repoPath, relativePath);
+					const fullPath = yield* trySync(() =>
+						resolveBackupFilePath(repoPath, relativePath),
+					);
 					if (entry.isDirectory()) {
 						yield* removeStaleBackupFilesEffect(
 							repoPath,
@@ -641,6 +681,10 @@ function removeStaleBackupFilesEffect(
 						relativePath.endsWith(".jsonl") &&
 						!expectedPaths.has(relativePath)
 					) {
+						const stat = yield* tryPromise(() => fs.lstat(fullPath)).pipe(
+							Effect.option,
+						);
+						if (stat._tag === "Some" && !stat.value.isFile()) return;
 						yield* tryPromise(() => fs.rm(fullPath, { force: true }));
 					}
 				}),
@@ -695,7 +739,10 @@ function ensureBackupReadmeEffect(
 	repoPath: string,
 ): Effect.Effect<void, unknown> {
 	return Effect.gen(function* () {
-		const readmePath = yield* trySync(() => path.join(repoPath, "README.md"));
+		const readmePath = yield* trySync(() =>
+			resolveBackupFilePath(repoPath, "README.md"),
+		);
+		yield* assertNoSymlinkAncestorEffect(repoPath, readmePath);
 		if (yield* trySync(() => existsSync(readmePath))) {
 			return;
 		}
@@ -750,8 +797,9 @@ function writeManifestEffect(
 ): Effect.Effect<void, unknown> {
 	return Effect.gen(function* () {
 		const manifestPath = yield* trySync(() =>
-			path.join(repoPath, MANIFEST_PATH),
+			resolveBackupFilePath(repoPath, MANIFEST_PATH),
 		);
+		yield* assertNoSymlinkAncestorEffect(repoPath, manifestPath);
 		const content = yield* trySync(
 			() => `${canonicalStringify(manifest as unknown as JsonRecord)}\n`,
 		);
@@ -996,6 +1044,12 @@ export function exportBackupEffect({
 		const database =
 			db ?? (yield* trySync(() => getNativeDb({ seedDemoData: false })));
 		yield* tryPromise(() => fs.mkdir(resolvedRepoPath, { recursive: true }));
+		const repoStat = yield* tryPromise(() => fs.lstat(resolvedRepoPath));
+		if (!repoStat.isDirectory() || repoStat.isSymbolicLink()) {
+			return yield* Effect.fail(
+				new Error("Backup repository path must be a real directory"),
+			);
+		}
 		yield* ensureBackupReadmeEffect(resolvedRepoPath);
 
 		const shards = yield* trySync(() => buildShards(database));
@@ -1075,9 +1129,15 @@ function readManifestEffect(
 	repoPath: string,
 ): Effect.Effect<BackupManifest, unknown> {
 	return Effect.gen(function* () {
-		const content = yield* tryPromise(() =>
-			fs.readFile(path.join(repoPath, MANIFEST_PATH), "utf8"),
+		const manifestPath = yield* trySync(() =>
+			resolveBackupFilePath(repoPath, MANIFEST_PATH),
 		);
+		yield* assertReadableBackupFileEffect(
+			repoPath,
+			manifestPath,
+			MANIFEST_PATH,
+		);
+		const content = yield* tryPromise(() => fs.readFile(manifestPath, "utf8"));
 		const parsed = yield* trySync(() => JSON.parse(content) as BackupManifest);
 		if (parsed.app !== "birdclaw") {
 			return yield* Effect.fail(
@@ -1095,14 +1155,112 @@ function readManifestEffect(
 	});
 }
 
+function resolveBackupFilePath(repoPath: string, relativePath: string) {
+	if (path.isAbsolute(relativePath)) {
+		throw new Error(`Backup manifest path must be relative: ${relativePath}`);
+	}
+	const normalized = path.normalize(relativePath);
+	if (
+		normalized === "." ||
+		normalized.startsWith("..") ||
+		path.isAbsolute(normalized)
+	) {
+		throw new Error(`Backup manifest path escapes repository: ${relativePath}`);
+	}
+	const root = path.resolve(repoPath);
+	const resolved = path.resolve(root, normalized);
+	const relative = path.relative(root, resolved);
+	if (relative.startsWith("..") || path.isAbsolute(relative)) {
+		throw new Error(`Backup manifest path escapes repository: ${relativePath}`);
+	}
+	return resolved;
+}
+
+function isPathInsideRoot(root: string, candidate: string) {
+	const relative = path.relative(root, candidate);
+	return (
+		relative === "" ||
+		(!relative.startsWith("..") && !path.isAbsolute(relative))
+	);
+}
+
+function assertBackupPathInsideRealRootEffect(
+	repoPath: string,
+	fullPath: string,
+): Effect.Effect<void, unknown> {
+	return Effect.gen(function* () {
+		const realRoot = yield* tryPromise(() => fs.realpath(repoPath));
+		const realPath = yield* tryPromise(() => fs.realpath(fullPath));
+		if (!isPathInsideRoot(realRoot, realPath)) {
+			return yield* Effect.fail(new Error("Backup path escapes repository"));
+		}
+	});
+}
+
+function assertReadableBackupFileEffect(
+	repoPath: string,
+	fullPath: string,
+	label: string,
+) {
+	return Effect.gen(function* () {
+		yield* assertNoSymlinkAncestorEffect(repoPath, fullPath);
+		const stat = yield* tryPromise(() => fs.lstat(fullPath));
+		if (!stat.isFile()) {
+			return yield* Effect.fail(
+				new Error(`Backup path is not a regular file: ${label}`),
+			);
+		}
+		yield* assertBackupPathInsideRealRootEffect(repoPath, fullPath);
+		return stat;
+	});
+}
+
+function assertNoSymlinkAncestorEffect(
+	repoPath: string,
+	fullPath: string,
+): Effect.Effect<void, unknown> {
+	return Effect.gen(function* () {
+		const root = path.resolve(repoPath);
+		const target = path.resolve(fullPath);
+		if (!isPathInsideRoot(root, target)) {
+			return yield* Effect.fail(new Error("Backup path escapes repository"));
+		}
+		const relative = path.relative(root, target);
+		let current = root;
+		for (const part of relative.split(path.sep).filter(Boolean)) {
+			current = path.join(current, part);
+			const stat = yield* tryPromise(() => fs.lstat(current)).pipe(
+				Effect.catchAll((error) =>
+					error &&
+					typeof error === "object" &&
+					"code" in error &&
+					error.code === "ENOENT"
+						? Effect.succeed(null)
+						: Effect.fail(error),
+				),
+			);
+			if (!stat) return;
+			if (stat.isSymbolicLink()) {
+				return yield* Effect.fail(
+					new Error(
+						`Backup path contains symlink: ${path.relative(root, current)}`,
+					),
+				);
+			}
+		}
+	});
+}
+
 function readJsonlFileEffect(
 	repoPath: string,
 	relativePath: string,
 ): Effect.Effect<JsonRecord[], unknown> {
 	return Effect.gen(function* () {
-		const content = yield* tryPromise(() =>
-			fs.readFile(path.join(repoPath, relativePath), "utf8"),
+		const filePath = yield* trySync(() =>
+			resolveBackupFilePath(repoPath, relativePath),
 		);
+		yield* assertReadableBackupFileEffect(repoPath, filePath, relativePath);
+		const content = yield* tryPromise(() => fs.readFile(filePath, "utf8"));
 		return yield* trySync(() =>
 			content
 				.split("\n")
@@ -1187,6 +1345,85 @@ function insertRows(
 	for (const row of rows) {
 		statement.run(...keys.map((key) => row[key] ?? null));
 	}
+}
+
+const JSON_URL_KEYS = new Set([
+	"url",
+	"expandedUrl",
+	"expanded_url",
+	"imageUrl",
+	"image_url",
+	"mediaUrl",
+	"media_url",
+	"media_url_https",
+	"thumbnailUrl",
+	"thumbnail_url",
+	"previewImageUrl",
+	"preview_image_url",
+]);
+
+function sanitizeJsonUrlValue(key: string, value: JsonValue): JsonValue {
+	if (!JSON_URL_KEYS.has(key)) return value;
+	if (typeof value !== "string" || value.length === 0) return value;
+	return safeHttpUrl(value) ?? "";
+}
+
+function sanitizeJsonUrls(value: JsonValue, key = ""): JsonValue {
+	if (Array.isArray(value)) {
+		return value.map((item) => sanitizeJsonUrls(item));
+	}
+	if (value && typeof value === "object") {
+		return Object.fromEntries(
+			Object.entries(value).map(([entryKey, entryValue]) => [
+				entryKey,
+				sanitizeJsonUrls(entryValue, entryKey),
+			]),
+		);
+	}
+	return sanitizeJsonUrlValue(key, value);
+}
+
+function sanitizeJsonTextUrls(value: JsonValue, fallback: JsonValue) {
+	if (typeof value !== "string" || value.length === 0) return value;
+	try {
+		return JSON.stringify(sanitizeJsonUrls(JSON.parse(value) as JsonValue));
+	} catch {
+		return JSON.stringify(fallback);
+	}
+}
+
+function sanitizeImportedTweets(rows: JsonRecord[]) {
+	return rows.map((row) => ({
+		...row,
+		entities_json: sanitizeJsonTextUrls(row.entities_json, {}),
+		media_json: sanitizeJsonTextUrls(row.media_json, []),
+	}));
+}
+
+function sanitizeImportedUrlExpansions(rows: JsonRecord[]) {
+	return rows.map((row) => {
+		const shortUrl =
+			typeof row.short_url === "string" ? safeHttpUrl(row.short_url) : null;
+		const expandedUrl =
+			typeof row.expanded_url === "string"
+				? safeHttpUrl(row.expanded_url)
+				: null;
+		const finalUrl =
+			typeof row.final_url === "string" ? safeHttpUrl(row.final_url) : null;
+		const safe = Boolean(shortUrl || expandedUrl || finalUrl);
+		return {
+			...row,
+			short_url: shortUrl ?? "",
+			expanded_url: expandedUrl ?? shortUrl ?? "",
+			final_url: finalUrl ?? expandedUrl ?? shortUrl ?? "",
+			status: safe ? row.status : "error",
+			error: safe ? row.error : "unsafe URL stripped from backup import",
+			image_url:
+				typeof row.image_url === "string"
+					? (safeHttpUrl(row.image_url) ?? "")
+					: row.image_url,
+		};
+	});
 }
 
 function readFtsIds(
@@ -1294,6 +1531,12 @@ export function importBackupEffect({
 			followEdges,
 			followEvents,
 		] = yield* readBackupImportRowsEffect(resolvedRepoPath, manifest);
+		const sanitizedTweets = yield* trySync(() =>
+			sanitizeImportedTweets(tweets),
+		);
+		const sanitizedUrlExpansions = yield* trySync(() =>
+			sanitizeImportedUrlExpansions(urlExpansions),
+		);
 
 		const fingerprint = yield* trySync(() => {
 			db.transaction(() => {
@@ -1632,7 +1875,7 @@ export function importBackupEffect({
         end,
         quoted_tweet_id = coalesce(excluded.quoted_tweet_id, tweets.quoted_tweet_id)
       `,
-					tweets,
+					sanitizedTweets,
 					[
 						"id",
 						"account_id",
@@ -1655,7 +1898,7 @@ export function importBackupEffect({
 					db,
 					"tweets_fts",
 					"tweet_id",
-					tweets,
+					sanitizedTweets,
 					"id",
 					"text",
 					tweetFtsIds,
@@ -1800,7 +2043,7 @@ export function importBackupEffect({
         source = excluded.source,
         updated_at = excluded.updated_at
       `,
-					urlExpansions,
+					sanitizedUrlExpansions,
 					[
 						"short_url",
 						"expanded_url",
@@ -1966,7 +2209,7 @@ export function syncBackupEffect({
 		return {
 			ok: true,
 			repoPath: resolvedRepoPath,
-			...(remote ? { remote } : {}),
+			...(remote ? { remote: redactSecretUrl(remote) } : {}),
 			pulled,
 			imported: Boolean(importResult),
 			...(importResult ? { importResult } : {}),
@@ -2024,7 +2267,7 @@ export function updateBackupFromGitEffect({
 		return {
 			ok: true,
 			repoPath: resolvedRepoPath,
-			...(remote ? { remote } : {}),
+			...(remote ? { remote: redactSecretUrl(remote) } : {}),
 			pulled,
 			imported: Boolean(importResult),
 			...(importResult ? { importResult } : {}),
@@ -2106,7 +2349,7 @@ function autoSyncConfigError(error: unknown): BackupAutoUpdateResult {
 	};
 }
 
-export function maybeAutoUpdateBackupEffect(
+function runMaybeAutoUpdateBackupEffect(
 	db?: Database,
 ): Effect.Effect<BackupAutoUpdateResult, never> {
 	return Effect.gen(function* () {
@@ -2150,7 +2393,7 @@ export function maybeAutoUpdateBackupEffect(
 				skipped: true,
 				reason: "backup auto-sync is fresh",
 				repoPath: config.repoPath,
-				...(config.remote ? { remote: config.remote } : {}),
+				...(config.remote ? { remote: redactSecretUrl(config.remote) } : {}),
 			};
 		}
 
@@ -2173,7 +2416,9 @@ export function maybeAutoUpdateBackupEffect(
 				enabled: true,
 				skipped: false,
 				repoPath: result.value.repoPath,
-				...(result.value.remote ? { remote: result.value.remote } : {}),
+				...(result.value.remote
+					? { remote: redactSecretUrl(result.value.remote) }
+					: {}),
 				pulled: result.value.pulled,
 				imported: result.value.imported,
 			};
@@ -2195,9 +2440,29 @@ export function maybeAutoUpdateBackupEffect(
 			enabled: true,
 			skipped: false,
 			repoPath: config.repoPath,
-			...(config.remote ? { remote: config.remote } : {}),
-			error: message,
+			...(config.remote ? { remote: redactSecretUrl(config.remote) } : {}),
+			error: redactSecretUrl(message),
 		};
+	});
+}
+
+export function maybeAutoUpdateBackupEffect(
+	db?: Database,
+): Effect.Effect<BackupAutoUpdateResult, never> {
+	if (autoUpdateInFlight) {
+		return Effect.promise(() => autoUpdateInFlight!);
+	}
+
+	return Effect.promise(() => {
+		const promise = runEffectPromise(
+			runMaybeAutoUpdateBackupEffect(db),
+		).finally(() => {
+			if (autoUpdateInFlight === promise) {
+				autoUpdateInFlight = null;
+			}
+		});
+		autoUpdateInFlight = promise;
+		return promise;
 	});
 }
 
@@ -2323,9 +2588,41 @@ export function validateBackupEffect(
 				Effect.gen(function* () {
 					const fileErrors: string[] = [];
 					let file: BackupFileManifest | undefined;
-					const content = yield* tryPromise(() =>
-						fs.readFile(path.join(resolvedRepoPath, expected.path)),
+					const filePath = yield* trySync(() =>
+						resolveBackupFilePath(resolvedRepoPath, expected.path),
 					).pipe(
+						Effect.match({
+							onFailure: (error) => {
+								fileErrors.push(
+									`${expected.path}: ${error instanceof Error ? error.message : String(error)}`,
+								);
+								return undefined;
+							},
+							onSuccess: (value) => value,
+						}),
+					);
+					if (!filePath) {
+						return { file, errors: fileErrors };
+					}
+					const stat = yield* assertReadableBackupFileEffect(
+						resolvedRepoPath,
+						filePath,
+						expected.path,
+					).pipe(
+						Effect.match({
+							onFailure: (error) => {
+								fileErrors.push(
+									`${expected.path}: ${error instanceof Error ? error.message : String(error)}`,
+								);
+								return undefined;
+							},
+							onSuccess: (value) => value,
+						}),
+					);
+					if (!stat) {
+						return { file, errors: fileErrors };
+					}
+					const content = yield* tryPromise(() => fs.readFile(filePath)).pipe(
 						Effect.match({
 							onFailure: (error) => {
 								fileErrors.push(

@@ -61,4 +61,26 @@ describe("TweetRichText", () => {
 			"https://t.co/raw",
 		);
 	});
+
+	it("keeps unsafe url entity text visible as plain text", () => {
+		const { container } = render(
+			<TweetRichText
+				text="Unsafe https://t.co/bad stays"
+				entities={{
+					urls: [
+						{
+							url: "https://t.co/bad",
+							expandedUrl: "javascript:alert(1)",
+							displayUrl: "bad.example",
+							start: 7,
+							end: 23,
+						},
+					],
+				}}
+			/>,
+		);
+
+		expect(screen.getByText(/https:\/\/t\.co\/bad/)).toBeInTheDocument();
+		expect(container.querySelector("a")).toBeNull();
+	});
 });

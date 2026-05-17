@@ -44,11 +44,7 @@ describe("avatar cache", () => {
 		process.env.BIRDCLAW_HOME = tempDir;
 
 		const db = getNativeDb();
-		const avatarUrl =
-			"data:image/svg+xml;utf8," +
-			encodeURIComponent(
-				'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="#111"/><text x="8" y="11" fill="white" text-anchor="middle">PS</text></svg>',
-			);
+		const avatarUrl = "data:image/png;base64,aGk=";
 
 		db.prepare(
 			"insert into profiles (id, handle, display_name, bio, followers_count, avatar_hue, avatar_url, created_at) values (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -64,11 +60,11 @@ describe("avatar cache", () => {
 		);
 
 		const avatar = await readCachedAvatar("profile_demo");
-		expect(avatar?.contentType).toBe("image/svg+xml");
+		expect(avatar?.contentType).toBe("image/png");
 		expect(avatar?.cachePath).toBe(
 			getAvatarCachePath("profile_demo", avatarUrl),
 		);
-		expect(readFileSync(avatar?.cachePath ?? "", "utf8")).toContain("<svg");
+		expect(readFileSync(avatar?.cachePath ?? "")).toEqual(Buffer.from("hi"));
 	});
 
 	it("maps cached extension types", () => {
@@ -79,7 +75,7 @@ describe("avatar cache", () => {
 		expect(__test__.getContentTypeFromExtension(".png")).toBe("image/png");
 		expect(__test__.getContentTypeFromExtension(".webp")).toBe("image/webp");
 		expect(__test__.getContentTypeFromExtension(".gif")).toBe("image/gif");
-		expect(__test__.getContentTypeFromExtension(".svg")).toBe("image/svg+xml");
+		expect(__test__.getContentTypeFromExtension(".svg")).toBe("image/jpeg");
 		expect(__test__.getContentTypeFromExtension(".jpg")).toBe("image/jpeg");
 		expect(
 			__test__.getExtensionFromAvatarUrl("https://pbs.twimg.com/a.gif"),
@@ -89,7 +85,7 @@ describe("avatar cache", () => {
 		).toBe(".webp");
 		expect(
 			__test__.getExtensionFromAvatarUrl("https://pbs.twimg.com/a.svg"),
-		).toBe(".svg");
+		).toBe(".jpg");
 		expect(
 			__test__.getExtensionFromAvatarUrl("https://pbs.twimg.com/a.jpeg"),
 		).toBe(".jpg");
@@ -107,14 +103,17 @@ describe("avatar cache", () => {
 		expect(
 			getAvatarCachePath("profile_unknown", "data:image/bmp;base64,aGk="),
 		).toMatch(/\.jpg$/);
-		expect(__test__.decodeDataUrl("data:;base64,aGk=")).toMatchObject({
-			contentType: "application/octet-stream",
-			buffer: Buffer.from("hi"),
-		});
-		expect(__test__.decodeDataUrl("data:text/plain,hello")).toMatchObject({
-			contentType: "text/plain",
-			buffer: Buffer.from("hello"),
-		});
+		expect(() => __test__.decodeDataUrl("data:;base64,aGk=")).toThrow(
+			"Avatar data URL must be a raster image",
+		);
+		expect(() => __test__.decodeDataUrl("data:text/plain,hello")).toThrow(
+			"Avatar data URL must be a raster image",
+		);
+		expect(() =>
+			__test__.decodeDataUrl(
+				`data:image/png;base64,${Buffer.alloc(2 * 1024 * 1024 + 1).toString("base64")}`,
+			),
+		).toThrow("Avatar data URL is too large");
 	});
 
 	it("fetches remote avatars once and then serves the cached file", async () => {

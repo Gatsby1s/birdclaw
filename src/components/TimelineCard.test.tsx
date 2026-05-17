@@ -122,10 +122,9 @@ describe("TimelineCard", () => {
 		expect(screen.getAllByText("Quoted tweet")[1]).toBeInTheDocument();
 		expect(screen.getByAltText("Demo image")).toBeInTheDocument();
 		expect(screen.getByText("Demo link")).toBeInTheDocument();
-		expect(screen.getByRole("img", { name: "Demo link" })).toHaveAttribute(
-			"src",
-			"https://example.com/preview.jpg",
-		);
+		expect(
+			screen.queryByRole("img", { name: "Demo link" }),
+		).not.toBeInTheDocument();
 		expect(container.querySelectorAll("header p")).toHaveLength(0);
 		fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 		expect(onReply).toHaveBeenCalledWith("tweet_1");
