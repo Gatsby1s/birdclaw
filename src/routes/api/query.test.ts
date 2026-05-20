@@ -30,7 +30,7 @@ describe("api query route", () => {
 		queryResourceMock.mockReturnValue({ resource: "dms", items: [] });
 		const response = await GET({
 			request: new Request(
-				"http://localhost/api/query?resource=dms&replyFilter=unreplied&minFollowers=10&minInfluenceScore=90&sort=influence",
+				"http://localhost/api/query?resource=dms&inbox=requests&replyFilter=unreplied&minFollowers=10&minInfluenceScore=90&sort=influence",
 			),
 		});
 
@@ -40,6 +40,7 @@ describe("api query route", () => {
 				replyFilter: "unreplied",
 				minFollowers: 10,
 				minInfluenceScore: 90,
+				inbox: "requests",
 				sort: "influence",
 			}),
 		);
@@ -81,6 +82,7 @@ describe("api query route", () => {
 				minFollowers: undefined,
 				maxFollowers: 33,
 				maxInfluenceScore: undefined,
+				inbox: "all",
 				sort: "recent",
 			}),
 		);

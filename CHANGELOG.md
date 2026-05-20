@@ -4,6 +4,7 @@
 
 ### Added
 
+- Add web DM inbox controls for switching between all, accepted, and message-request conversations.
 - Render the `What happened` AI digest as a structured day overview with summary cards, signal topics, highlight tweets, links, people, and hover previews for cited tweet ids and `@handle` mentions.
 - Add a streaming `What happened` AI digest in the web UI and CLI (`birdclaw today`, `birdclaw digest`) backed by OpenAI Responses API, GPT-5.5 by default, medium reasoning, priority service tier, local context hashing, and cached final structured results.
 - Add a global web account switcher plus `jobs sync-account`/`install-account-launchd` so multi-account Birdclaw installs can refresh home, mentions, likes, bookmarks, and DMs from launchd.

@@ -47,6 +47,14 @@ const TABS: Array<{ value: ReplyFilter; label: string }> = [
 	{ value: "replied", label: "Replied" },
 ];
 
+type DmInboxFilter = "all" | "accepted" | "requests";
+
+const INBOX_FILTERS: Array<{ value: DmInboxFilter; label: string }> = [
+	{ value: "all", label: "All" },
+	{ value: "accepted", label: "Accepted" },
+	{ value: "requests", label: "Requests" },
+];
+
 function DmsRoute() {
 	const [meta, setMeta] = useState<QueryEnvelope | null>(null);
 	const [items, setItems] = useState<DmConversationItem[]>([]);
@@ -57,6 +65,7 @@ function DmsRoute() {
 	const [selectedConversationId, setSelectedConversationId] = useState<
 		string | undefined
 	>();
+	const [inboxFilter, setInboxFilter] = useState<DmInboxFilter>("all");
 	const [replyFilter, setReplyFilter] = useState<ReplyFilter>("unreplied");
 	const [minFollowers, setMinFollowers] = useState("0");
 	const [minInfluenceScore, setMinInfluenceScore] = useState("0");
@@ -82,6 +91,7 @@ function DmsRoute() {
 		let active = true;
 		const url = new URL("/api/query", window.location.origin);
 		url.searchParams.set("resource", "dms");
+		url.searchParams.set("inbox", inboxFilter);
 		url.searchParams.set("replyFilter", replyFilter);
 		url.searchParams.set("minFollowers", minFollowers);
 		url.searchParams.set("minInfluenceScore", minInfluenceScore);
@@ -147,6 +157,7 @@ function DmsRoute() {
 	}, [
 		minFollowers,
 		minInfluenceScore,
+		inboxFilter,
 		refreshTick,
 		replyFilter,
 		search,
@@ -254,9 +265,30 @@ function DmsRoute() {
 						kind="dms"
 						label="Sync DMs"
 						onSynced={refreshLocalView}
+						syncOptions={{
+							inbox: inboxFilter,
+							limit: inboxFilter === "requests" ? 200 : 50,
+							maxPages: inboxFilter === "requests" ? 3 : 1,
+						}}
 					/>
 				</div>
 				<div className="flex flex-wrap items-center gap-2 px-4 pb-3">
+					<div className={segmentedClass} aria-label="DM inbox">
+						{INBOX_FILTERS.map((filter) => (
+							<button
+								key={filter.value}
+								aria-pressed={inboxFilter === filter.value}
+								className={cx(
+									segmentClass,
+									inboxFilter === filter.value && segmentActiveClass,
+								)}
+								onClick={() => setInboxFilter(filter.value)}
+								type="button"
+							>
+								{filter.label}
+							</button>
+						))}
+					</div>
 					<label className={cx(searchFieldShellClass, "flex-1 min-w-[200px]")}>
 						<Search className={searchFieldIconClass} strokeWidth={2} />
 						<input

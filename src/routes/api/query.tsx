@@ -9,6 +9,7 @@ import {
 } from "#/lib/http-effect";
 import { queryResource } from "#/lib/queries";
 import type {
+	DmQuery,
 	ReplyFilter,
 	ResourceKind,
 	TimelineQualityFilter,
@@ -29,6 +30,11 @@ function parseOptionalNumber(value: string | null) {
 
 function parseQualityFilter(value: string | null): TimelineQualityFilter {
 	return value === "summary" ? "summary" : "all";
+}
+
+function parseDmInbox(value: string | null): NonNullable<DmQuery["inbox"]> {
+	if (value === "accepted" || value === "requests") return value;
+	return "all";
 }
 
 export const Route = createFileRoute("/api/query")({
@@ -84,6 +90,7 @@ export const Route = createFileRoute("/api/query")({
 										url.searchParams.get("sort") === "influence"
 											? "influence"
 											: "recent",
+									inbox: parseDmInbox(url.searchParams.get("inbox")),
 									conversationId:
 										url.searchParams.get("conversationId") ?? undefined,
 								}),
