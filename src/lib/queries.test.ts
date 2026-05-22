@@ -519,6 +519,12 @@ describe("birdclaw queries", () => {
 			limit: 20,
 		});
 		const sharedItems = allItems.filter((item) => item.id === "tweet_001");
+		const allAccountItems = listTimelineItems({
+			resource: "home",
+			account: "all",
+			since: "2000-01-01T00:00:00.000Z",
+			limit: 20,
+		});
 		const studioItems = listTimelineItems({
 			resource: "home",
 			account: "acct_studio",
@@ -526,16 +532,62 @@ describe("birdclaw queries", () => {
 			limit: 20,
 		});
 
-		expect(sharedItems.map((item) => item.accountId).sort()).toEqual([
-			"acct_primary",
-			"acct_studio",
-		]);
+		expect(sharedItems).toHaveLength(1);
+		expect(sharedItems[0]?.accountId).toBe("acct_primary");
+		expect(
+			allAccountItems.filter((item) => item.id === "tweet_001"),
+		).toHaveLength(1);
 		expect(studioItems.find((item) => item.id === "tweet_001")).toMatchObject({
 			accountId: "acct_studio",
 			accountHandle: "@birdclaw_lab",
 			bookmarked: false,
 			liked: false,
 		});
+	});
+
+	it("deduplicates unscoped timelines before applying the requested limit", () => {
+		setupTempHome();
+		const db = getNativeDb();
+		const accounts = Array.from({ length: 6 }, (_, index) => ({
+			id: `acct_overlap_${index}`,
+			handle: `@overlap_${index}`,
+		}));
+		const now = "2026-03-08T12:00:00.000Z";
+
+		const insertAccount = db.prepare(`
+      insert into accounts (
+        id, name, handle, external_user_id, transport, is_default, created_at
+      ) values (?, ?, ?, null, 'xurl', 0, ?)
+    `);
+		const insertEdge = db.prepare(`
+      insert into tweet_account_edges (
+        account_id, tweet_id, kind, first_seen_at, last_seen_at, seen_count,
+        source, raw_json, updated_at
+      ) values (?, ?, 'home', ?, ?, 1, 'test', '{}', ?)
+    `);
+		for (const account of accounts) {
+			insertAccount.run(account.id, account.id, account.handle, now);
+			for (const tweetId of ["tweet_001", "tweet_003"]) {
+				insertEdge.run(account.id, tweetId, now, now, now);
+			}
+		}
+
+		const items = listTimelineItems({
+			resource: "home",
+			since: "2000-01-01T00:00:00.000Z",
+			limit: 3,
+		});
+
+		expect(items.map((item) => item.id)).toEqual([
+			"tweet_001",
+			"tweet_003",
+			"tweet_002",
+		]);
+		expect(items.map((item) => item.accountId)).toEqual([
+			"acct_primary",
+			"acct_primary",
+			"acct_primary",
+		]);
 	});
 
 	it("omits timeline search snippets when no query is provided", () => {
@@ -1144,7 +1196,7 @@ describe("birdclaw queries", () => {
 			listTimelineItems({ resource: "mentions", limit: 20 }).length,
 		);
 		expect(envelope.stats).toMatchObject({
-			home: 5,
+			home: 4,
 			mentions: 3,
 			inbox: 5,
 		});

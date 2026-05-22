@@ -643,31 +643,28 @@ function countTimelineEdges(db: Database, kind: "home" | "mention") {
 	const row = db
 		.prepare(
 			`
-      select (
-	        (
-	          select count(*)
-	          from tweet_account_edges edge
-	          where edge.kind = ?
-	            and exists (
-	              select 1
-	              from tweets t
-	              where t.id = edge.tweet_id
-	            )
-	        )
-        +
-        (
-          select count(*)
-          from tweets legacy
-          where legacy.kind = ?
-            and not exists (
-              select 1
-              from tweet_account_edges edge
-              where edge.account_id = legacy.account_id
-                and edge.tweet_id = legacy.id
-                and edge.kind = legacy.kind
-            )
-        )
-      ) as count
+      select count(distinct tweet_id) as count
+      from (
+        select edge.tweet_id
+        from tweet_account_edges edge
+        where edge.kind = ?
+          and exists (
+            select 1
+            from tweets t
+            where t.id = edge.tweet_id
+          )
+        union all
+        select legacy.id as tweet_id
+        from tweets legacy
+        where legacy.kind = ?
+          and not exists (
+            select 1
+            from tweet_account_edges edge
+            where edge.account_id = legacy.account_id
+              and edge.tweet_id = legacy.id
+              and edge.kind = legacy.kind
+          )
+      )
       `,
 		)
 		.get(kind, kind) as { count: number | bigint } | undefined;
@@ -802,6 +799,7 @@ export function listTimelineItems({
 	const params: Array<string | number> = [];
 	const normalizedLowQualityThreshold =
 		normalizeLowQualityThreshold(lowQualityThreshold);
+	const shouldDedupeAcrossAccounts = !account || account === "all";
 	let timelineEdgesCte = `
       with timeline_edges as (
         select account_id, tweet_id, kind, raw_json
@@ -934,6 +932,20 @@ export function listTimelineItems({
 	if (account && account !== "all") {
 		where += " and e.account_id = ?";
 		params.push(account);
+	}
+
+	if (shouldDedupeAcrossAccounts) {
+		where += `
+      and e.account_id = (
+        select e2.account_id
+        from timeline_edges e2
+        join accounts a2 on a2.id = e2.account_id
+        where e2.tweet_id = e.tweet_id
+          and e2.kind = e.kind
+        order by a2.is_default desc, e2.account_id asc
+        limit 1
+      )
+    `;
 	}
 
 	where += buildReplyClause(replyFilter).replaceAll(

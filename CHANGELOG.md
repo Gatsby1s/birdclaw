@@ -19,6 +19,7 @@
 
 ### Fixed
 
+- Deduplicate unscoped timeline rows across accounts so Home does not show the same tweet twice when multiple accounts saw it.
 - Render model-emitted Markdown links even when the model inserts a space or line break between the link label and URL.
 - Close Today tweet hover previews when opening their source links so command-clicked citations cannot leave stale preview cards stacked on later hovers.
 - Keep the Messages shell aligned with the rest of the app while collapsing the sidebar labels, and label optional follower/score DM filters instead of showing default `0` fields.
