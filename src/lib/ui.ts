@@ -10,7 +10,7 @@ export const siteShellClass =
 	"mx-auto flex min-h-screen w-full max-w-[1280px] gap-0";
 
 export const siteShellDmClass =
-	"mx-auto flex min-h-screen w-full max-w-[1680px] gap-0";
+	"mx-auto flex min-h-screen w-full max-w-[1280px] gap-0";
 
 export const sidebarShellClass =
 	"sticky top-0 z-30 flex h-screen w-[72px] shrink-0 flex-col justify-between border-r border-[var(--line)] bg-[var(--bg)] px-2 py-3 min-[1100px]:w-[260px] min-[1100px]:px-3";

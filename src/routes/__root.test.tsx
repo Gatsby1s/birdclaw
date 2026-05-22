@@ -84,7 +84,7 @@ describe("root route", () => {
 		expect(appNavProps).toEqual([{ compact: false }]);
 	});
 
-	it("expands the shell for messages mode", () => {
+	it("keeps the shell position stable for messages mode", () => {
 		routerState.path = "/dms";
 		appNavProps.length = 0;
 		const routeOptions = Route.options as unknown as {
@@ -102,7 +102,7 @@ describe("root route", () => {
 			</Shell>,
 		);
 
-		expect(markup).toContain("max-w-[1680px]");
+		expect(markup).toContain("max-w-[1280px]");
 		expect(markup).not.toContain("max-w-[680px]");
 		expect(markup).toContain("birdclaw nav compact");
 		expect(appNavProps).toEqual([{ compact: true }]);

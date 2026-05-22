@@ -32,8 +32,6 @@ import {
 	tabButtonClass,
 	tabButtonIndicatorClass,
 	tabStripClass,
-	textFieldClass,
-	textFieldShortClass,
 	timestampClass,
 } from "#/lib/ui";
 
@@ -60,6 +58,9 @@ const INBOX_FILTERS: Array<{ value: DmInboxFilter; label: string }> = [
 	{ value: "requests", label: "Requests" },
 ];
 
+const filterNumberFieldClass =
+	"flex h-[46px] shrink-0 items-center gap-2 rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-0 text-[14px] text-[var(--ink)] outline-none transition-colors duration-150 focus-within:border-[var(--accent)] focus-within:shadow-[0_0_0_1px_var(--accent)]";
+
 function DmsRoute() {
 	const [meta, setMeta] = useState<QueryEnvelope | null>(null);
 	const [items, setItems] = useState<DmConversationItem[]>([]);
@@ -72,8 +73,8 @@ function DmsRoute() {
 	>();
 	const [inboxFilter, setInboxFilter] = useState<DmInboxFilter>("all");
 	const [replyFilter, setReplyFilter] = useState<ReplyFilter>("unreplied");
-	const [minFollowers, setMinFollowers] = useState("0");
-	const [minInfluenceScore, setMinInfluenceScore] = useState("0");
+	const [minFollowers, setMinFollowers] = useState("");
+	const [minInfluenceScore, setMinInfluenceScore] = useState("");
 	const [sort, setSort] = useState<"recent" | "followers">("recent");
 	const [search, setSearch] = useState("");
 	const [replyDraft, setReplyDraft] = useState("");
@@ -98,10 +99,14 @@ function DmsRoute() {
 		url.searchParams.set("resource", "dms");
 		url.searchParams.set("inbox", inboxFilter);
 		url.searchParams.set("replyFilter", replyFilter);
-		url.searchParams.set("minFollowers", minFollowers);
-		url.searchParams.set("minInfluenceScore", minInfluenceScore);
 		url.searchParams.set("refresh", String(refreshTick));
 		url.searchParams.set("sort", sort);
+		if (minFollowers.trim()) {
+			url.searchParams.set("minFollowers", minFollowers.trim());
+		}
+		if (minInfluenceScore.trim()) {
+			url.searchParams.set("minInfluenceScore", minInfluenceScore.trim());
+		}
 		if (selectedAccountId && inboxFilter !== "requests") {
 			url.searchParams.set("account", selectedAccountId);
 		}
@@ -303,20 +308,30 @@ function DmsRoute() {
 							value={search}
 						/>
 					</label>
-					<input
-						className={cx(textFieldClass, textFieldShortClass)}
-						inputMode="numeric"
-						onChange={(event) => setMinFollowers(event.target.value)}
-						placeholder="Min followers"
-						value={minFollowers}
-					/>
-					<input
-						className={cx(textFieldClass, textFieldShortClass)}
-						inputMode="numeric"
-						onChange={(event) => setMinInfluenceScore(event.target.value)}
-						placeholder="Min score"
-						value={minInfluenceScore}
-					/>
+					<label className={cx(filterNumberFieldClass, "w-[156px]")}>
+						<span className="shrink-0 text-[12px] font-semibold text-[var(--ink-soft)]">
+							Followers
+						</span>
+						<input
+							className="min-w-0 flex-1 border-0 bg-transparent text-right text-[14px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]"
+							inputMode="numeric"
+							onChange={(event) => setMinFollowers(event.target.value)}
+							placeholder="Any"
+							value={minFollowers}
+						/>
+					</label>
+					<label className={cx(filterNumberFieldClass, "w-[132px]")}>
+						<span className="shrink-0 text-[12px] font-semibold text-[var(--ink-soft)]">
+							Score
+						</span>
+						<input
+							className="min-w-0 flex-1 border-0 bg-transparent text-right text-[14px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]"
+							inputMode="numeric"
+							onChange={(event) => setMinInfluenceScore(event.target.value)}
+							placeholder="Any"
+							value={minInfluenceScore}
+						/>
+					</label>
 					<div className={segmentedClass}>
 						{SORTS.map((option) => (
 							<button
