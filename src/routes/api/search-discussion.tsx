@@ -63,10 +63,10 @@ function parseOptions(url: URL): SearchDiscussionOptions {
 		refresh: parseBoolean(url.searchParams.get("refresh")),
 		model: url.searchParams.get("model") === "gpt-5.5" ? "gpt-5.5" : undefined,
 		limit: parseBoundedInteger(url.searchParams.get("limit"), {
-			max: 1000,
+			max: 5_000,
 		}),
 		maxPages: parseBoundedInteger(url.searchParams.get("maxPages"), {
-			max: 20,
+			max: 100,
 		}),
 	};
 }

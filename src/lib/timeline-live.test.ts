@@ -269,6 +269,79 @@ describe("live home timeline sync", () => {
 		).toEqual({ source: "xurl" });
 	});
 
+	it("walks xurl home timeline until the selected start time without a page cap", async () => {
+		makeTempHome();
+		listHomeTimelineViaXurlMock
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "home_recent",
+						author_id: "42",
+						text: "recent timeline item",
+						created_at: "2026-04-26T13:43:34.000Z",
+					},
+				],
+				includes: {
+					users: [{ id: "42", username: "sam", name: "Sam" }],
+				},
+				meta: { next_token: "page-2" },
+			})
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "home_boundary",
+						author_id: "43",
+						text: "boundary timeline item",
+						created_at: "2026-04-25T23:59:00.000Z",
+					},
+				],
+				includes: {
+					users: [{ id: "43", username: "lee", name: "Lee" }],
+				},
+				meta: { next_token: "page-3" },
+			});
+		const { syncHomeTimeline } = await import("./timeline-live");
+
+		const result = await syncHomeTimeline({
+			account: "acct_primary",
+			mode: "xurl",
+			startTime: "2026-04-26T00:00:00.000Z",
+			refresh: true,
+		});
+
+		expect(result).toMatchObject({ source: "xurl", count: 2 });
+		expect(listHomeTimelineViaXurlMock).toHaveBeenCalledTimes(2);
+		expect(listHomeTimelineViaXurlMock).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({ maxResults: 100 }),
+		);
+		expect(listHomeTimelineViaXurlMock).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({ paginationToken: "page-2" }),
+		);
+	});
+
+	it("keeps bird imports finite when a selected start time is present", async () => {
+		makeTempHome();
+		listHomeTimelineViaBirdMock.mockResolvedValueOnce({
+			data: [],
+			meta: { result_count: 0 },
+		});
+		const { syncHomeTimeline } = await import("./timeline-live");
+
+		await syncHomeTimeline({
+			account: "acct_primary",
+			mode: "bird",
+			startTime: "2026-04-26T00:00:00.000Z",
+			refresh: true,
+		});
+
+		expect(listHomeTimelineViaBirdMock).toHaveBeenCalledWith({
+			maxResults: 300,
+			following: true,
+		});
+	});
+
 	it("falls back to bird for auto mode and rejects xurl for-you imports", async () => {
 		makeTempHome();
 		listHomeTimelineViaXurlMock.mockRejectedValueOnce(new Error("no xurl"));

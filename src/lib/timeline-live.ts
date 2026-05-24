@@ -23,6 +23,7 @@ export interface SyncHomeTimelineOptions {
 	mode?: HomeTimelineMode;
 	limit?: number;
 	maxPages?: number;
+	startTime?: string;
 	following?: boolean;
 	refresh?: boolean;
 	cacheTtlMs?: number;
@@ -37,7 +38,7 @@ function parseCacheTtlMs(value?: number) {
 }
 
 function assertLimit(limit: number) {
-	if (!Number.isFinite(limit) || limit < 1) {
+	if ((!Number.isFinite(limit) && limit !== Infinity) || limit < 1) {
 		throw new Error("--limit must be at least 1");
 	}
 }
@@ -56,6 +57,26 @@ function parseMaxPages(maxPages: number | undefined) {
 		throw new Error("--max-pages must be at least 1");
 	}
 	return Math.floor(maxPages);
+}
+
+function parseStartTime(value: string | undefined) {
+	if (!value?.trim()) return undefined;
+	const time = new Date(value).getTime();
+	if (!Number.isFinite(time)) {
+		throw new Error("--start-time must be a valid date");
+	}
+	return { iso: new Date(time).toISOString(), time };
+}
+
+function reachedStartTimeBoundary(
+	payload: XurlMentionsResponse,
+	startTimeMs: number | undefined,
+) {
+	if (startTimeMs === undefined) return false;
+	return payload.data.some((tweet) => {
+		const createdAt = new Date(tweet.created_at).getTime();
+		return Number.isFinite(createdAt) && createdAt <= startTimeMs;
+	});
 }
 
 function getReferencedTweetId(
@@ -233,8 +254,9 @@ function mergeHomeTimelineIntoLocalStore(
 export function syncHomeTimelineEffect({
 	account,
 	mode,
-	limit = 100,
+	limit,
 	maxPages,
+	startTime,
 	following = true,
 	refresh = false,
 	cacheTtlMs,
@@ -252,9 +274,22 @@ export function syncHomeTimelineEffect({
 	unknown
 > {
 	return Effect.gen(function* () {
-		assertLimit(limit);
+		const parsedStartTime = yield* Effect.try({
+			try: () => parseStartTime(startTime),
+			catch: (error) => error,
+		});
 		const parsedMode = parseMode(mode);
-		const parsedMaxPages = parseMaxPages(maxPages);
+		const finiteFallbackLimit = limit ?? (parsedStartTime ? 300 : 100);
+		const effectiveLimit =
+			limit ??
+			(parsedStartTime && (parsedMode === "xurl" || parsedMode === "auto")
+				? Infinity
+				: finiteFallbackLimit);
+		assertLimit(effectiveLimit);
+		const parsedMaxPages =
+			maxPages === undefined && parsedStartTime
+				? Infinity
+				: parseMaxPages(maxPages);
 		const db = getNativeDb();
 		const resolvedAccount = resolveAccount(db, account);
 		const accountId = resolvedAccount.accountId;
@@ -264,7 +299,7 @@ export function syncHomeTimelineEffect({
 			!resolvedAccount.isDefault
 				? "xurl"
 				: parsedMode;
-		const cacheKey = `timeline:${effectiveMode}:${accountId}:${following ? "following" : "for-you"}:${String(limit)}:${String(parsedMaxPages)}`;
+		const cacheKey = `timeline:${effectiveMode}:${accountId}:${following ? "following" : "for-you"}:${Number.isFinite(effectiveLimit) ? String(effectiveLimit) : "all"}:${Number.isFinite(parsedMaxPages) ? String(parsedMaxPages) : "all-pages"}:${parsedStartTime?.iso ?? "no-start"}`;
 		const ttlMs = parseCacheTtlMs(cacheTtlMs);
 		const cached = readSyncCache<XurlMentionsResponse>(cacheKey, db);
 		const cacheAgeMs = cached
@@ -296,7 +331,9 @@ export function syncHomeTimelineEffect({
 					(sum, item) => sum + item.data.length,
 					0,
 				);
-				const remaining = Math.max(1, limit - fetchedCount);
+				const remaining = Number.isFinite(effectiveLimit)
+					? Math.max(1, effectiveLimit - fetchedCount)
+					: Infinity;
 				const pageSize = Math.min(
 					MAX_XURL_TIMELINE_PAGE_SIZE,
 					Math.max(5, remaining),
@@ -313,14 +350,19 @@ export function syncHomeTimelineEffect({
 					typeof pagePayload.meta?.next_token === "string"
 						? pagePayload.meta.next_token
 						: undefined;
-				if (!nextToken || fetchedCount + pagePayload.data.length >= limit) {
+				if (
+					!nextToken ||
+					(Number.isFinite(effectiveLimit) &&
+						fetchedCount + pagePayload.data.length >= effectiveLimit) ||
+					reachedStartTimeBoundary(pagePayload, parsedStartTime?.time)
+				) {
 					break;
 				}
 			}
-			return mergeTimelinePayloads(pages, limit);
+			return mergeTimelinePayloads(pages, effectiveLimit);
 		});
 		const fetchViaBird = listHomeTimelineViaBirdEffect({
-			maxResults: limit,
+			maxResults: finiteFallbackLimit,
 			following,
 		});
 		let source: "bird" | "xurl";
@@ -341,7 +383,7 @@ export function syncHomeTimelineEffect({
 			source = fetched.source;
 		} else {
 			payload = yield* listHomeTimelineViaBirdEffect({
-				maxResults: limit,
+				maxResults: finiteFallbackLimit,
 				following,
 			});
 			source = "bird";

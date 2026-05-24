@@ -108,6 +108,45 @@ describe("period digest", () => {
 		expect(changed.hash).not.toBe(first.hash);
 	});
 
+	it("keeps fitting tweets in the prompt dataset", () => {
+		const context = collectPeriodDigestContext({
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			maxTweets: 20,
+		});
+		const prompt = __test__.buildPrompt(context);
+
+		expect(prompt).toContain(
+			`Prompt tweets: ${String(context.tweets.length)} of ${String(context.tweets.length)}`,
+		);
+		expect(prompt).toContain(context.tweets[0]?.text);
+	});
+
+	it("preserves tweet prompt context when auxiliary sections exceed the budget", () => {
+		const context = collectPeriodDigestContext({
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			maxTweets: 20,
+		});
+		const prompt = __test__.buildPrompt({
+			...context,
+			dms: [
+				{
+					id: "huge_dm",
+					participant: "person",
+					name: "Person",
+					lastMessageAt: "2026-01-01T00:00:00.000Z",
+					text: "x".repeat(2_000_000),
+					needsReply: false,
+					influenceScore: 0,
+				},
+			],
+		});
+
+		expect(prompt).toContain(context.tweets[0]?.text);
+		expect(prompt).toContain(`"dms":[]`);
+	});
+
 	it("keeps same-day default windows on a stable cache key", () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2028-05-16T10:30:00.000Z"));

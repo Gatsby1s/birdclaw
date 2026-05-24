@@ -75,8 +75,8 @@ function discussionUrl(
 	url.searchParams.set("source", options.source);
 	url.searchParams.set("mode", options.mode);
 	url.searchParams.set("includeDms", String(options.includeDms));
-	url.searchParams.set("limit", "500");
-	url.searchParams.set("maxPages", "5");
+	url.searchParams.set("limit", "5000");
+	url.searchParams.set("maxPages", "50");
 	if (options.question.trim()) {
 		url.searchParams.set("question", options.question.trim());
 	}

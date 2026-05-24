@@ -792,7 +792,10 @@ export function syncMentionsEffect({
 			yield* trySync(() => assertBirdLimit(limit));
 		}
 		const parsedMaxPages = yield* trySync(() => parseMaxPages(maxPages));
-		const fetchAll = parsedMode === "xurl" && parsedMaxPages !== null;
+		const fetchAll =
+			parsedMode === "xurl" &&
+			(parsedMaxPages !== null ||
+				Boolean(explicitSinceId || explicitStartTime));
 		const db = yield* trySync(() => getNativeDb());
 		const resolvedAccount = yield* trySync(() => resolveAccount(db, account));
 		const cursorShape: MentionScanShape = {

@@ -137,6 +137,16 @@ describe("period digest live refresh", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(syncHomeTimelineMock).toHaveBeenCalled();
 		expect(syncMentionsMock).toHaveBeenCalled();
+		expect(syncHomeTimelineMock.mock.calls[0]?.[0]).toMatchObject({
+			limit: undefined,
+			maxPages: undefined,
+			startTime: "2026-01-01T00:00:00.000Z",
+		});
+		expect(syncMentionsMock.mock.calls[0]?.[0]).toMatchObject({
+			limit: 100,
+			maxPages: undefined,
+			startTime: "2026-01-01T00:00:00.000Z",
+		});
 		expect(syncMentionThreadsMock).not.toHaveBeenCalled();
 		expect(maybeAutoSyncBackupMock).toHaveBeenCalled();
 	});

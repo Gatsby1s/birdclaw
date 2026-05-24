@@ -1305,10 +1305,14 @@ export function searchRecentTweetsEffect(
 	{
 		maxResults,
 		paginationToken,
+		startTime,
+		endTime,
 		timeoutMs,
 	}: {
 		maxResults: number;
 		paginationToken?: string;
+		startTime?: string;
+		endTime?: string;
 		timeoutMs?: number;
 	},
 ): Effect.Effect<XurlTweetsResponse, Error> {
@@ -1323,6 +1327,12 @@ export function searchRecentTweetsEffect(
 	if (paginationToken) {
 		query.set("pagination_token", paginationToken);
 	}
+	if (startTime) {
+		query.set("start_time", startTime);
+	}
+	if (endTime) {
+		query.set("end_time", endTime);
+	}
 
 	return runJsonCommandEffect([`/2/tweets/search/recent?${query.toString()}`], {
 		timeoutMs,
@@ -1334,6 +1344,8 @@ export function searchRecentTweets(
 	options: {
 		maxResults: number;
 		paginationToken?: string;
+		startTime?: string;
+		endTime?: string;
 		timeoutMs?: number;
 	},
 ): Promise<XurlTweetsResponse> {

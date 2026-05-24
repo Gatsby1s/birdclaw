@@ -141,8 +141,9 @@ interface OpenAIStreamState {
 const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_REASONING_EFFORT = "medium";
 const DEFAULT_SERVICE_TIER = "priority";
-const DEFAULT_LIMIT = 500;
-const DEFAULT_MAX_PAGES = 5;
+const DEFAULT_LIMIT = 5_000;
+const DEFAULT_MAX_PAGES = 50;
+const MAX_PROMPT_DATA_CHARS = 1_200_000;
 const DELIMITER_PATTERN = /\n---\s*\n/;
 const VISIBLE_DELIMITER_HOLD = 8;
 
@@ -439,6 +440,46 @@ function buildPrompt(context: SearchDiscussionContext) {
 		bookmarked: tweet.bookmarked,
 		needsReply: tweet.needsReply,
 	}));
+	const fitDataset = () => {
+		let tweetCount = promptTweets.length;
+		let dmCount = context.dms.length;
+		const datasetFor = (tweets: number, dms: number) => ({
+			tweets: promptTweets.slice(0, tweets),
+			dms: context.dms.slice(0, dms),
+		});
+		const lengthFor = (tweets: number, dms: number) =>
+			JSON.stringify(datasetFor(tweets, dms)).length;
+		const fitCount = (max: number, fits: (count: number) => boolean) => {
+			let low = 0;
+			let high = max;
+			let best = 0;
+			while (low <= high) {
+				const mid = Math.floor((low + high) / 2);
+				if (fits(mid)) {
+					best = mid;
+					low = mid + 1;
+				} else {
+					high = mid - 1;
+				}
+			}
+			return best;
+		};
+		if (lengthFor(tweetCount, dmCount) <= MAX_PROMPT_DATA_CHARS) {
+			return { dataset: datasetFor(tweetCount, dmCount), tweetCount };
+		}
+		dmCount = fitCount(
+			dmCount,
+			(count) => lengthFor(tweetCount, count) <= MAX_PROMPT_DATA_CHARS,
+		);
+		if (lengthFor(tweetCount, dmCount) > MAX_PROMPT_DATA_CHARS) {
+			tweetCount = fitCount(
+				tweetCount,
+				(count) => lengthFor(count, dmCount) <= MAX_PROMPT_DATA_CHARS,
+			);
+		}
+		return { dataset: datasetFor(tweetCount, dmCount), tweetCount };
+	};
+	const { dataset, tweetCount } = fitDataset();
 
 	return `Search query: ${context.query}
 ${context.question ? `Discussion question: ${context.question}\n` : ""}Account: ${context.account ?? "all"}
@@ -447,6 +488,7 @@ Live search: ${context.liveSearch ? JSON.stringify(context.liveSearch) : "not ru
 Since: ${context.since ?? "(none)"}
 Until: ${context.until ?? "(none)"}
 Counts: ${JSON.stringify(context.counts)}
+Prompt tweets: ${String(tweetCount)} of ${String(context.tweets.length)} selected context tweets
 
 Write a high-signal Markdown discussion from this local Twitter/X search result set.
 
@@ -463,7 +505,7 @@ Requirements:
 - JSON shape: { "title": string, "summary": string, "themes": [{ "title": string, "summary": string, "tweetIds": string[], "dmConversationIds": string[], "handles": string[] }], "tensions": string[], "followUps": string[], "sourceTweetIds": string[], "sourceDmConversationIds": string[] }
 
 Dataset:
-${JSON.stringify({ tweets: promptTweets, dms: context.dms }, null, 2)}`;
+${JSON.stringify(dataset)}`;
 }
 
 function fallbackDiscussion(
@@ -740,6 +782,8 @@ export function streamSearchDiscussionEffect(
 						mode,
 						limit: options.limit ?? DEFAULT_LIMIT,
 						maxPages: options.maxPages ?? DEFAULT_MAX_PAGES,
+						since: options.since,
+						until: options.until,
 						refresh: options.refresh,
 						timeoutMs: 30_000,
 					});

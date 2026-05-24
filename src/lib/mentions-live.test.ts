@@ -612,6 +612,53 @@ describe("cached live mentions", () => {
 		expect(call).not.toHaveProperty("sinceId");
 	});
 
+	it("walks every retrievable explicit start_time mention page by default", async () => {
+		makeTempHome();
+		clearLocalMentionRows();
+		listMentionsViaXurlMock
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "start_all_page_1",
+						author_id: "7",
+						text: "first start time page",
+						created_at: "2026-03-09T02:00:00.000Z",
+					},
+				],
+				meta: { result_count: 1, next_token: "page-2" },
+			})
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "start_all_page_2",
+						author_id: "8",
+						text: "second start time page",
+						created_at: "2026-03-09T01:59:00.000Z",
+					},
+				],
+				meta: { result_count: 1 },
+			});
+		const { syncMentions } = await import("./mentions-live");
+
+		const result = await syncMentions({
+			account: "acct_primary",
+			mode: "xurl",
+			limit: 5,
+			startTime: "2026-03-01T00:00:00Z",
+			refresh: true,
+		});
+
+		expect(result).toMatchObject({ count: 2, partial: false });
+		expect(listMentionsViaXurlMock).toHaveBeenCalledTimes(2);
+		expect(listMentionsViaXurlMock).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({
+				paginationToken: "page-2",
+				startTime: "2026-03-01T00:00:00Z",
+			}),
+		);
+	});
+
 	it("bypasses stale resume pagination when start_time is explicit", async () => {
 		makeTempHome();
 		clearLocalMentionRows();

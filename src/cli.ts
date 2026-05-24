@@ -1004,8 +1004,8 @@ program
 	.option("--hide-low-quality", "Hide RTs, tiny replies, and link-only noise")
 	.option("--model <model>", "OpenAI model id")
 	.option("--refresh", "Bypass the local discussion cache")
-	.option("--limit <n>", "Maximum tweet context", "500")
-	.option("--max-pages <n>", "Maximum live search pages", "5")
+	.option("--limit <n>", "Maximum tweet context", "5000")
+	.option("--max-pages <n>", "Maximum live search pages", "50")
 	.action(async (query, options) => {
 		await autoUpdateBeforeRead();
 		const discussionOptions = buildSearchDiscussionOptions(query, options);
@@ -1020,7 +1020,7 @@ program
 	.option("--include-dms", "Include private DM context")
 	.option("--model <model>", "OpenAI model id")
 	.option("--refresh", "Bypass the local digest cache")
-	.option("--max-tweets <n>", "Maximum tweet context", "300")
+	.option("--max-tweets <n>", "Maximum tweet context", "5000")
 	.option("--max-links <n>", "Maximum linked articles", "12")
 	.option("--no-live-sync", "Use only the local database")
 	.option(
@@ -1044,7 +1044,7 @@ program
 	.option("--until <isoDate>", "End of explicit window")
 	.option("--model <model>", "OpenAI model id")
 	.option("--refresh", "Bypass the local digest cache")
-	.option("--max-tweets <n>", "Maximum tweet context", "300")
+	.option("--max-tweets <n>", "Maximum tweet context", "5000")
 	.option("--max-links <n>", "Maximum linked articles", "12")
 	.option("--no-live-sync", "Use only the local database")
 	.option(

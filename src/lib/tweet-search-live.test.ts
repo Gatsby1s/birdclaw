@@ -210,6 +210,69 @@ describe("live tweet search sync", () => {
 		).toEqual({ count: 2 });
 	});
 
+	it("passes selected time bounds through to xurl search", async () => {
+		mocks.searchRecentTweets.mockResolvedValueOnce(payload(["tweet_time_1"]));
+		const { syncTweetSearch } = await import("./tweet-search-live");
+
+		await syncTweetSearch({
+			query: "local-first",
+			mode: "xurl",
+			refresh: true,
+			limit: 100,
+			since: "2026-05-24T00:00:00Z",
+			until: "2026-05-24T12:00:00Z",
+		});
+
+		expect(mocks.searchRecentTweets).toHaveBeenCalledWith(
+			"local-first",
+			expect.objectContaining({
+				startTime: "2026-05-24T00:00:00.000Z",
+				endTime: "2026-05-24T12:00:00.000Z",
+			}),
+		);
+	});
+
+	it("uses xurl directly for auto searches with selected time bounds", async () => {
+		mocks.searchTweetsViaBird.mockResolvedValue(payload(["tweet_unbounded"]));
+		mocks.searchRecentTweets.mockResolvedValueOnce(payload(["tweet_time_1"]));
+		const { syncTweetSearch } = await import("./tweet-search-live");
+
+		const result = await syncTweetSearch({
+			query: "local-first",
+			mode: "auto",
+			refresh: true,
+			limit: 100,
+			since: "2026-05-24T00:00:00Z",
+		});
+
+		expect(result).toMatchObject({ ok: true, source: "xurl" });
+		expect(mocks.searchTweetsViaBird).not.toHaveBeenCalled();
+		expect(mocks.searchRecentTweets).toHaveBeenCalledWith(
+			"local-first",
+			expect.objectContaining({
+				startTime: "2026-05-24T00:00:00.000Z",
+			}),
+		);
+	});
+
+	it("falls back to bird when bounded auto xurl search fails", async () => {
+		mocks.searchRecentTweets.mockRejectedValueOnce(new Error("xurl down"));
+		mocks.searchTweetsViaBird.mockResolvedValueOnce(payload(["tweet_bird_1"]));
+		const { syncTweetSearch } = await import("./tweet-search-live");
+
+		const result = await syncTweetSearch({
+			query: "local-first",
+			mode: "auto",
+			refresh: true,
+			limit: 100,
+			since: "2026-05-24T00:00:00Z",
+		});
+
+		expect(result).toMatchObject({ ok: true, source: "bird" });
+		expect(mocks.searchRecentTweets).toHaveBeenCalled();
+		expect(mocks.searchTweetsViaBird).toHaveBeenCalled();
+	});
+
 	it("reports auto failure when both live transports fail", async () => {
 		mocks.searchTweetsViaBird.mockRejectedValue(new Error("bird unavailable"));
 		mocks.searchRecentTweets.mockRejectedValue(new Error("xurl unauthorized"));

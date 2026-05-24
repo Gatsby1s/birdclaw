@@ -18,6 +18,8 @@ export interface SyncTweetSearchOptions {
 	mode?: TweetSearchMode;
 	limit?: number;
 	maxPages?: number;
+	since?: string;
+	until?: string;
 	refresh?: boolean;
 	cacheTtlMs?: number;
 	timeoutMs?: number;
@@ -41,8 +43,8 @@ export type SyncTweetSearchResult =
 			error: string;
 	  };
 
-const DEFAULT_SEARCH_LIMIT = 500;
-const DEFAULT_MAX_PAGES = 5;
+const DEFAULT_SEARCH_LIMIT = 5_000;
+const DEFAULT_MAX_PAGES = 50;
 const DEFAULT_CACHE_TTL_MS = 2 * 60_000;
 const XURL_PAGE_SIZE = 100;
 
@@ -71,6 +73,15 @@ function normalizeMaxPages(maxPages: number | undefined) {
 		throw new Error("--max-pages must be at least 1");
 	}
 	return Math.floor(maxPages);
+}
+
+function normalizeTime(value: string | undefined, optionName: string) {
+	if (!value?.trim()) return undefined;
+	const date = new Date(value);
+	if (!Number.isFinite(date.getTime())) {
+		throw new Error(`${optionName} must be a valid date`);
+	}
+	return date.toISOString();
 }
 
 function normalizeCacheTtlMs(value: number | undefined) {
@@ -264,14 +275,18 @@ function cacheKey({
 	mode,
 	limit,
 	maxPages,
+	since,
+	until,
 }: {
 	query: string;
 	accountId: string;
 	mode: Exclude<TweetSearchMode, "auto" | "local">;
 	limit: number;
 	maxPages: number;
+	since?: string;
+	until?: string;
 }) {
-	return `tweet-search:${mode}:${accountId}:${encodeURIComponent(query)}:${String(limit)}:${String(maxPages)}`;
+	return `tweet-search:${mode}:${accountId}:${encodeURIComponent(query)}:${String(limit)}:${String(maxPages)}:${since ?? "no-since"}:${until ?? "no-until"}`;
 }
 
 function fetchBirdSearchEffect({
@@ -295,11 +310,15 @@ function fetchXurlSearchEffect({
 	limit,
 	maxPages,
 	timeoutMs,
+	since,
+	until,
 }: {
 	query: string;
 	limit: number;
 	maxPages: number;
 	timeoutMs?: number;
+	since?: string;
+	until?: string;
 }): Effect.Effect<XurlMentionsResponse, Error> {
 	return Effect.gen(function* () {
 		const responses: XurlMentionsResponse[] = [];
@@ -312,6 +331,8 @@ function fetchXurlSearchEffect({
 			const response = yield* searchRecentTweetsEffect(query, {
 				maxResults: Math.max(10, Math.min(XURL_PAGE_SIZE, remaining)),
 				paginationToken: nextToken,
+				startTime: since,
+				endTime: until,
 				timeoutMs,
 			});
 			responses.push(toMentionsResponse(response));
@@ -332,6 +353,8 @@ function runModeEffect(
 		accountId: string;
 		limit: number;
 		maxPages: number;
+		since?: string;
+		until?: string;
 		refresh: boolean;
 		cacheTtlMs: number;
 		timeoutMs?: number;
@@ -391,6 +414,8 @@ export function syncTweetSearchEffect({
 	mode = "auto",
 	limit,
 	maxPages,
+	since,
+	until,
 	refresh = false,
 	cacheTtlMs,
 	timeoutMs,
@@ -402,6 +427,12 @@ export function syncTweetSearchEffect({
 		}
 		const normalizedLimit = normalizeLimit(limit);
 		const normalizedMaxPages = normalizeMaxPages(maxPages);
+		const normalizedSince = yield* trySync(() =>
+			normalizeTime(since, "--since"),
+		);
+		const normalizedUntil = yield* trySync(() =>
+			normalizeTime(until, "--until"),
+		);
 		const ttlMs = normalizeCacheTtlMs(cacheTtlMs);
 		const db = getNativeDb();
 		const accountId = yield* trySync(() => resolveAccount(db, account));
@@ -422,6 +453,8 @@ export function syncTweetSearchEffect({
 			accountId,
 			limit: normalizedLimit,
 			maxPages: normalizedMaxPages,
+			since: normalizedSince,
+			until: normalizedUntil,
 			refresh,
 			cacheTtlMs: ttlMs,
 			timeoutMs,
@@ -435,6 +468,26 @@ export function syncTweetSearchEffect({
 						accountId,
 						query: normalizedQuery,
 						error: error.message,
+					} as const),
+				),
+			);
+		}
+
+		if (normalizedSince || normalizedUntil) {
+			const xurlResult = yield* runModeEffect("xurl", runOptions).pipe(
+				Effect.either,
+			);
+			if (xurlResult._tag === "Right") {
+				return xurlResult.right;
+			}
+			return yield* runModeEffect("bird", runOptions).pipe(
+				Effect.catchAll((error) =>
+					Effect.succeed({
+						ok: false,
+						source: "auto",
+						accountId,
+						query: normalizedQuery,
+						error: `${xurlResult.left.message}; ${error.message}`,
 					} as const),
 				),
 			);

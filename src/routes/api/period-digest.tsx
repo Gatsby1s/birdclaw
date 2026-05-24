@@ -29,7 +29,7 @@ function parseOptions(url: URL): PeriodDigestOptions {
 		refresh: parseBoolean(url.searchParams.get("refresh")),
 		model: url.searchParams.get("model") === "gpt-5.5" ? "gpt-5.5" : undefined,
 		maxTweets: parseBoundedInteger(url.searchParams.get("maxTweets"), {
-			max: 500,
+			max: 5_000,
 		}),
 		maxLinks: parseBoundedInteger(url.searchParams.get("maxLinks"), {
 			max: 25,
@@ -38,11 +38,11 @@ function parseOptions(url: URL): PeriodDigestOptions {
 		liveSyncMode: "xurl",
 		liveTimelineLimit: parseBoundedInteger(
 			url.searchParams.get("liveTimelineLimit"),
-			{ max: 500 },
+			{ max: 100_000 },
 		),
 		liveTimelineMaxPages: parseBoundedInteger(
 			url.searchParams.get("liveTimelineMaxPages"),
-			{ max: 10 },
+			{ max: 1_000 },
 		),
 	};
 }

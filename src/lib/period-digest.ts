@@ -186,14 +186,14 @@ interface OpenAIStreamState {
 const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_REASONING_EFFORT = "medium";
 const DEFAULT_SERVICE_TIER = "priority";
-const DEFAULT_MAX_TWEETS = 300;
+const DEFAULT_MAX_TWEETS = 2_500;
 const DEFAULT_MAX_LINKS = 12;
-const DEFAULT_LIVE_TIMELINE_LIMIT = 300;
-const DEFAULT_LIVE_TIMELINE_MAX_PAGES = 3;
+const DEFAULT_LIVE_TIMELINE_MAX_PAGES = undefined;
 const DEFAULT_LIVE_MENTIONS_LIMIT = 100;
-const DEFAULT_LIVE_MENTIONS_MAX_PAGES = 3;
+const DEFAULT_LIVE_MENTIONS_MAX_PAGES = undefined;
 const DEFAULT_LIVE_THREAD_LIMIT = 12;
 const DEFAULT_LIVE_THREAD_TIMEOUT_MS = 5_000;
+const MAX_PROMPT_DATA_CHARS = 1_200_000;
 const DELIMITER_PATTERN = /\n---\s*\n/;
 const VISIBLE_DELIMITER_HOLD = 8;
 
@@ -228,6 +228,12 @@ function parseDate(value: string | undefined) {
 	if (!value?.trim()) return null;
 	const parsed = new Date(value);
 	return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function floorIsoToHour(value: string) {
+	const date = new Date(value);
+	date.setUTCMinutes(0, 0, 0);
+	return date.toISOString();
 }
 
 function normalizePeriod(value: string | undefined): PeriodDigestPreset {
@@ -605,12 +611,12 @@ function refreshPeriodDigestInputsEffect(
 	const includeMentions = phase.mentions ?? true;
 	const includeThreads = phase.threads ?? true;
 	const window = resolvePeriodDigestWindow(options);
+	const liveStartTime = floorIsoToHour(window.since);
 	const mode = options.liveSyncMode ?? "xurl";
-	const timelineLimit = boundedPositiveInteger(
-		options.liveTimelineLimit ?? options.maxTweets,
-		DEFAULT_LIVE_TIMELINE_LIMIT,
-		500,
-	);
+	const timelineLimit =
+		options.liveTimelineLimit === undefined
+			? undefined
+			: boundedPositiveInteger(options.liveTimelineLimit, 300, 100_000);
 	const mentionsLimit = boundedPositiveInteger(
 		options.liveMentionsLimit,
 		DEFAULT_LIVE_MENTIONS_LIMIT,
@@ -621,16 +627,14 @@ function refreshPeriodDigestInputsEffect(
 		DEFAULT_LIVE_THREAD_LIMIT,
 		100,
 	);
-	const timelineMaxPages = boundedPositiveInteger(
-		options.liveTimelineMaxPages,
-		DEFAULT_LIVE_TIMELINE_MAX_PAGES,
-		10,
-	);
-	const mentionsMaxPages = boundedPositiveInteger(
-		options.liveMentionsMaxPages,
-		DEFAULT_LIVE_MENTIONS_MAX_PAGES,
-		10,
-	);
+	const timelineMaxPages =
+		options.liveTimelineMaxPages === undefined
+			? DEFAULT_LIVE_TIMELINE_MAX_PAGES
+			: boundedPositiveInteger(options.liveTimelineMaxPages, 3, 1_000);
+	const mentionsMaxPages =
+		options.liveMentionsMaxPages === undefined
+			? DEFAULT_LIVE_MENTIONS_MAX_PAGES
+			: boundedPositiveInteger(options.liveMentionsMaxPages, 3, 1_000);
 
 	return Effect.gen(function* () {
 		if (includeTimeline) {
@@ -639,6 +643,7 @@ function refreshPeriodDigestInputsEffect(
 				mode,
 				limit: timelineLimit,
 				maxPages: timelineMaxPages,
+				startTime: liveStartTime,
 				following: true,
 				refresh: Boolean(options.refresh),
 				cacheTtlMs: 2 * 60_000,
@@ -651,7 +656,7 @@ function refreshPeriodDigestInputsEffect(
 				mode: "xurl",
 				limit: mentionsLimit,
 				maxPages: mentionsMaxPages,
-				startTime: window.since,
+				startTime: liveStartTime,
 				refresh: Boolean(options.refresh),
 				cacheTtlMs: 2 * 60_000,
 			}).pipe(Effect.catchAll(() => Effect.void));
@@ -702,11 +707,66 @@ function buildPrompt(context: PeriodDigestContext) {
 		replyToId: tweet.replyToId,
 		replyToTweet: tweet.replyToTweet,
 	}));
+	const fitDataset = () => {
+		let tweetCount = promptTweets.length;
+		let dmCount = context.dms.length;
+		let linkCount = context.links.length;
+		const datasetFor = (tweets: number, dms: number, links: number) => ({
+			tweets: promptTweets.slice(0, tweets),
+			dms: context.dms.slice(0, dms),
+			links: context.links.slice(0, links),
+		});
+		const lengthFor = (tweets: number, dms: number, links: number) =>
+			JSON.stringify(datasetFor(tweets, dms, links)).length;
+		const fitCount = (max: number, fits: (count: number) => boolean) => {
+			let low = 0;
+			let high = max;
+			let best = 0;
+			while (low <= high) {
+				const mid = Math.floor((low + high) / 2);
+				if (fits(mid)) {
+					best = mid;
+					low = mid + 1;
+				} else {
+					high = mid - 1;
+				}
+			}
+			return best;
+		};
+		if (lengthFor(tweetCount, dmCount, linkCount) <= MAX_PROMPT_DATA_CHARS) {
+			return {
+				dataset: datasetFor(tweetCount, dmCount, linkCount),
+				tweetCount,
+			};
+		}
+		dmCount = fitCount(
+			dmCount,
+			(count) =>
+				lengthFor(tweetCount, count, linkCount) <= MAX_PROMPT_DATA_CHARS,
+		);
+		if (lengthFor(tweetCount, dmCount, linkCount) > MAX_PROMPT_DATA_CHARS) {
+			linkCount = fitCount(
+				linkCount,
+				(count) =>
+					lengthFor(tweetCount, dmCount, count) <= MAX_PROMPT_DATA_CHARS,
+			);
+		}
+		if (lengthFor(tweetCount, dmCount, linkCount) > MAX_PROMPT_DATA_CHARS) {
+			tweetCount = fitCount(
+				tweetCount,
+				(count) =>
+					lengthFor(count, dmCount, linkCount) <= MAX_PROMPT_DATA_CHARS,
+			);
+		}
+		return { dataset: datasetFor(tweetCount, dmCount, linkCount), tweetCount };
+	};
+	const { dataset, tweetCount } = fitDataset();
 
 	return `Window: ${context.window.label}
 Since: ${context.window.since}
 Until: ${context.window.until}
 Sources: ${JSON.stringify(context.counts)}
+Prompt tweets: ${String(tweetCount)} of ${String(context.tweets.length)} selected context tweets
 
 Write a high-signal "what happened" report from this local Twitter/X dataset.
 
@@ -730,15 +790,7 @@ Requirements:
 - JSON shape: { "title": string, "summary": string, "keyTopics": [{ "title": string, "summary": string, "tweetIds": string[], "handles": string[] }], "notableLinks": [{ "title": string, "url": string, "why": string, "sourceTweetIds": string[] }], "people": [{ "handle": string, "name"?: string, "why": string }], "actionItems": [{ "kind": "reply"|"follow_up"|"read"|"sync", "label": string, "tweetId"?: string, "dmConversationId"?: string }], "sourceTweetIds": string[] }
 
 Dataset:
-${JSON.stringify(
-	{
-		tweets: promptTweets,
-		dms: context.dms,
-		links: context.links,
-	},
-	null,
-	2,
-)}`;
+${JSON.stringify(dataset)}`;
 }
 
 function fallbackDigest(

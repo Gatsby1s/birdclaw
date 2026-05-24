@@ -87,6 +87,43 @@ describe("search discussion", () => {
 		expect(second.hash).not.toBe(first.hash);
 	});
 
+	it("keeps fitting tweets in the discussion prompt dataset", () => {
+		const context = collectSearchDiscussionContext({
+			query: "local-first",
+			limit: 20,
+		});
+		const prompt = __test__.buildPrompt(context);
+
+		expect(prompt).toContain(
+			`Prompt tweets: ${String(context.tweets.length)} of ${String(context.tweets.length)}`,
+		);
+		expect(prompt).toContain(context.tweets[0]?.text);
+	});
+
+	it("preserves discussion tweets when DM matches exceed the prompt budget", () => {
+		const context = collectSearchDiscussionContext({
+			query: "local-first",
+			limit: 20,
+		});
+		const prompt = __test__.buildPrompt({
+			...context,
+			dms: [
+				{
+					id: "huge_dm",
+					participant: "person",
+					name: "Person",
+					lastMessageAt: "2026-01-01T00:00:00.000Z",
+					text: "x".repeat(2_000_000),
+					needsReply: false,
+					influenceScore: 0,
+				},
+			],
+		});
+
+		expect(prompt).toContain(context.tweets[0]?.text);
+		expect(prompt).toContain(`"dms":[]`);
+	});
+
 	it("keeps the context hash stable for cached live search provenance", () => {
 		const first = collectSearchDiscussionContext({
 			query: "local-first",

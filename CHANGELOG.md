@@ -8,6 +8,10 @@
 - Prefetch cached avatars for Discuss hover citations so source previews avoid fallback initials once profile metadata includes an avatar URL.
 - Refresh Today digests from live `xurl` home timelines, mentions, and mention conversations before AI analysis so reports see more current context and reply parents.
 
+### Changed
+
+- Let Today and Discuss fetch much deeper live `xurl` data for the selected time window while keeping the AI prompt constrained to a large model-context budget.
+
 ### Fixed
 
 - Recover live `xurl` sync when the valid OAuth token is stored under a different local xurl username label than the Birdclaw account handle.
