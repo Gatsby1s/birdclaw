@@ -55,6 +55,21 @@ What to look for in the output:
 
 If `auth status` looks wrong, re-run the matching transport's auth command (`xurl auth login` or `bird auth import-cookies`) and try again.
 
+## Change the default transport
+
+Most commands accept `--mode <auto|xurl|bird>` (or `--transport`) and `auto` is the default. To change the default for every run, pick one:
+
+- **For a single shell session** — `export BIRDCLAW_ACTIONS_TRANSPORT=xurl` (or `bird`, `auto`).
+- **Persistently** — edit `~/.birdclaw/config.json` and set `actions.transport`:
+
+  ```json
+  {
+    "actions": { "transport": "xurl" }
+  }
+  ```
+
+  Allowed values: `auto`, `xurl`, `bird`. See `resolveActionsTransport` in `src/lib/config.ts` for the resolution order (per-command flag → env var → config file → `auto`).
+
 ## Privacy notes
 
 The non-OAuth transports work by re-using your existing browser session. That's worth being explicit about:

@@ -229,7 +229,7 @@ birdclaw import archive --json
 birdclaw import archive ~/Downloads/twitter-archive-2025.zip --json
 ```
 
-Don't have an archive yet? Request it from <https://x.com/settings/your_archive>; X emails a download link in ~24 hours. See [Archive Import → Get an archive](docs/archive.md#get-an-archive).
+Don't have an archive yet? Request it from <https://x.com/settings/download_your_data>; X emails a download link in ~24 hours. See [Archive Import → Get an archive](docs/archive.md#get-an-archive).
 
 Optional profile hydration can improve bios, follower counts, and avatars, but it performs live X profile reads and can spend API credits on large archives:
 

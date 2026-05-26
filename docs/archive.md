@@ -17,7 +17,7 @@ The archive is optional — birdclaw works in live-only mode via xurl or bird (s
 
 Request flow:
 
-1. Sign in to x.com and go to <https://x.com/settings/your_archive> (also reachable via *Settings and privacy → Your account → Download an archive of your data*).
+1. Sign in to x.com and go to <https://x.com/settings/download_your_data> (also reachable via *Settings and privacy → Your account → Download an archive of your data*).
 2. Re-enter your password and complete 2FA if prompted.
 3. Click *Request archive*. X queues the export and emails a download link when it's ready — usually ~24 hours, sometimes longer.
 4. When the email arrives (subject: *Your X data is ready to download*), open the link, sign in again, and download the ZIP. Typical filename: `twitter-YYYY-MM-DD-<hash>.zip`.

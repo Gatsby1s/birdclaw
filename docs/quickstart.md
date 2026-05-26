@@ -30,7 +30,7 @@ birdclaw db stats --json
 
 ## 3. Find and import an archive
 
-If you downloaded your Twitter/X archive from <https://x.com/settings/your_archive>, point birdclaw at it. On macOS, autodiscovery looks in `~/Downloads` and Spotlight first.
+If you downloaded your Twitter/X archive from <https://x.com/settings/download_your_data>, point birdclaw at it. On macOS, autodiscovery looks in `~/Downloads` and Spotlight first.
 
 ```bash
 birdclaw archive find --json

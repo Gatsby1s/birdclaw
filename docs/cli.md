@@ -61,7 +61,6 @@ Project config:
 ```text
 birdclaw init
 birdclaw auth status
-birdclaw auth use <transport>
 birdclaw import archive [path]
 birdclaw sync all
 birdclaw sync tweets
@@ -142,11 +141,6 @@ birdclaw debug transport
 - show transport availability
 - show active account/profile
 - never print secrets
-
-### `auth use <transport>`
-
-- set preferred transport for profile
-- allowed: `auto`, `xurl`, `bird`, `official`, `xweb`
 
 ### `backup export`
 

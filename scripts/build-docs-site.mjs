@@ -453,6 +453,10 @@ function inline(text, currentRel) {
 		return `\u0000${stash.length - 1}\u0000`;
 	});
 	out = escapeHtml(out)
+		.replace(/&lt;(https?:\/\/[^\s<>]+)&gt;/g, (_, url) => {
+			stash.push(`<a href="${escapeAttr(url)}">${escapeHtml(url)}</a>`);
+			return ` ${stash.length - 1} `;
+		})
 		.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
 		.replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>")
 		.replace(/(^|[^_])_([^_\s][^_]*?)_(?!_)/g, "$1<em>$2</em>")
@@ -460,8 +464,7 @@ function inline(text, currentRel) {
 			/\[([^\]]+)\]\(([^)]+)\)/g,
 			(_, label, href) =>
 				`<a href="${escapeAttr(rewriteHref(href, currentRel))}">${label}</a>`,
-		)
-		.replace(/&lt;(https?:\/\/[^\s<>]+)&gt;/g, '<a href="$1">$1</a>');
+		);
 	out = out.replace(/\\\|/g, "|");
 	out = out.replace(/&lt;br&gt;/g, "<br>");
 	return out.replace(/\u0000(\d+)\u0000/g, (_, i) => stash[Number(i)]);
