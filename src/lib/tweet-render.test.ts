@@ -3,6 +3,7 @@ import {
 	enrichFallbackUrlEntities,
 	renderTweetMarkdown,
 	renderTweetPlainText,
+	tweetEntitiesFromXurl,
 } from "./tweet-render";
 
 describe("tweet render helpers", () => {
@@ -34,6 +35,24 @@ describe("tweet render helpers", () => {
 				],
 			}),
 		).toBe("Hi @sam https://example.com/demo #ship");
+	});
+
+	it("normalizes X API url entities for expanded preview text", () => {
+		const entities = tweetEntitiesFromXurl({
+			urls: [
+				{
+					url: "https://t.co/demo",
+					expanded_url: "https://example.com/demo",
+					display_url: "example.com/demo",
+					start: 6,
+					end: 23,
+				},
+			],
+		});
+
+		expect(renderTweetPlainText("Read: https://t.co/demo", entities)).toBe(
+			"Read: https://example.com/demo",
+		);
 	});
 
 	it("renders markdown with mention and url links", () => {

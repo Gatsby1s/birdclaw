@@ -2,11 +2,14 @@ import {
 	Fragment,
 	type MouseEventHandler,
 	type ReactNode,
+	useLayoutEffect,
+	useRef,
 	useState,
 } from "react";
 import { formatCompactNumber, formatShortTimestamp } from "#/lib/present";
 import type { PeriodDigestContext } from "#/lib/period-digest";
 import type { ProfileAnalysisContext } from "#/lib/profile-analysis";
+import { renderTweetPlainText } from "#/lib/tweet-render";
 import type { ProfileRecord } from "#/lib/types";
 import { cx, tweetLinkClass, tweetMentionClass } from "#/lib/ui";
 import { safeHttpUrl } from "#/lib/url-safety";
@@ -135,13 +138,30 @@ function TweetPreviewToken({
 	children: ReactNode;
 }) {
 	const [open, setOpen] = useState(false);
+	const [placeAbove, setPlaceAbove] = useState(false);
+	const shellRef = useRef<HTMLSpanElement | null>(null);
+	const cardRef = useRef<HTMLSpanElement | null>(null);
+
+	useLayoutEffect(() => {
+		if (!open) return;
+		const shell = shellRef.current;
+		if (!shell) return;
+		const shellRect = shell.getBoundingClientRect();
+		const cardHeight = cardRef.current?.offsetHeight ?? 220;
+		const belowSpace = window.innerHeight - shellRect.bottom;
+		const aboveSpace = shellRect.top;
+		setPlaceAbove(belowSpace < cardHeight + 18 && aboveSpace > belowSpace);
+	}, [open]);
 
 	function closePreview() {
 		setOpen(false);
 	}
 
+	const previewText = renderTweetPlainText(tweet.text, tweet.entities ?? {});
+
 	return (
 		<span
+			ref={shellRef}
 			className="relative inline align-baseline"
 			onBlur={closePreview}
 			onFocus={() => setOpen(true)}
@@ -158,9 +178,11 @@ function TweetPreviewToken({
 				{children}
 			</TweetSourceLink>
 			<span
+				ref={cardRef}
 				aria-hidden={!open}
 				className={cx(
-					"absolute left-1/2 top-[calc(100%+10px)] z-40 w-[360px] -translate-x-1/2 rounded-2xl border border-[var(--line)] bg-[var(--bg-elevated)] p-3 text-left text-[14px] leading-[1.4] text-[var(--ink)] shadow-[0_14px_40px_var(--shadow-strong)]",
+					"absolute left-1/2 z-40 w-[360px] -translate-x-1/2 rounded-2xl border border-[var(--line)] bg-[var(--bg-elevated)] p-3 text-left text-[14px] leading-[1.4] text-[var(--ink)] shadow-[0_14px_40px_var(--shadow-strong)]",
+					placeAbove ? "bottom-[calc(100%+10px)]" : "top-[calc(100%+10px)]",
 					open ? "block" : "hidden",
 				)}
 			>
@@ -180,7 +202,7 @@ function TweetPreviewToken({
 					</span>
 				</span>
 				<span className="line-clamp-6 whitespace-pre-wrap [overflow-wrap:anywhere]">
-					{tweet.text}
+					{previewText}
 				</span>
 				<span className="mt-2 flex gap-3 text-[12px] text-[var(--ink-soft)]">
 					<span>{tweet.source}</span>
@@ -598,6 +620,7 @@ function profileAnalysisTweetToCitation(
 		authorProfile: profile,
 		createdAt: tweet.createdAt,
 		text: tweet.text,
+		entities: tweet.entities,
 		likeCount: tweet.likeCount,
 		liked: false,
 		bookmarked: false,
@@ -618,6 +641,7 @@ function conversationTweetToCitation(
 		authorProfile,
 		createdAt: tweet.createdAt,
 		text: tweet.text,
+		entities: tweet.entities,
 		likeCount: tweet.likeCount,
 		liked: false,
 		bookmarked: false,

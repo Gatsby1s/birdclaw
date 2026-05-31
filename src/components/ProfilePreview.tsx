@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { formatCompactNumber } from "#/lib/present";
 import type { ProfileRecord } from "#/lib/types";
 import {
@@ -23,8 +23,29 @@ export function ProfilePreview({
 	children: ReactNode;
 	className?: string;
 }) {
+	const [placeAbove, setPlaceAbove] = useState(false);
+	const shellRef = useRef<HTMLSpanElement | null>(null);
+	const cardRef = useRef<HTMLSpanElement | null>(null);
+
+	function updatePlacement() {
+		const shell = shellRef.current;
+		if (!shell) return;
+		const shellRect = shell.getBoundingClientRect();
+		const cardHeight = cardRef.current?.offsetHeight ?? 180;
+		const belowSpace = window.innerHeight - shellRect.bottom;
+		const aboveSpace = shellRect.top;
+		setPlaceAbove(belowSpace < cardHeight + 18 && aboveSpace > belowSpace);
+	}
+
+	useLayoutEffect(updatePlacement, []);
+
 	return (
-		<span className={cx(profilePreviewClass, "group", className)}>
+		<span
+			ref={shellRef}
+			className={cx(profilePreviewClass, "group", className)}
+			onFocus={updatePlacement}
+			onPointerEnter={updatePlacement}
+		>
 			<a
 				className={profilePreviewTriggerClass}
 				href={`https://x.com/${profile.handle}`}
@@ -33,7 +54,15 @@ export function ProfilePreview({
 			>
 				{children}
 			</a>
-			<span className={profilePreviewCardClass}>
+			<span
+				ref={cardRef}
+				className={cx(
+					profilePreviewCardClass,
+					placeAbove
+						? "bottom-[calc(100%+8px)] -translate-y-1 group-hover:translate-y-0 group-focus-within:translate-y-0"
+						: "top-[calc(100%+8px)] translate-y-1 group-hover:translate-y-0 group-focus-within:translate-y-0",
+				)}
+			>
 				<span className={profilePreviewHeaderClass}>
 					<AvatarChip
 						avatarUrl={profile.avatarUrl}

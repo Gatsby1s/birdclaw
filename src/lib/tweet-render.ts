@@ -57,6 +57,70 @@ export function displayUrlForLink(url: string) {
 	}
 }
 
+function asRecord(value: unknown) {
+	return value && typeof value === "object"
+		? (value as Record<string, unknown>)
+		: {};
+}
+
+export function tweetEntitiesFromXurl(raw: unknown): TweetEntities {
+	const entities = asRecord(raw);
+	const rawMentions = Array.isArray(entities.mentions) ? entities.mentions : [];
+	const rawUrls = Array.isArray(entities.urls) ? entities.urls : [];
+	const rawHashtags = Array.isArray(entities.hashtags) ? entities.hashtags : [];
+
+	return {
+		...(rawMentions.length
+			? {
+					mentions: rawMentions.map((mention) => {
+						const value = asRecord(mention);
+						return {
+							username: String(value.username ?? ""),
+							id: typeof value.id === "string" ? String(value.id) : undefined,
+							start: Number(value.start ?? 0),
+							end: Number(value.end ?? 0),
+						};
+					}),
+				}
+			: {}),
+		...(rawUrls.length
+			? {
+					urls: rawUrls.map((url) => {
+						const value = asRecord(url);
+						const expandedUrl = String(
+							value.expandedUrl ?? value.expanded_url ?? value.url ?? "",
+						);
+						return {
+							url: String(value.url ?? ""),
+							expandedUrl,
+							displayUrl: String(
+								value.displayUrl ??
+									value.display_url ??
+									expandedUrl ??
+									value.url ??
+									"",
+							),
+							start: Number(value.start ?? 0),
+							end: Number(value.end ?? 0),
+						};
+					}),
+				}
+			: {}),
+		...(rawHashtags.length
+			? {
+					hashtags: rawHashtags.map((hashtag) => {
+						const value = asRecord(hashtag);
+						return {
+							tag: String(value.tag ?? value.text ?? ""),
+							start: Number(value.start ?? 0),
+							end: Number(value.end ?? 0),
+						};
+					}),
+				}
+			: {}),
+	};
+}
+
 function spansOverlap(
 	leftStart: number,
 	leftEnd: number,

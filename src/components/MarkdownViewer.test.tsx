@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { PeriodDigestContext } from "#/lib/period-digest";
 import type { ProfileAnalysisContext } from "#/lib/profile-analysis";
@@ -39,7 +45,18 @@ const context = {
 			name: "Strata",
 			authorProfile,
 			createdAt: "2026-05-18T09:12:00.000Z",
-			text: "@GOATNetwork @openclaw oh nice, autonomous agents running on goAT",
+			text: "@GOATNetwork @openclaw oh nice, autonomous agents running on goAT https://t.co/goat",
+			entities: {
+				urls: [
+					{
+						url: "https://t.co/goat",
+						expandedUrl: "https://goat.network/agents",
+						displayUrl: "goat.network/agents",
+						start: 66,
+						end: 83,
+					},
+				],
+			},
 			likeCount: 0,
 			liked: false,
 			bookmarked: false,
@@ -586,7 +603,7 @@ describe("MarkdownViewer", () => {
 		});
 		const wrapper = link.parentElement;
 		const preview = screen
-			.getByText(context.tweets[0].text)
+			.getByText(/https:\/\/goat\.network\/agents/)
 			.closest("[aria-hidden]");
 
 		expect(preview).toHaveAttribute("aria-hidden", "true");
@@ -597,5 +614,75 @@ describe("MarkdownViewer", () => {
 
 		fireEvent.click(link, { metaKey: true });
 		expect(preview).toHaveAttribute("aria-hidden", "true");
+	});
+
+	it("places tweet previews above the citation when the viewport is tight below", async () => {
+		const originalInnerHeight = window.innerHeight;
+		const originalRect = HTMLElement.prototype.getBoundingClientRect;
+		const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+			HTMLElement.prototype,
+			"offsetHeight",
+		);
+		Object.defineProperty(window, "innerHeight", {
+			configurable: true,
+			value: 220,
+		});
+		HTMLElement.prototype.getBoundingClientRect = () =>
+			({
+				bottom: 196,
+				height: 18,
+				left: 120,
+				right: 220,
+				top: 178,
+				width: 100,
+				x: 120,
+				y: 178,
+				toJSON: () => ({}),
+			}) as DOMRect;
+		Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+			configurable: true,
+			get() {
+				return 160;
+			},
+		});
+
+		try {
+			render(
+				<MarkdownViewer
+					context={context}
+					markdown={
+						"ChainZenit reacted positively to “autonomous agents running on goAT” (tweet_2056286865875935400)."
+					}
+				/>,
+			);
+
+			const link = screen.getByRole("link", {
+				name: "“autonomous agents running on goAT”",
+			});
+			const wrapper = link.parentElement;
+			const preview = screen
+				.getByText(/https:\/\/goat\.network\/agents/)
+				.closest("[aria-hidden]");
+			expect(wrapper).not.toBeNull();
+
+			fireEvent.pointerEnter(wrapper as Element);
+
+			await waitFor(() => {
+				expect(preview).toHaveClass("bottom-[calc(100%+10px)]");
+			});
+		} finally {
+			Object.defineProperty(window, "innerHeight", {
+				configurable: true,
+				value: originalInnerHeight,
+			});
+			HTMLElement.prototype.getBoundingClientRect = originalRect;
+			if (originalOffsetHeight) {
+				Object.defineProperty(
+					HTMLElement.prototype,
+					"offsetHeight",
+					originalOffsetHeight,
+				);
+			}
+		}
 	});
 });

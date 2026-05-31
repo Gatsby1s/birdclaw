@@ -9,7 +9,7 @@ import { syncMentionsEffect } from "./mentions-live";
 import { listDmConversations, listTimelineItems } from "./queries";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
 import { syncHomeTimelineEffect, type HomeTimelineMode } from "./timeline-live";
-import type { ProfileRecord } from "./types";
+import type { ProfileRecord, TweetEntities } from "./types";
 
 export type PeriodDigestPreset = "today" | "yesterday" | "24h" | "week";
 export type PeriodDigestSourceKind =
@@ -119,6 +119,7 @@ interface CompactTweet {
 	authorProfile: ProfileRecord;
 	createdAt: string;
 	text: string;
+	entities?: TweetEntities;
 	likeCount: number;
 	liked: boolean;
 	bookmarked: boolean;
@@ -325,6 +326,7 @@ function compactTweet(
 		authorProfile: item.author,
 		createdAt: item.createdAt,
 		text: item.text,
+		entities: item.entities,
 		likeCount: item.likeCount,
 		liked: item.liked,
 		bookmarked: item.bookmarked,

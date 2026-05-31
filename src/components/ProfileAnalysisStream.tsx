@@ -59,11 +59,17 @@ function knownProfileHandles(context: ProfileAnalysisContext) {
 	return handles;
 }
 
-function collectProfileAnalysisHydrationHandles(
-	result: ProfileAnalysisRunResult,
-) {
+function collectProfileAnalysisHydrationHandles({
+	context,
+	analysis,
+	markdown,
+}: {
+	context: ProfileAnalysisContext;
+	analysis?: ProfileAnalysisRunResult["analysis"];
+	markdown?: string;
+}) {
 	const handles = new Set<string>();
-	const known = knownProfileHandles(result.context);
+	const known = knownProfileHandles(context);
 	const add = (value: string | undefined) => {
 		if (!value) return;
 		const handle = normalizeProfileHandle(value);
@@ -71,16 +77,18 @@ function collectProfileAnalysisHydrationHandles(
 		handles.add(handle);
 	};
 
-	for (const handle of result.analysis.sourceHandles) add(handle);
-	for (const theme of result.analysis.themes) {
+	for (const handle of analysis?.sourceHandles ?? []) add(handle);
+	for (const theme of analysis?.themes ?? []) {
 		for (const handle of theme.handles) add(handle);
 	}
-	for (const handle of handlesFromText(result.markdown)) add(handle);
-	for (const handle of handlesFromText(result.context.profile.bio)) add(handle);
-	for (const tweet of result.context.tweets) {
+	if (markdown) {
+		for (const handle of handlesFromText(markdown)) add(handle);
+	}
+	for (const handle of handlesFromText(context.profile.bio)) add(handle);
+	for (const tweet of context.tweets) {
 		for (const handle of handlesFromText(tweet.text)) add(handle);
 	}
-	for (const tweet of result.context.conversations) {
+	for (const tweet of context.conversations) {
 		for (const handle of handlesFromText(tweet.text)) add(handle);
 		for (const handle of handlesFromText(tweet.bio)) add(handle);
 	}
@@ -105,13 +113,30 @@ function applyHydratedProfilesToProfileAnalysisContext(
 	};
 }
 
-async function hydrateProfileAnalysisContext(result: ProfileAnalysisRunResult) {
-	const handles = collectProfileAnalysisHydrationHandles(result);
-	if (handles.length === 0) return result.context;
+async function hydrateProfileAnalysisContext({
+	context,
+	analysis,
+	markdown,
+	requestedHandles,
+}: {
+	context: ProfileAnalysisContext;
+	analysis?: ProfileAnalysisRunResult["analysis"];
+	markdown?: string;
+	requestedHandles?: Set<string>;
+}) {
+	const handles = collectProfileAnalysisHydrationHandles({
+		context,
+		analysis,
+		markdown,
+	}).filter((handle) => !requestedHandles?.has(handle));
+	if (handles.length === 0) return context;
+	for (const handle of handles) {
+		requestedHandles?.add(handle);
+	}
 	const url = new URL("/api/profile-hydrate", window.location.origin);
 	url.searchParams.set("handles", handles.join(","));
 	const response = await fetch(url);
-	if (!response.ok) return result.context;
+	if (!response.ok) return context;
 	const payload = (await response.json()) as {
 		results?: Array<{ status?: string; profile?: ProfileRecord }>;
 	};
@@ -119,8 +144,8 @@ async function hydrateProfileAnalysisContext(result: ProfileAnalysisRunResult) {
 		.filter((item) => item.status === "hit" && item.profile)
 		.map((item) => item.profile as ProfileRecord);
 	return profiles.length > 0
-		? applyHydratedProfilesToProfileAnalysisContext(result.context, profiles)
-		: result.context;
+		? applyHydratedProfilesToProfileAnalysisContext(context, profiles)
+		: context;
 }
 
 export function profileAnalysisUrl(
@@ -203,6 +228,53 @@ export function useProfileAnalysisStream(handle: string): ProfileAnalysisState {
 				abortRef.current === controller &&
 				requestIdRef.current === requestId &&
 				!controller.signal.aborted;
+			const requestedHydrationHandles = new Set<string>();
+			const hydratedProfilesByHandle = new Map<string, ProfileRecord>();
+			const rememberHydratedProfiles = (
+				nextContext: ProfileAnalysisContext,
+			) => {
+				for (const profile of nextContext.profiles ?? []) {
+					hydratedProfilesByHandle.set(
+						normalizeProfileHandle(profile.handle),
+						profile,
+					);
+				}
+			};
+			const mergeKnownHydratedProfiles = (
+				nextContext: ProfileAnalysisContext,
+			) =>
+				hydratedProfilesByHandle.size > 0
+					? applyHydratedProfilesToProfileAnalysisContext(nextContext, [
+							...hydratedProfilesByHandle.values(),
+						])
+					: nextContext;
+			const hydrateContext = (
+				nextContext: ProfileAnalysisContext,
+				nextResult?: ProfileAnalysisRunResult,
+			) => {
+				void hydrateProfileAnalysisContext({
+					context: nextContext,
+					analysis: nextResult?.analysis,
+					markdown: nextResult?.markdown,
+					requestedHandles: requestedHydrationHandles,
+				})
+					.then((hydratedContext) => {
+						if (!isActiveRequest()) return;
+						if (hydratedContext === nextContext) return;
+						rememberHydratedProfiles(hydratedContext);
+						const mergedContext = mergeKnownHydratedProfiles(hydratedContext);
+						setContext(mergedContext);
+						if (nextResult) {
+							setResult({
+								...nextResult,
+								context: mergedContext,
+							});
+						}
+					})
+					.catch(() => {
+						// Profile hover hydration is best-effort; analysis remains usable.
+					});
+			};
 			setMarkdown("");
 			setContext(null);
 			setResult(null);
@@ -252,26 +324,25 @@ export function useProfileAnalysisStream(handle: string): ProfileAnalysisState {
 												? "Loading cached analysis"
 												: "Summarizing profile",
 										);
+										hydrateContext(event.context);
 									} else if (event.type === "delta") {
 										setMarkdown((current) => current + event.delta);
 									} else if (event.type === "done") {
-										setResult(event.result);
-										setContext(event.result.context);
+										const mergedContext = mergeKnownHydratedProfiles(
+											event.result.context,
+										);
+										const mergedResult =
+											mergedContext === event.result.context
+												? event.result
+												: {
+														...event.result,
+														context: mergedContext,
+													};
+										setResult(mergedResult);
+										setContext(mergedContext);
 										setMarkdown(event.result.markdown);
 										setStatus(event.result.cached ? "Cached" : "Complete");
-										void hydrateProfileAnalysisContext(event.result)
-											.then((hydratedContext) => {
-												if (!isActiveRequest()) return;
-												if (hydratedContext === event.result.context) return;
-												setContext(hydratedContext);
-												setResult({
-													...event.result,
-													context: hydratedContext,
-												});
-											})
-											.catch(() => {
-												// Profile hover hydration is best-effort; analysis remains usable.
-											});
+										hydrateContext(mergedContext, mergedResult);
 									} else if (event.type === "error") {
 										setError(event.error);
 									}

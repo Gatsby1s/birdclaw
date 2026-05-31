@@ -28,24 +28,13 @@ function profileContext() {
 			id: "profile_steipete",
 			handle: "steipete",
 			displayName: "Peter Steinberger",
-			bio: "Builder of agentic software. Contact hello@openai.com with @OpenClaw.",
+			bio: "Futurist 🦄\nChief Architect @openclaw 🦞\nWriter @forbes Tech Council\nAdjunct @MIT\nEx @Microsoft @Qantas\nContact hello@openai.com",
 			followersCount: 123456,
 			followingCount: 987,
 			avatarHue: 18,
 			avatarUrl: "https://pbs.twimg.com/profile_images/1/avatar.jpg",
 			createdAt: "2009-03-19T22:54:05.000Z",
 		},
-		profiles: [
-			{
-				id: "profile_openclaw",
-				handle: "OpenClaw",
-				displayName: "OpenClaw",
-				bio: "Agent tooling.",
-				followersCount: 456,
-				avatarHue: 210,
-				createdAt: "2026-01-01T00:00:00.000Z",
-			},
-		],
 		externalUserId: "123",
 		tweets: [],
 		conversations: [],
@@ -64,28 +53,89 @@ function profileContext() {
 describe("profile route", () => {
 	it("loads /profiles/:handle as a profile header with analysis", async () => {
 		const context = profileContext();
-		const fetchMock = vi.fn(
-			async () =>
-				new Response(
-					streamEvents([
-						{ type: "status", label: "Fetching profile tweets" },
-						{ type: "start", context, cached: true },
-						{
-							type: "done",
-							result: {
-								context,
-								analysis: {},
-								markdown: "Peter ships agent tools with practical taste.",
-								model: "gpt-5.5",
-								reasoningEffort: "medium",
-								serviceTier: "priority",
-								cached: true,
-								updatedAt: "2026-05-31T12:00:00.000Z",
-							},
+		const hydratedProfiles = [
+			{
+				id: "profile_openclaw",
+				handle: "openclaw",
+				displayName: "OpenClaw",
+				bio: "Agent tooling.",
+				followersCount: 456,
+				avatarHue: 210,
+				createdAt: "2026-01-01T00:00:00.000Z",
+			},
+			{
+				id: "profile_forbes",
+				handle: "forbes",
+				displayName: "Forbes",
+				bio: "Business news.",
+				followersCount: 123,
+				avatarHue: 110,
+				createdAt: "2009-01-01T00:00:00.000Z",
+			},
+			{
+				id: "profile_mit",
+				handle: "MIT",
+				displayName: "MIT",
+				bio: "Massachusetts Institute of Technology.",
+				followersCount: 789,
+				avatarHue: 20,
+				createdAt: "2009-01-01T00:00:00.000Z",
+			},
+			{
+				id: "profile_microsoft",
+				handle: "Microsoft",
+				displayName: "Microsoft",
+				bio: "Technology company.",
+				followersCount: 999,
+				avatarHue: 220,
+				createdAt: "2009-01-01T00:00:00.000Z",
+			},
+			{
+				id: "profile_qantas",
+				handle: "Qantas",
+				displayName: "Qantas",
+				bio: "Airline.",
+				followersCount: 333,
+				avatarHue: 300,
+				createdAt: "2009-01-01T00:00:00.000Z",
+			},
+		];
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/profile-hydrate") {
+				return new Response(
+					JSON.stringify({
+						ok: true,
+						results: hydratedProfiles.map((profile) => ({
+							status: "hit",
+							profile,
+						})),
+					}),
+					{
+						headers: { "content-type": "application/json" },
+					},
+				);
+			}
+			return new Response(
+				streamEvents([
+					{ type: "status", label: "Fetching profile tweets" },
+					{ type: "start", context, cached: true },
+					{
+						type: "done",
+						result: {
+							context,
+							analysis: {},
+							markdown: "Peter ships agent tools with practical taste.",
+							model: "gpt-5.5",
+							reasoningEffort: "medium",
+							serviceTier: "priority",
+							cached: true,
+							updatedAt: "2026-05-31T12:00:00.000Z",
 						},
-					]),
-				),
-		);
+					},
+				]),
+			);
+		});
 		vi.stubGlobal("fetch", fetchMock);
 
 		render(<ProfileRouteView handle="steipete" />);
@@ -94,17 +144,36 @@ describe("profile route", () => {
 		expect(screen.getByTestId("profile-cover")).toHaveClass("h-32");
 		expect(screen.getByTestId("profile-avatar-overlap")).toHaveClass("-mt-8");
 		expect(screen.getByText("@steipete")).toBeInTheDocument();
-		expect(
-			screen.getByText(
-				/Builder of agentic software\. Contact hello@openai\.com with/,
-			),
-		).toBeInTheDocument();
+		expect(screen.getByText(/Futurist/)).toBeInTheDocument();
+		expect(screen.getByText(/Contact hello@openai\.com/)).toBeInTheDocument();
 		expect(screen.queryByRole("link", { name: "@openai" })).toBeNull();
-		expect(screen.getByRole("link", { name: "@OpenClaw" })).toHaveAttribute(
+		expect(screen.getByRole("link", { name: "@openclaw" })).toHaveAttribute(
 			"href",
-			"https://x.com/OpenClaw",
+			"https://x.com/openclaw",
 		);
-		expect(screen.getByText("Agent tooling.")).toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "@forbes" })).toHaveAttribute(
+			"href",
+			"https://x.com/forbes",
+		);
+		expect(screen.getByRole("link", { name: "@MIT" })).toHaveAttribute(
+			"href",
+			"https://x.com/MIT",
+		);
+		expect(screen.getByRole("link", { name: "@Microsoft" })).toHaveAttribute(
+			"href",
+			"https://x.com/Microsoft",
+		);
+		expect(screen.getByRole("link", { name: "@Qantas" })).toHaveAttribute(
+			"href",
+			"https://x.com/Qantas",
+		);
+		expect(await screen.findByText("Agent tooling.")).toBeInTheDocument();
+		expect(screen.getByText("Business news.")).toBeInTheDocument();
+		expect(
+			screen.getByText("Massachusetts Institute of Technology."),
+		).toBeInTheDocument();
+		expect(screen.getByText("Technology company.")).toBeInTheDocument();
+		expect(screen.getByText("Airline.")).toBeInTheDocument();
 		expect(
 			await screen.findByText("Peter ships agent tools with practical taste."),
 		).toBeInTheDocument();
@@ -118,5 +187,13 @@ describe("profile route", () => {
 			expect(url.pathname).toBe("/api/profile-analysis");
 			expect(url.searchParams.get("handle")).toBe("steipete");
 		});
+		const hydrateCall = fetchMock.mock.calls.find(([input]) =>
+			String(input).includes("/api/profile-hydrate"),
+		);
+		expect(hydrateCall).toBeDefined();
+		const hydrateUrl = new URL(String(hydrateCall?.[0]), "http://localhost");
+		expect(hydrateUrl.searchParams.get("handles")).toBe(
+			"openclaw,forbes,mit,microsoft,qantas",
+		);
 	});
 });

@@ -6,8 +6,10 @@ import { runEffectPromise, tryPromise } from "./effect-runtime";
 import { buildMediaJsonFromIncludes, countTweetMedia } from "./media-includes";
 import type { Database } from "./sqlite";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
+import { tweetEntitiesFromXurl } from "./tweet-render";
 import type {
 	ProfileRecord,
+	TweetEntities,
 	XurlMediaItem,
 	XurlMentionUser,
 	XurlTweetData,
@@ -57,6 +59,7 @@ export interface CompactProfileTweet {
 	author: string;
 	createdAt: string;
 	text: string;
+	entities?: TweetEntities;
 	conversationId?: string;
 	replyToId?: string;
 	likeCount: number;
@@ -483,6 +486,7 @@ function compactProfileTweet(
 		author: profileHandle,
 		createdAt: tweet.created_at,
 		text: tweet.text,
+		entities: tweetEntitiesFromXurl(tweet.entities),
 		...(tweet.conversation_id ? { conversationId: tweet.conversation_id } : {}),
 		...(tweet.referenced_tweets?.find((item) => item.type === "replied_to")?.id
 			? {
@@ -536,6 +540,11 @@ function contextCacheKey(options: {
 	].join(":");
 }
 
+function promptTweetContext(tweet: CompactProfileTweet) {
+	const { entities: _entities, ...promptTweet } = tweet;
+	return promptTweet;
+}
+
 function contextHash(context: Omit<ProfileAnalysisContext, "hash">) {
 	return createHash("sha1")
 		.update(
@@ -546,8 +555,8 @@ function contextHash(context: Omit<ProfileAnalysisContext, "hash">) {
 				externalUserId: context.externalUserId,
 				profile: context.profile,
 				counts: context.counts,
-				tweets: context.tweets,
-				conversations: context.conversations,
+				tweets: context.tweets.map(promptTweetContext),
+				conversations: context.conversations.map(promptTweetContext),
 			}),
 		)
 		.digest("hex");
@@ -989,8 +998,10 @@ function fitPromptDataset(context: ProfileAnalysisContext) {
 	const datasetFor = (tweets: number, conversations: number) => ({
 		profile: context.profile,
 		counts: context.counts,
-		tweets: context.tweets.slice(0, tweets),
-		conversations: context.conversations.slice(0, conversations),
+		tweets: context.tweets.slice(0, tweets).map(promptTweetContext),
+		conversations: context.conversations
+			.slice(0, conversations)
+			.map(promptTweetContext),
 	});
 	const lengthFor = (tweets: number, conversations: number) =>
 		JSON.stringify(datasetFor(tweets, conversations)).length;
