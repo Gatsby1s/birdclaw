@@ -1,15 +1,30 @@
 import { Effect } from "effect";
 import { getNativeDb } from "./db";
 import type { Database } from "./sqlite";
+import {
+	recordDatabaseWriteCompleted,
+	recordDatabaseWriteQueued,
+	recordDatabaseWriteStarted,
+} from "./database-metrics";
 
 let writeTail: Promise<void> = Promise.resolve();
 
 export function enqueueDatabaseWrite<T>(
 	write: (db: Database) => T,
 ): Promise<T> {
+	const queuedAt = performance.now();
+	recordDatabaseWriteQueued();
 	const pending = writeTail.then(() => {
-		const db = getNativeDb({ seedDemoData: false });
-		return db.transaction(() => write(db))();
+		recordDatabaseWriteStarted(performance.now() - queuedAt);
+		try {
+			const db = getNativeDb({ seedDemoData: false });
+			const result = db.transaction(() => write(db))();
+			recordDatabaseWriteCompleted(false);
+			return result;
+		} catch (error) {
+			recordDatabaseWriteCompleted(true);
+			throw error;
+		}
 	});
 	writeTail = pending.then(
 		() => undefined,

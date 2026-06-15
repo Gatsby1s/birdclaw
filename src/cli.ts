@@ -47,6 +47,7 @@ import {
 	setActionsTransport,
 } from "#/lib/config";
 import { closeDatabase } from "#/lib/db";
+import { getDatabaseRuntimeMetrics } from "#/lib/database-metrics";
 import {
 	type DirectMessagesSyncMode,
 	syncDirectMessagesViaCachedBird,
@@ -1964,7 +1965,7 @@ for (const action of ["accept", "reject", "block"] as const) {
 			...(action === "block" && options.allPages ? { allPages: true } : {}),
 		});
 		if (result.success) {
-			applyDmRequestMutationToLocalStore(conversationId, action);
+			await applyDmRequestMutationToLocalStore(conversationId, action);
 		} else {
 			process.exitCode = 1;
 		}
@@ -2167,6 +2168,7 @@ program
 		print(
 			{
 				paths,
+				database: getDatabaseRuntimeMetrics(),
 				stats: meta.stats,
 				transport: meta.transport,
 			},

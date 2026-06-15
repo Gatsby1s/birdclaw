@@ -9,6 +9,10 @@ import {
 	runDatabaseMigrations,
 } from "./database-migrations";
 import { seedDemoData } from "./seed";
+import {
+	type DatabaseConnectionRole,
+	recordDatabaseStatement,
+} from "./database-metrics";
 
 export interface AccountsTable {
 	id: string;
@@ -324,6 +328,8 @@ export interface BirdclawDatabase {
 }
 
 let nativeDb: Database | undefined;
+let readDbs: Database[] = [];
+let readDbIndex = 0;
 let kyselyDb: Kysely<BirdclawDatabase> | undefined;
 let demoSeedAttempted = false;
 
@@ -1092,7 +1098,7 @@ function initDatabase(options: InitDatabaseOptions = {}) {
 
 	if (!nativeDb) {
 		const { dbPath } = getBirdclawPaths();
-		nativeDb = new NativeSqliteDatabase(dbPath);
+		nativeDb = createDatabaseConnection(dbPath, "writer");
 		nativeDb.exec(`
 		  pragma busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
 		  pragma foreign_keys = on;
@@ -1114,9 +1120,42 @@ function initDatabase(options: InitDatabaseOptions = {}) {
 	}
 }
 
+function createDatabaseConnection(
+	dbPath: string,
+	role: DatabaseConnectionRole,
+	options: { readonly?: boolean } = {},
+) {
+	return new NativeSqliteDatabase(dbPath, {
+		...options,
+		onStatement: (sql, durationMs) =>
+			recordDatabaseStatement(role, sql, durationMs),
+	});
+}
+
 export function getNativeDb(options: InitDatabaseOptions = {}) {
 	initDatabase(options);
 	return nativeDb as Database;
+}
+
+export function getReadDb(options: InitDatabaseOptions = {}) {
+	initDatabase(options);
+	if (readDbs.length === 0) {
+		const { dbPath } = getBirdclawPaths();
+		readDbs = Array.from({ length: 2 }, () => {
+			const db = createDatabaseConnection(dbPath, "reader", {
+				readonly: true,
+			});
+			db.exec(`
+			  pragma busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
+			  pragma foreign_keys = on;
+			  pragma query_only = on;
+			`);
+			return db;
+		});
+	}
+	const db = readDbs[readDbIndex % readDbs.length] as Database;
+	readDbIndex = (readDbIndex + 1) % readDbs.length;
+	return db;
 }
 
 export function getDb() {
@@ -1127,10 +1166,14 @@ export function getDb() {
 export async function closeDatabase() {
 	const db = kyselyDb;
 	const native = nativeDb;
+	const readers = readDbs;
 	kyselyDb = undefined;
 	nativeDb = undefined;
+	readDbs = [];
+	readDbIndex = 0;
 	demoSeedAttempted = false;
 
+	for (const reader of readers) reader.close();
 	if (db) {
 		await db.destroy();
 	} else {
@@ -1141,9 +1184,13 @@ export async function closeDatabase() {
 export function resetDatabaseForTests() {
 	const db = kyselyDb;
 	const native = nativeDb;
+	const readers = readDbs;
 	kyselyDb = undefined;
 	nativeDb = undefined;
+	readDbs = [];
+	readDbIndex = 0;
 	demoSeedAttempted = false;
+	for (const reader of readers) reader.close();
 	if (db) {
 		void db.destroy();
 	} else {

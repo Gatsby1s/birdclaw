@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import type { Database } from "./sqlite";
 import { findArchivesCachedEffect } from "./archive-finder";
-import { getDb, getNativeDb } from "./db";
+import { getReadDb } from "./db";
+import { databaseWriteEffect } from "./database-writer";
 import { runEffectPromise, tryPromise } from "./effect-runtime";
 import { fetchProfileAffiliations } from "./profile-affiliations";
 import { displayUrlForLink, enrichFallbackUrlEntities } from "./tweet-render";
@@ -58,7 +59,7 @@ function verifySelectedXurlAccountEffect(accountId: string) {
 	return Effect.gen(function* () {
 		if (liveWritesDisabled()) return;
 		if (e2eFakeLiveWritesEnabled()) return;
-		const db = yield* trySync(() => getNativeDb());
+		const db = yield* trySync(() => getReadDb());
 		const account = yield* trySync(
 			() =>
 				db
@@ -705,8 +706,7 @@ export function getQueryEnvelopeEffect({
 	includeArchives = true,
 }: { includeArchives?: boolean } = {}): Effect.Effect<QueryEnvelope, unknown> {
 	return Effect.gen(function* () {
-		const db = yield* trySync(() => getDb());
-		const nativeDb = yield* trySync(() => getNativeDb());
+		const nativeDb = yield* trySync(() => getReadDb());
 		const homeCount = yield* trySync(() =>
 			countTimelineEdges(nativeDb, "home"),
 		);
@@ -714,26 +714,35 @@ export function getQueryEnvelopeEffect({
 			countTimelineEdges(nativeDb, "mention"),
 		);
 		const counts = yield* Effect.all({
-			dms: tryPromise(() =>
-				db
-					.selectFrom("dm_conversations")
-					.select((eb) => eb.fn.countAll().as("count"))
-					.executeTakeFirstOrThrow(),
+			dms: trySync(
+				() =>
+					nativeDb
+						.prepare("select count(*) as count from dm_conversations")
+						.get() as { count: number },
 			),
-			needsReply: tryPromise(() =>
-				db
-					.selectFrom("dm_conversations")
-					.select((eb) => eb.fn.countAll().as("count"))
-					.where("needs_reply", "=", 1)
-					.executeTakeFirstOrThrow(),
+			needsReply: trySync(
+				() =>
+					nativeDb
+						.prepare(
+							"select count(*) as count from dm_conversations where needs_reply = 1",
+						)
+						.get() as { count: number },
 			),
-			accounts: tryPromise(() =>
-				db
-					.selectFrom("accounts")
-					.selectAll()
-					.orderBy("is_default", "desc")
-					.orderBy("name", "asc")
-					.execute(),
+			accounts: trySync(
+				() =>
+					nativeDb
+						.prepare(
+							"select * from accounts order by is_default desc, name asc",
+						)
+						.all() as Array<{
+						id: string;
+						name: string;
+						handle: string;
+						external_user_id: string | null;
+						transport: string;
+						is_default: number;
+						created_at: string;
+					}>,
 			),
 			archives: includeArchives
 				? findArchivesCachedEffect()
@@ -796,7 +805,7 @@ export function listTimelineItems({
 	bookmarkedOnly = false,
 	limit = 18,
 }: TimelineQuery): TimelineItem[] {
-	const db = getNativeDb();
+	const db = getReadDb();
 	const kind = resource === "mentions" ? "mention" : resource;
 	const params: Array<string | number> = [];
 	const normalizedLowQualityThreshold =
@@ -1291,7 +1300,7 @@ export function getTweetsByIds(
 	tweetIds: string[],
 	accountId?: string,
 ): EmbeddedTweet[] {
-	const db = getNativeDb();
+	const db = getReadDb();
 	const scopedAccountId =
 		accountId && accountId !== "all" ? accountId : undefined;
 	const urlExpansionCache: UrlExpansionCache = new Map();
@@ -1408,7 +1417,7 @@ export function getTweetConversation(
 	tweetId: string,
 	limit = 80,
 ): TweetConversationResponse | null {
-	const db = getNativeDb();
+	const db = getReadDb();
 	const urlExpansionCache: UrlExpansionCache = new Map();
 	const profileByHandleCache: ProfileByHandleCache = new Map();
 	const resolveProfileByHandle = (handle: string) =>
@@ -1490,7 +1499,7 @@ export function listDmConversations({
 	context = 0,
 	limit = 20,
 }: DmQuery): DmConversationItem[] {
-	const db = getNativeDb();
+	const db = getReadDb();
 	const params: Array<string | number> = [];
 	const joinParams: Array<string | number> = [];
 	let searchSnippetCte = "";
@@ -1765,7 +1774,7 @@ export function getConversationThread(
 		return null;
 	}
 
-	const db = getNativeDb();
+	const db = getReadDb();
 	const rows = db
 		.prepare(
 			`
@@ -1821,50 +1830,52 @@ export function getConversationThread(
 
 export type DmRequestMutationAction = "accept" | "reject" | "block";
 
-export function applyDmRequestMutationToLocalStore(
+export async function applyDmRequestMutationToLocalStore(
 	conversationId: string,
 	action: DmRequestMutationAction,
 ) {
-	return persistWrite((db) => {
-		db.prepare(
-			"delete from sync_cache where cache_key like 'dms:bird:%'",
-		).run();
-		if (action === "accept") {
-			return db
-				.prepare(
-					`
+	return runEffectPromise(
+		databaseWriteEffect((db) => {
+			db.prepare(
+				"delete from sync_cache where cache_key like 'dms:bird:%'",
+			).run();
+			if (action === "accept") {
+				return db
+					.prepare(
+						`
     update dm_conversations
     set inbox_kind = 'accepted'
     where id = ?
     `,
-				)
-				.run(conversationId).changes;
-		}
+					)
+					.run(conversationId).changes;
+			}
 
-		db.prepare(
-			`
+			db.prepare(
+				`
     delete from link_occurrences
     where source_kind = 'dm'
       and source_id in (
         select id from dm_messages where conversation_id = ?
       )
     `,
-		).run(conversationId);
-		db.prepare(
-			`
+			).run(conversationId);
+			db.prepare(
+				`
     delete from dm_fts
     where message_id in (
       select id from dm_messages where conversation_id = ?
     )
     `,
-		).run(conversationId);
-		db.prepare("delete from dm_messages where conversation_id = ?").run(
-			conversationId,
-		);
-		return db
-			.prepare("delete from dm_conversations where id = ?")
-			.run(conversationId).changes;
-	});
+			).run(conversationId);
+			db.prepare("delete from dm_messages where conversation_id = ?").run(
+				conversationId,
+			);
+			return db
+				.prepare("delete from dm_conversations where id = ?")
+				.run(conversationId).changes;
+		}),
+	);
 }
 
 function normalizeDmContext(value: number | undefined) {
@@ -1932,7 +1943,7 @@ function getDmSearchMatches({
 	conversationIds: string[];
 	context: number;
 }) {
-	const db = getNativeDb();
+	const db = getReadDb();
 	if (search.length === 0) {
 		return new Map<string, DmConversationItem["matches"]>();
 	}
@@ -2099,7 +2110,7 @@ function refreshDmConversationState(
 }
 
 function getLocalAuthorProfileId(accountId: string) {
-	const db = getNativeDb();
+	const db = getReadDb();
 	const row = db
 		.prepare(
 			`
@@ -2116,8 +2127,7 @@ function getLocalAuthorProfileId(accountId: string) {
 
 let savepointCounter = 0;
 
-function preflightWrite<T>(write: (db: Database) => T) {
-	const db = getNativeDb();
+function preflightWrite<T>(db: Database, write: (db: Database) => T) {
 	const savepoint = `__birdclaw_preflight_${++savepointCounter}`;
 	db.exec(`savepoint ${savepoint}`);
 	try {
@@ -2134,11 +2144,6 @@ function preflightWrite<T>(write: (db: Database) => T) {
 		}
 		throw error;
 	}
-}
-
-function persistWrite<T>(write: (db: Database) => T) {
-	const db = getNativeDb();
-	return db.transaction(() => write(db))();
 }
 
 type PostDraft = {
@@ -2195,19 +2200,20 @@ function writePostDraft(
 
 export function createPostEffect(accountId: string, text: string) {
 	return Effect.gen(function* () {
-		const draft = yield* trySync(() => {
-			const postDraft = preparePostDraft(accountId);
-			preflightWrite((db) => writePostDraft(db, accountId, text, postDraft));
-			return postDraft;
-		});
+		const draft = yield* trySync(() => preparePostDraft(accountId));
+		yield* databaseWriteEffect((db) =>
+			preflightWrite(db, (writeDb) =>
+				writePostDraft(writeDb, accountId, text, draft),
+			),
+		);
 
 		yield* verifySelectedXurlAccountEffect(accountId);
 		const transport = yield* postViaXurlEffect(text);
 		if (!transport.ok) {
 			return yield* Effect.fail(new Error(transport.output || "post failed"));
 		}
-		yield* trySync(() =>
-			persistWrite((db) => writePostDraft(db, accountId, text, draft)),
+		yield* databaseWriteEffect((db) =>
+			writePostDraft(db, accountId, text, draft),
 		);
 
 		return { ok: true, transport, tweetId: draft.tweetId };
@@ -2262,18 +2268,17 @@ export function createTweetReplyEffect(
 	}
 
 	return Effect.gen(function* () {
-		const draft = yield* trySync(() => {
-			const replyDraft = prepareReplyDraft();
-			preflightWrite((db) => writeReplyDraft(db, replyDraft));
-			return replyDraft;
-		});
+		const draft = yield* trySync(() => prepareReplyDraft());
+		yield* databaseWriteEffect((db) =>
+			preflightWrite(db, (writeDb) => writeReplyDraft(writeDb, draft)),
+		);
 
 		yield* verifySelectedXurlAccountEffect(accountId);
 		const transport = yield* replyViaXurlEffect(tweetId, text);
 		if (!transport.ok) {
 			return yield* Effect.fail(new Error(transport.output || "reply failed"));
 		}
-		yield* trySync(() => persistWrite((db) => writeReplyDraft(db, draft)));
+		yield* databaseWriteEffect((db) => writeReplyDraft(db, draft));
 
 		return { ok: true, transport, replyId: draft.replyId };
 	});
@@ -2309,68 +2314,69 @@ export function createDmReplyEffect(conversationId: string, text: string) {
 				observedLastMessageAt: conversation.conversation.lastMessageAt,
 				outboundId: `msg_${randomUUID()}`,
 			};
-			preflightWrite((db) => {
-				db.prepare(
-					`
-    insert into dm_messages (
-      id, conversation_id, sender_profile_id, text, created_at, direction, is_replied, media_count
-    ) values (?, ?, ?, ?, ?, 'outbound', 1, 0)
-    `,
-				).run(
-					dmDraft.outboundId,
-					conversationId,
-					dmDraft.authorProfileId,
-					text,
-					dmDraft.createdAt,
-				);
-				db.prepare("insert into dm_fts (message_id, text) values (?, ?)").run(
-					dmDraft.outboundId,
-					text,
-				);
-
-				refreshDmConversationState(
-					db,
-					conversationId,
-					dmDraft.createdAt,
-					dmDraft.observedLastMessageAt,
-				);
-			});
 			return dmDraft;
 		});
-
-		yield* verifySelectedXurlAccountEffect(draft.accountId);
-		const transport = yield* dmViaXurlEffect(draft.handle, text);
-		if (!transport.ok) {
-			return yield* Effect.fail(new Error(transport.output || "dm failed"));
-		}
-		yield* trySync(() =>
-			persistWrite((db) => {
-				db.prepare(
-					`
+		yield* databaseWriteEffect((db) =>
+			preflightWrite(db, (writeDb) => {
+				writeDb
+					.prepare(
+						`
     insert into dm_messages (
       id, conversation_id, sender_profile_id, text, created_at, direction, is_replied, media_count
     ) values (?, ?, ?, ?, ?, 'outbound', 1, 0)
     `,
-				).run(
-					draft.outboundId,
-					conversationId,
-					draft.authorProfileId,
-					text,
-					draft.createdAt,
-				);
-				db.prepare("insert into dm_fts (message_id, text) values (?, ?)").run(
-					draft.outboundId,
-					text,
-				);
+					)
+					.run(
+						draft.outboundId,
+						conversationId,
+						draft.authorProfileId,
+						text,
+						draft.createdAt,
+					);
+				writeDb
+					.prepare("insert into dm_fts (message_id, text) values (?, ?)")
+					.run(draft.outboundId, text);
 
 				refreshDmConversationState(
-					db,
+					writeDb,
 					conversationId,
 					draft.createdAt,
 					draft.observedLastMessageAt,
 				);
 			}),
 		);
+
+		yield* verifySelectedXurlAccountEffect(draft.accountId);
+		const transport = yield* dmViaXurlEffect(draft.handle, text);
+		if (!transport.ok) {
+			return yield* Effect.fail(new Error(transport.output || "dm failed"));
+		}
+		yield* databaseWriteEffect((db) => {
+			db.prepare(
+				`
+    insert into dm_messages (
+      id, conversation_id, sender_profile_id, text, created_at, direction, is_replied, media_count
+    ) values (?, ?, ?, ?, ?, 'outbound', 1, 0)
+    `,
+			).run(
+				draft.outboundId,
+				conversationId,
+				draft.authorProfileId,
+				text,
+				draft.createdAt,
+			);
+			db.prepare("insert into dm_fts (message_id, text) values (?, ?)").run(
+				draft.outboundId,
+				text,
+			);
+
+			refreshDmConversationState(
+				db,
+				conversationId,
+				draft.createdAt,
+				draft.observedLastMessageAt,
+			);
+		});
 
 		return { ok: true, transport, messageId: draft.outboundId };
 	});

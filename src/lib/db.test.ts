@@ -6,7 +6,7 @@ import path from "node:path";
 import NativeSqliteDatabase, { SQLITE_BUSY_TIMEOUT_MS } from "./sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetBirdclawPathsForTests } from "./config";
-import { getNativeDb, resetDatabaseForTests } from "./db";
+import { getNativeDb, getReadDb, resetDatabaseForTests } from "./db";
 
 const tempDirs: string[] = [];
 
@@ -322,6 +322,32 @@ describe("database init", () => {
 			);
 		} finally {
 			await stopChild(holder);
+		}
+	});
+
+	it("uses independent query-only connections for reads", () => {
+		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-read-"));
+		tempDirs.push(tempDir);
+		process.env.BIRDCLAW_HOME = tempDir;
+
+		const writer = getNativeDb({ seedDemoData: false });
+		writer.exec("create table read_probe (value text)");
+		writer.prepare("insert into read_probe (value) values ('committed')").run();
+		const reader = getReadDb({ seedDemoData: false });
+
+		writer.exec("begin immediate");
+		try {
+			writer.prepare("insert into read_probe (value) values ('pending')").run();
+			expect(
+				reader.prepare("select value from read_probe order by value").all(),
+			).toEqual([{ value: "committed" }]);
+			expect(() =>
+				reader
+					.prepare("insert into read_probe (value) values ('blocked')")
+					.run(),
+			).toThrow(/read.?only|write/i);
+		} finally {
+			writer.exec("rollback");
 		}
 	});
 });

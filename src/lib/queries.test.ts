@@ -235,16 +235,16 @@ describe("birdclaw queries", () => {
 		});
 	});
 
-	it("applies live DM request mutations to the local store", () => {
+	it("applies live DM request mutations to the local store", async () => {
 		setupTempHome();
 		const db = getNativeDb();
 		db.prepare(
 			"update dm_conversations set inbox_kind = 'request' where id = ?",
 		).run("dm_003");
 
-		expect(
+		await expect(
 			applyDmRequestMutationToLocalStore("dm_003", "accept"),
-		).toBeGreaterThan(0);
+		).resolves.toBeGreaterThan(0);
 		expect(listDmConversations({ inbox: "requests" })).toHaveLength(0);
 		expect(listDmConversations({ inbox: "accepted" })).toEqual(
 			expect.arrayContaining([
@@ -263,9 +263,9 @@ describe("birdclaw queries", () => {
 			"insert into sync_cache (cache_key, value_json, updated_at) values ('dms:bird:acct_primary:20:requests:max-pages:0', '{}', '2026-05-01T00:00:00.000Z')",
 		).run();
 
-		expect(
+		await expect(
 			applyDmRequestMutationToLocalStore("dm_003", "reject"),
-		).toBeGreaterThan(0);
+		).resolves.toBeGreaterThan(0);
 		expect(getConversationThread("dm_003")).toBeNull();
 		expect(
 			db

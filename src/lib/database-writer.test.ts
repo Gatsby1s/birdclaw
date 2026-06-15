@@ -8,12 +8,17 @@ import {
 	enqueueDatabaseWrite,
 	resetDatabaseWriterForTests,
 } from "./database-writer";
+import {
+	getDatabaseRuntimeMetrics,
+	resetDatabaseRuntimeMetricsForTests,
+} from "./database-metrics";
 import { getNativeDb, resetDatabaseForTests } from "./db";
 
 let tempDir: string | undefined;
 
 afterEach(() => {
 	resetDatabaseWriterForTests();
+	resetDatabaseRuntimeMetricsForTests();
 	resetDatabaseForTests();
 	resetBirdclawPathsForTests();
 	delete process.env.BIRDCLAW_HOME;
@@ -85,5 +90,10 @@ describe("database writer", () => {
 				.prepare("select name from writer_events order by position")
 				.all(),
 		).toEqual([{ name: "committed" }]);
+		expect(getDatabaseRuntimeMetrics().writer).toMatchObject({
+			completed: 2,
+			failed: 1,
+			queued: 0,
+		});
 	});
 });

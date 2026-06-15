@@ -6,6 +6,7 @@ type DatabaseOptions = {
 	readonly?: boolean;
 	fileMustExist?: boolean;
 	timeout?: number;
+	onStatement?: (sql: string, durationMs: number) => void;
 };
 
 type PragmaOptions = {
@@ -53,31 +54,57 @@ function normalizeRow(row: unknown): unknown {
 class NativeSqliteStatement {
 	readonly reader: boolean;
 
-	constructor(private readonly statement: StatementSync) {
+	constructor(
+		private readonly statement: StatementSync,
+		private readonly sql: string,
+		private readonly onStatement?: (sql: string, durationMs: number) => void,
+	) {
 		this.reader = statement.columns().length > 0;
 	}
 
+	private track<T>(operation: () => T) {
+		const startedAt = performance.now();
+		try {
+			return operation();
+		} finally {
+			this.onStatement?.(this.sql, performance.now() - startedAt);
+		}
+	}
+
 	all(...parameters: unknown[]): unknown[] {
-		return this.statement.all(...bindArgs(parameters)).map(normalizeRow);
+		return this.track(() =>
+			this.statement.all(...bindArgs(parameters)).map(normalizeRow),
+		);
 	}
 
 	get(...parameters: unknown[]): unknown {
-		return normalizeRow(this.statement.get(...bindArgs(parameters)));
+		return this.track(() =>
+			normalizeRow(this.statement.get(...bindArgs(parameters))),
+		);
 	}
 
 	run(...parameters: unknown[]): RunResult {
-		const result = this.statement.run(...bindArgs(parameters));
-		return {
-			changes: Number(result.changes),
-			lastInsertRowid: Number(result.lastInsertRowid),
-		};
+		return this.track(() => {
+			const result = this.statement.run(...bindArgs(parameters));
+			return {
+				changes: Number(result.changes),
+				lastInsertRowid: Number(result.lastInsertRowid),
+			};
+		});
 	}
 
 	iterate(...parameters: unknown[]): IterableIterator<unknown> {
 		const rows = this.statement.iterate(...bindArgs(parameters));
+		const startedAt = performance.now();
+		const onStatement = this.onStatement;
+		const sql = this.sql;
 		return (function* () {
-			for (const row of rows) {
-				yield normalizeRow(row);
+			try {
+				for (const row of rows) {
+					yield normalizeRow(row);
+				}
+			} finally {
+				onStatement?.(sql, performance.now() - startedAt);
 			}
 		})();
 	}
@@ -87,7 +114,10 @@ export class NativeSqliteDatabase {
 	private transactionDepth = 0;
 	private readonly db: DatabaseSync;
 
-	constructor(path: string, options: DatabaseOptions = {}) {
+	constructor(
+		path: string,
+		private readonly options: DatabaseOptions = {},
+	) {
 		this.db = new DatabaseSync(path, {
 			readOnly: options.readonly,
 			timeout: options.timeout ?? SQLITE_BUSY_TIMEOUT_MS,
@@ -117,7 +147,11 @@ export class NativeSqliteDatabase {
 	}
 
 	prepare(sql: string): NativeSqliteStatement {
-		return new NativeSqliteStatement(this.db.prepare(sql));
+		return new NativeSqliteStatement(
+			this.db.prepare(sql),
+			sql,
+			this.options.onStatement,
+		);
 	}
 
 	transaction<TArgs extends unknown[], TResult>(
