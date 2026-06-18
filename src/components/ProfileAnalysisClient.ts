@@ -1,7 +1,14 @@
+import type { QueryClient } from "@tanstack/react-query";
 import type {
 	ProfileAnalysisContext,
 	ProfileAnalysisRunResult,
 } from "#/lib/profile-analysis";
+import { responseError } from "#/lib/client-http";
+import {
+	PROFILE_HYDRATION_BATCH_LIMIT,
+	hydrateProfileHandles,
+	normalizeProfileHydrationHandle,
+} from "#/lib/profile-hydration-client";
 import type { ProfileRecord } from "#/lib/types";
 
 export interface ProfileAnalysisRequestOptions {
@@ -19,12 +26,9 @@ export const DEFAULT_PROFILE_ANALYSIS_LIMITS = {
 	maxConversationPages: 3,
 } as const;
 
-const PROFILE_HYDRATION_LIMIT = 50;
 const PROFILE_MENTION_RE = /(^|[^\w@./])@([A-Za-z0-9_]{1,15})\b/g;
 
-export function normalizeProfileHandle(value: string) {
-	return value.trim().replace(/^@/, "").toLowerCase();
-}
+export const normalizeProfileHandle = normalizeProfileHydrationHandle;
 
 export function handlesFromText(value: string) {
 	return Array.from(value.matchAll(PROFILE_MENTION_RE)).map(
@@ -78,7 +82,7 @@ export function collectProfileAnalysisHydrationHandles({
 		for (const handle of handlesFromText(tweet.bio)) add(handle);
 	}
 
-	return [...handles].slice(0, PROFILE_HYDRATION_LIMIT);
+	return [...handles];
 }
 
 export function applyHydratedProfilesToProfileAnalysisContext(
@@ -98,39 +102,26 @@ export function applyHydratedProfilesToProfileAnalysisContext(
 	};
 }
 
-export async function hydrateProfileAnalysisContext({
+export async function hydrateProfileAnalysisProfiles({
+	queryClient,
 	context,
 	analysis,
 	markdown,
-	requestedHandles,
 }: {
+	queryClient: QueryClient;
 	context: ProfileAnalysisContext;
 	analysis?: ProfileAnalysisRunResult["analysis"];
 	markdown?: string;
-	requestedHandles?: Set<string>;
 }) {
 	const handles = collectProfileAnalysisHydrationHandles({
 		context,
 		analysis,
 		markdown,
-	}).filter((handle) => !requestedHandles?.has(handle));
-	if (handles.length === 0) return context;
-	for (const handle of handles) {
-		requestedHandles?.add(handle);
-	}
-	const url = new URL("/api/profile-hydrate", window.location.origin);
-	url.searchParams.set("handles", handles.join(","));
-	const response = await fetch(url);
-	if (!response.ok) return context;
-	const payload = (await response.json()) as {
-		results?: Array<{ status?: string; profile?: ProfileRecord }>;
-	};
-	const profiles = (payload.results ?? [])
-		.filter((item) => item.status === "hit" && item.profile)
-		.map((item) => item.profile as ProfileRecord);
-	return profiles.length > 0
-		? applyHydratedProfilesToProfileAnalysisContext(context, profiles)
-		: context;
+	});
+	const { profiles } = await hydrateProfileHandles(queryClient, handles, {
+		limit: PROFILE_HYDRATION_BATCH_LIMIT,
+	});
+	return profiles;
 }
 
 export function profileAnalysisUrl(
@@ -150,28 +141,7 @@ export function profileAnalysisUrl(
 }
 
 export async function profileAnalysisRequestError(response: Response) {
-	const status = `${String(response.status)}${response.statusText ? ` ${response.statusText}` : ""}`;
-	let detail = "";
-	try {
-		const contentType = response.headers.get("content-type") ?? "";
-		if (contentType.includes("application/json")) {
-			const payload = (await response.json()) as {
-				error?: unknown;
-				message?: unknown;
-			};
-			if (typeof payload.message === "string") detail = payload.message;
-			else if (typeof payload.error === "string") detail = payload.error;
-		} else {
-			detail = (await response.text()).trim();
-		}
-	} catch {
-		detail = "";
-	}
-	return new Error(
-		detail
-			? `Profile analysis failed (${status}): ${detail}`
-			: `Profile analysis failed (${status})`,
-	);
+	return responseError(response, { label: "Profile analysis failed" });
 }
 
 export function formatProfileAnalysisCounts(

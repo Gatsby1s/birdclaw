@@ -18,7 +18,12 @@ import {
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { MapRef } from "react-map-gl/mapbox";
 import { useNetworkMapController } from "#/components/network-map-controller";
-import type { NetworkMapResponse } from "#/lib/network-map";
+import type { NetworkMapResponse } from "#/lib/api-contracts";
+import {
+	type NetworkMapRouteSearch,
+	type RouteSearchChange,
+	validateNetworkMapSearch,
+} from "#/lib/route-search";
 import {
 	cx,
 	errorCopyClass,
@@ -61,6 +66,7 @@ import {
 
 export const Route = createFileRoute("/network-map")({
 	component: NetworkMapRoute,
+	validateSearch: validateNetworkMapSearch,
 });
 
 function StatTile({
@@ -618,6 +624,33 @@ function VisibleProfilesPanel({
 }
 
 function NetworkMapRoute() {
+	const search = Route.useSearch();
+	const navigate = Route.useNavigate();
+	return (
+		<NetworkMapRouteView
+			searchState={search}
+			onSearchChange={(next, options) =>
+				void navigate({ search: next, replace: options?.replace })
+			}
+		/>
+	);
+}
+
+export function NetworkMapRouteView({
+	searchState: controlledSearch,
+	onSearchChange,
+}: {
+	searchState?: NetworkMapRouteSearch;
+	onSearchChange?: RouteSearchChange<NetworkMapRouteSearch>;
+} = {}) {
+	const [localSearch, setLocalSearch] = useState(() =>
+		validateNetworkMapSearch({}),
+	);
+	const searchState = controlledSearch ?? localSearch;
+	const updateSearch: RouteSearchChange<NetworkMapRouteSearch> = (
+		next,
+		options,
+	) => (onSearchChange ? onSearchChange(next, options) : setLocalSearch(next));
 	const {
 		type,
 		setType,
@@ -632,7 +665,7 @@ function NetworkMapRoute() {
 		visibleFeatures,
 		filteredVisibleFeatures,
 		mapTypes,
-	} = useNetworkMapController();
+	} = useNetworkMapController(searchState, updateSearch);
 
 	return (
 		<section className="flex min-h-screen flex-col min-[1180px]:h-screen min-[1180px]:min-h-0 min-[1180px]:overflow-hidden">

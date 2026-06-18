@@ -14,6 +14,7 @@ import {
 	normalizeTweetUrlEntityRangeForText,
 } from "#/lib/tweet-render";
 import type {
+	EmbeddedTweet,
 	TimelineItem,
 	TweetEntities,
 	TweetMediaItem,
@@ -232,6 +233,52 @@ function isInteractiveTarget(target: EventTarget | null) {
 	);
 }
 
+function TweetPresentation({
+	tweet,
+	hiddenUrlRanges,
+	visibleUrlCards,
+	replyToTweet,
+	quotedTweet,
+}: {
+	tweet: TimelineItem | EmbeddedTweet;
+	hiddenUrlRanges: Array<{ start: number; end: number }>;
+	visibleUrlCards: TweetUrlEntity[];
+	replyToTweet?: EmbeddedTweet | null;
+	quotedTweet?: EmbeddedTweet | null;
+}) {
+	return (
+		<>
+			<TweetRichText
+				className={feedRowTextClass}
+				entities={tweet.entities}
+				hiddenUrlRanges={hiddenUrlRanges}
+				text={tweet.text}
+			/>
+			<TweetMediaGrid items={tweet.media} />
+			{tweet.entities.article ? (
+				<TweetArticleCard article={tweet.entities.article} />
+			) : null}
+			{replyToTweet ? (
+				<div className={embeddedCardClass}>
+					<EmbeddedTweetCard item={replyToTweet} label="In reply to" />
+				</div>
+			) : null}
+			{quotedTweet ? (
+				<div className={embeddedCardClass}>
+					<EmbeddedTweetCard item={quotedTweet} label="Quoted tweet" />
+				</div>
+			) : null}
+			{visibleUrlCards.map((entry, index) => (
+				<LinkPreviewCard
+					key={`${entry.expandedUrl}-${String(index)}`}
+					entry={entry}
+					index={index}
+				/>
+			))}
+		</>
+	);
+}
+
 export function TimelineCard({
 	item,
 	onReply,
@@ -364,63 +411,13 @@ export function TimelineCard({
 						</span>
 					) : null}
 				</header>
-				{item.retweetedTweet ? (
-					<>
-						<TweetRichText
-							className={feedRowTextClass}
-							entities={displayTweet.entities}
-							hiddenUrlRanges={hiddenMediaUrlRanges}
-							text={displayTweet.text}
-						/>
-						<TweetMediaGrid items={displayTweet.media} />
-						{displayTweet.entities.article ? (
-							<TweetArticleCard article={displayTweet.entities.article} />
-						) : null}
-						{visibleUrlCards.map((entry, index) => (
-							<LinkPreviewCard
-								key={`${entry.expandedUrl}-${String(index)}`}
-								entry={entry}
-								index={index}
-							/>
-						))}
-					</>
-				) : (
-					<>
-						<TweetRichText
-							className={feedRowTextClass}
-							entities={item.entities}
-							hiddenUrlRanges={hiddenMediaUrlRanges}
-							text={item.text}
-						/>
-						<TweetMediaGrid items={item.media} />
-						{item.entities.article ? (
-							<TweetArticleCard article={item.entities.article} />
-						) : null}
-						{item.replyToTweet ? (
-							<div className={embeddedCardClass}>
-								<EmbeddedTweetCard
-									item={item.replyToTweet}
-									label="In reply to"
-								/>
-							</div>
-						) : null}
-						{item.quotedTweet ? (
-							<div className={embeddedCardClass}>
-								<EmbeddedTweetCard
-									item={item.quotedTweet}
-									label="Quoted tweet"
-								/>
-							</div>
-						) : null}
-						{visibleUrlCards.map((entry, index) => (
-							<LinkPreviewCard
-								key={`${entry.expandedUrl}-${String(index)}`}
-								entry={entry}
-								index={index}
-							/>
-						))}
-					</>
-				)}
+				<TweetPresentation
+					hiddenUrlRanges={hiddenMediaUrlRanges}
+					quotedTweet={item.retweetedTweet ? null : item.quotedTweet}
+					replyToTweet={item.retweetedTweet ? null : item.replyToTweet}
+					tweet={displayTweet}
+					visibleUrlCards={visibleUrlCards}
+				/>
 				<footer className={feedRowActionsClass}>
 					<div className="flex items-center gap-3 text-[13px] text-[var(--ink-soft)]">
 						<button

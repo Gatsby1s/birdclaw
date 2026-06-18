@@ -52,6 +52,7 @@ describe("api period digest route", () => {
 							window: { label: "Week" },
 							counts: { home: 1, mentions: 0, links: 0, dms: 0 },
 							includeDms: true,
+							tweets: [],
 						},
 						digest: { actionItems: [] },
 					},

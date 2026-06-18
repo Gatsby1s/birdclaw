@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { liveDataSourcesResponseSchema } from "#/lib/api-contracts";
 import { getLiveDataSourcesEffect } from "#/lib/data-sources";
 import {
 	jsonResponse,
@@ -16,7 +17,11 @@ export const Route = createFileRoute("/api/data-sources")({
 						const denied = sensitiveRequestErrorResponse(request);
 						if (denied) return denied;
 
-						return jsonResponse(yield* getLiveDataSourcesEffect());
+						return jsonResponse(
+							liveDataSourcesResponseSchema.parse(
+								yield* getLiveDataSourcesEffect(),
+							),
+						);
 					}),
 				),
 		},

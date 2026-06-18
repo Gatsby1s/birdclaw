@@ -1,5 +1,4 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient as render } from "#/test/render";
 
@@ -51,9 +50,7 @@ vi.mock("#/components/DmWorkspace", () => ({
 	),
 }));
 
-import { Route } from "./dms";
-
-const DmsRoute = Route.options.component as ComponentType;
+import { DmsRouteView as DmsRoute } from "./dms";
 
 describe("dms route", () => {
 	beforeEach(() => {

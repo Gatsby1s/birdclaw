@@ -1,6 +1,11 @@
 import type * as GeoJSON from "geojson";
 import Supercluster from "supercluster";
-import type { NetworkMapKind, NetworkMapResponse } from "#/lib/network-map";
+import {
+	networkMapResponseSchema,
+	type NetworkMapResponse,
+} from "#/lib/api-contracts";
+import { fetchJson } from "#/lib/api-client";
+import type { NetworkMapKind } from "#/lib/network-map";
 
 export type ReactMapboxModule = typeof import("react-map-gl/mapbox");
 export type MapFeature = NetworkMapResponse["features"][number];
@@ -82,11 +87,12 @@ export async function fetchMap(
 	url.searchParams.set("geocodeLimit", refresh ? "80" : "12");
 	if (accountId) url.searchParams.set("account", accountId);
 	if (refresh) url.searchParams.set("refresh", "true");
-	const response = await fetch(url, { signal });
-	if (!response.ok) {
-		throw new Error(`Map request failed (${String(response.status)})`);
-	}
-	return (await response.json()) as NetworkMapResponse;
+	return fetchJson(
+		url,
+		{ signal },
+		networkMapResponseSchema,
+		"Map request failed",
+	);
 }
 
 export function formatNumber(value: number) {

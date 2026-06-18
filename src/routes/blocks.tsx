@@ -7,10 +7,15 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { AvatarChip } from "#/components/AvatarChip";
 import { useDebouncedValue } from "#/components/useDebouncedValue";
-import { fetchQueryEnvelope, postAction } from "#/lib/api-client";
+import { blockListResponseSchema } from "#/lib/api-contracts";
+import { fetchJson, fetchQueryEnvelope, postAction } from "#/lib/api-client";
 import { formatCompactNumber } from "#/lib/present";
 import { queryKeys } from "#/lib/query-client";
-import type { BlockListResponse } from "#/lib/types";
+import {
+	type BlocksRouteSearch,
+	type RouteSearchChange,
+	validateBlocksSearch,
+} from "#/lib/route-search";
 import {
 	blockRowBodyClass,
 	blockRowClass,
@@ -29,18 +34,43 @@ import {
 	statusCopyClass,
 	textFieldClass,
 	textFieldShortClass,
-	textFieldWideClass,
 	timestampClass,
 } from "#/lib/ui";
 
 export const Route = createFileRoute("/blocks")({
 	component: BlocksRoute,
+	validateSearch: validateBlocksSearch,
 });
 
 function BlocksRoute() {
+	const search = Route.useSearch();
+	const navigate = Route.useNavigate();
+	return (
+		<BlocksRouteView
+			searchState={search}
+			onSearchChange={(next, options) =>
+				void navigate({ search: next, replace: options?.replace })
+			}
+		/>
+	);
+}
+
+export function BlocksRouteView({
+	searchState: controlledSearch,
+	onSearchChange,
+}: {
+	searchState?: BlocksRouteSearch;
+	onSearchChange?: RouteSearchChange<BlocksRouteSearch>;
+} = {}) {
 	const queryClient = useQueryClient();
-	const [accountId, setAccountId] = useState<string>("acct_primary");
-	const [search, setSearch] = useState("");
+	const [localSearch, setLocalSearch] = useState(() =>
+		validateBlocksSearch({}),
+	);
+	const searchState = controlledSearch ?? localSearch;
+	const updateSearch: RouteSearchChange<BlocksRouteSearch> = (next, options) =>
+		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
+	const accountId = searchState.account;
+	const search = searchState.q;
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [message, setMessage] = useState("");
 	const [actionError, setActionError] = useState("");
@@ -67,15 +97,12 @@ function BlocksRoute() {
 			if (debouncedSearch.trim()) {
 				params.set("search", debouncedSearch.trim());
 			}
-			const response = await fetch(`/api/blocks?${params.toString()}`, {
-				signal,
-			});
-			if (!response.ok) {
-				throw new Error(
-					`Blocklist request failed (${String(response.status)})`,
-				);
-			}
-			return (await response.json()) as BlockListResponse;
+			return fetchJson(
+				`/api/blocks?${params.toString()}`,
+				{ signal },
+				blockListResponseSchema,
+				"Blocklist request failed",
+			);
 		},
 		placeholderData: keepPreviousData,
 		staleTime: 5 * 60_000,
@@ -87,14 +114,10 @@ function BlocksRoute() {
 		enabled: hasAccountId,
 		retry: false,
 		queryFn: async () => {
-			const data = (await postAction({
+			const data = await postAction({
 				kind: "syncBlocks",
 				accountId,
-			})) as {
-				ok?: boolean;
-				syncedCount?: number;
-				transport?: { ok?: boolean; output?: string };
-			};
+			});
 			if (data.ok === false || data.transport?.ok === false) {
 				throw new Error(data.transport?.output ?? "Block sync failed");
 			}
@@ -117,7 +140,13 @@ function BlocksRoute() {
 	useEffect(() => {
 		if (!meta?.accounts.length) return;
 		if (meta.accounts.some((account) => account.id === accountId)) return;
-		setAccountId(meta.accounts[0]?.id ?? "acct_primary");
+		updateSearch(
+			{
+				...searchState,
+				account: meta.accounts[0]?.id ?? "acct_primary",
+			},
+			{ replace: true },
+		);
 	}, [accountId, meta]);
 
 	useEffect(() => {
@@ -152,15 +181,11 @@ function BlocksRoute() {
 		setMessage("");
 
 		try {
-			const data = (await postAction({
+			const data = await postAction({
 				kind,
 				accountId,
 				query: normalized,
-			})) as {
-				ok?: boolean;
-				profile?: { handle?: string };
-				transport?: { ok?: boolean; output?: string };
-			};
+			});
 			if (data.ok === false || data.transport?.ok === false) {
 				setActionError(data.transport?.output ?? "Blocklist action failed");
 				return;
@@ -199,7 +224,9 @@ function BlocksRoute() {
 					<select
 						className={cx(selectFieldClass, textFieldShortClass)}
 						disabled={!isReady}
-						onChange={(event) => setAccountId(event.target.value)}
+						onChange={(event) =>
+							updateSearch({ ...searchState, account: event.target.value })
+						}
 						value={accountId}
 					>
 						{meta?.accounts.map((account) => (
@@ -209,13 +236,14 @@ function BlocksRoute() {
 						))}
 					</select>
 					<input
-						className={cx(
-							textFieldClass,
-							textFieldWideClass,
-							"flex-1 min-w-[200px]",
-						)}
+						className={cx(textFieldClass, "flex-1 min-w-[200px]")}
 						disabled={!hasAccountId}
-						onChange={(event) => setSearch(event.target.value)}
+						onChange={(event) =>
+							updateSearch(
+								{ ...searchState, q: event.target.value },
+								{ replace: true },
+							)
+						}
 						placeholder="Handle, name, bio, or Twitter URL"
 						value={search}
 					/>

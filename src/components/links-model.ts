@@ -1,10 +1,14 @@
 import { queryKeys } from "#/lib/query-client";
+import {
+	linkInsightResponseSchema,
+	type LinkInsightResponse,
+} from "#/lib/api-contracts";
+import { fetchJson } from "#/lib/api-client";
 import type {
 	LinkInsightItem,
 	LinkInsightKind,
 	LinkInsightMention,
 	LinkInsightRange,
-	LinkInsightResponse,
 	LinkInsightSort,
 	LinkInsightSource,
 	ProfileRecord,
@@ -18,7 +22,6 @@ export const LINK_INSIGHTS_COMMENTS_LIMIT = 30;
 export const PROFILE_HYDRATION_LIMIT = 30;
 export const PROFILE_HYDRATION_DELAY_MS = 1200;
 export const LINK_INSIGHTS_CACHE_MAX_AGE_MS = 5 * 60_000;
-export const hydratingLinkProfileHandles = new Set<string>();
 
 export const ranges: Array<{ value: LinkInsightRange; label: string }> = [
 	{ value: "today", label: "Today" },
@@ -72,14 +75,12 @@ export async function fetchLinkInsights(
 	source: LinkInsightSource,
 	signal?: AbortSignal,
 ) {
-	const response = await fetch(linkInsightsUrl(kind, range, sort, source), {
-		signal,
-	});
-	const data = (await response.json()) as LinkInsightResponse;
-	if (!response.ok) {
-		throw new Error("Link insights unavailable");
-	}
-	return data;
+	return fetchJson(
+		linkInsightsUrl(kind, range, sort, source),
+		{ signal },
+		linkInsightResponseSchema,
+		"Link insights unavailable",
+	);
 }
 
 export function mentionHref(

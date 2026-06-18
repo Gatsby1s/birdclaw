@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { profileHydrationResponseSchema } from "#/lib/api-contracts";
 import {
 	jsonResponse,
 	runRouteEffect,
@@ -40,13 +41,15 @@ export const Route = createFileRoute("/api/profile-hydrate")({
 						}
 
 						const results = yield* resolveProfilesForHandlesEffect(handles);
-						return jsonResponse({
-							ok: true,
-							results,
-							hydratedProfiles: results.filter(
-								(result) => result.status === "hit",
-							).length,
-						});
+						return jsonResponse(
+							profileHydrationResponseSchema.parse({
+								ok: true,
+								results,
+								hydratedProfiles: results.filter(
+									(result) => result.status === "hit",
+								).length,
+							}),
+						);
 					}),
 				),
 		},

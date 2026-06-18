@@ -1,10 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient as render } from "#/test/render";
-import { Route } from "./links";
-
-const LinksRoute = Route.options.component as ComponentType;
+import { LinksRouteView as LinksRoute } from "./links";
 
 describe("links route", () => {
 	beforeEach(() => {

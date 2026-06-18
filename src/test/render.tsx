@@ -27,9 +27,11 @@ export function renderWithQueryClient(
 ) {
 	const { queryClient = createTestQueryClient(), ...renderOptions } =
 		options ?? {};
-	const result = testingLibraryRender(
-		<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
-		renderOptions,
-	);
+	const result = testingLibraryRender(ui, {
+		...renderOptions,
+		wrapper: ({ children }) => (
+			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+		),
+	});
 	return { ...result, queryClient };
 }

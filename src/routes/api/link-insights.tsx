@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { linkInsightResponseSchema } from "#/lib/api-contracts";
 import { maybeAutoUpdateBackupEffect } from "#/lib/backup";
 import { getNativeDb } from "#/lib/db";
 import {
@@ -65,18 +66,20 @@ export const Route = createFileRoute("/api/link-insights")({
 						getNativeDb();
 						const url = new URL(request.url);
 						return jsonResponse(
-							getLinkInsights({
-								kind: parseKind(url.searchParams.get("kind")),
-								range: parseRange(url.searchParams.get("range")),
-								sort: parseSort(url.searchParams.get("sort")),
-								source: parseSource(url.searchParams.get("source")),
-								since: url.searchParams.get("since") ?? undefined,
-								until: url.searchParams.get("until") ?? undefined,
-								limit: parseNumber(url.searchParams.get("limit")),
-								commentsLimit: parseNumber(
-									url.searchParams.get("commentsLimit"),
-								),
-							}),
+							linkInsightResponseSchema.parse(
+								getLinkInsights({
+									kind: parseKind(url.searchParams.get("kind")),
+									range: parseRange(url.searchParams.get("range")),
+									sort: parseSort(url.searchParams.get("sort")),
+									source: parseSource(url.searchParams.get("source")),
+									since: url.searchParams.get("since") ?? undefined,
+									until: url.searchParams.get("until") ?? undefined,
+									limit: parseNumber(url.searchParams.get("limit")),
+									commentsLimit: parseNumber(
+										url.searchParams.get("commentsLimit"),
+									),
+								}),
+							),
 						);
 					}),
 				),

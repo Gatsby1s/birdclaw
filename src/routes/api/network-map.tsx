@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { networkMapResponseSchema } from "#/lib/api-contracts";
 import { maybeAutoUpdateBackupEffect } from "#/lib/backup";
 import {
 	jsonResponse,
@@ -47,7 +48,7 @@ export const Route = createFileRoute("/api/network-map")({
 								signal: request.signal,
 							}),
 						);
-						return jsonResponse(response);
+						return jsonResponse(networkMapResponseSchema.parse(response));
 					}),
 				),
 		},

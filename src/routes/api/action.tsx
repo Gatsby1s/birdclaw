@@ -1,6 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
 import {
+	actionRequestSchema,
+	actionResponseSchemaFor,
+} from "#/lib/api-contracts";
+import {
 	addBlockEffect,
 	removeBlockEffect,
 	syncBlocksEffect,
@@ -20,7 +24,6 @@ import {
 	createTweetReplyEffect,
 } from "#/lib/query-actions";
 import type { ActionsTransport } from "#/lib/config";
-import type { InboxKind } from "#/lib/types";
 
 function parseActionsTransport(
 	value: string | undefined,
@@ -54,30 +57,39 @@ export const Route = createFileRoute("/api/action")({
 						const denied = sensitiveRequestErrorResponse(request);
 						if (denied) return denied;
 
-						const body =
-							yield* requestJsonEffect<Record<string, string>>(request);
-						const transport = parseActionsTransport(body.transport);
+						const input = yield* requestJsonEffect<unknown>(request);
+						const parsed = actionRequestSchema.safeParse(input);
+						if (!parsed.success) {
+							return jsonResponse(
+								{ ok: false, message: "Unknown action kind" },
+								{ status: 400 },
+							);
+						}
+						const body = parsed.data;
+						const transport = parseActionsTransport(
+							"transport" in body ? body.transport : undefined,
+						);
 						let result: unknown;
 
 						if (body.kind === "post") {
 							result = yield* createPostEffect(
-								body.accountId || "acct_primary",
-								body.text || "",
+								body.accountId ?? "acct_primary",
+								body.text,
 							);
 						} else if (body.kind === "replyTweet") {
 							result = yield* createTweetReplyEffect(
-								body.accountId || "acct_primary",
-								body.tweetId || "",
-								body.text || "",
+								body.accountId ?? "acct_primary",
+								body.tweetId,
+								body.text,
 							);
 						} else if (body.kind === "replyDm") {
 							result = yield* createDmReplyEffect(
-								body.conversationId || "",
-								body.text || "",
+								body.conversationId,
+								body.text,
 							);
 						} else if (body.kind === "scoreInbox") {
 							result = yield* scoreInboxEffect({
-								kind: ((body.scoreKind as InboxKind) || "mixed") as InboxKind,
+								kind: body.scoreKind,
 								account: body.account,
 								limit: parseBoundedInteger(body.limit, {
 									defaultValue: 8,
@@ -86,39 +98,39 @@ export const Route = createFileRoute("/api/action")({
 							});
 						} else if (body.kind === "blockProfile") {
 							result = yield* addBlockEffect(
-								body.accountId || "acct_primary",
-								body.query || "",
+								body.accountId ?? "acct_primary",
+								body.query,
 								{
 									transport,
 								},
 							);
 						} else if (body.kind === "unblockProfile") {
 							result = yield* removeBlockEffect(
-								body.accountId || "acct_primary",
-								body.query || "",
+								body.accountId ?? "acct_primary",
+								body.query,
 								{
 									transport,
 								},
 							);
 						} else if (body.kind === "muteProfile") {
 							result = yield* addMuteEffect(
-								body.accountId || "acct_primary",
-								body.query || "",
+								body.accountId ?? "acct_primary",
+								body.query,
 								{
 									transport,
 								},
 							);
 						} else if (body.kind === "unmuteProfile") {
 							result = yield* removeMuteEffect(
-								body.accountId || "acct_primary",
-								body.query || "",
+								body.accountId ?? "acct_primary",
+								body.query,
 								{
 									transport,
 								},
 							);
 						} else if (body.kind === "syncBlocks") {
 							result = yield* syncBlocksEffect(
-								body.accountId || "acct_primary",
+								body.accountId ?? "acct_primary",
 							);
 						} else {
 							return jsonResponse(
@@ -127,7 +139,9 @@ export const Route = createFileRoute("/api/action")({
 							);
 						}
 
-						return jsonResponse(result);
+						return jsonResponse(
+							actionResponseSchemaFor(body.kind).parse(result),
+						);
 					}).pipe(
 						Effect.catchAll((error) =>
 							Effect.succeed(

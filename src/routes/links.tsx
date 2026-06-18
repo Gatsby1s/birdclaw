@@ -21,6 +21,11 @@ import { ProfilePreview } from "#/components/ProfilePreview";
 import { SmartTimestamp } from "#/components/SmartTimestamp";
 import { useLinksController } from "#/components/links-controller";
 import { formatCompactNumber } from "#/lib/present";
+import {
+	type LinksRouteSearch,
+	type RouteSearchChange,
+	validateLinksSearch,
+} from "#/lib/route-search";
 import type {
 	LinkInsightItem,
 	LinkInsightMention,
@@ -43,6 +48,7 @@ import {
 
 export const Route = createFileRoute("/links")({
 	component: LinksRoute,
+	validateSearch: validateLinksSearch,
 });
 
 import {
@@ -490,6 +496,29 @@ function LinkInsightRow({
 }
 
 function LinksRoute() {
+	const search = Route.useSearch();
+	const navigate = Route.useNavigate();
+	return (
+		<LinksRouteView
+			searchState={search}
+			onSearchChange={(next, options) =>
+				void navigate({ search: next, replace: options?.replace })
+			}
+		/>
+	);
+}
+
+export function LinksRouteView({
+	searchState: controlledSearch,
+	onSearchChange,
+}: {
+	searchState?: LinksRouteSearch;
+	onSearchChange?: RouteSearchChange<LinksRouteSearch>;
+} = {}) {
+	const [localSearch, setLocalSearch] = useState(() => validateLinksSearch({}));
+	const searchState = controlledSearch ?? localSearch;
+	const updateSearch: RouteSearchChange<LinksRouteSearch> = (next, options) =>
+		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
 	const {
 		kind,
 		setKind,
@@ -506,7 +535,7 @@ function LinksRoute() {
 		loading,
 		error,
 		retry,
-	} = useLinksController();
+	} = useLinksController(searchState, updateSearch);
 
 	return (
 		<>

@@ -2,15 +2,13 @@ import {
 	act,
 	cleanup,
 	fireEvent,
-	render,
 	screen,
 	waitFor,
 } from "@testing-library/react";
-import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Route } from "./today";
-
-const TodayRoute = Route.options.component as ComponentType;
+import { ndjsonResponse } from "#/test/ndjson";
+import { renderWithQueryClient as render } from "#/test/render";
+import { TodayRouteView as TodayRoute } from "./today";
 
 const authorProfile = {
 	id: "profile_alice",
@@ -107,13 +105,6 @@ function digestResult(label: string, markdown: string, includeDms = false) {
 		cached: false,
 		updatedAt: "2026-05-16T12:00:00.000Z",
 	};
-}
-
-function ndjsonResponse(events: unknown[]) {
-	const body = events.map((event) => `${JSON.stringify(event)}\n`).join("");
-	return new Response(body, {
-		headers: { "content-type": "application/x-ndjson" },
-	});
 }
 
 describe("today route", () => {

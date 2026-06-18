@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { linkPreviewResponseSchema } from "#/lib/api-contracts";
 import {
 	jsonResponse,
 	runRouteEffect,
@@ -39,7 +40,9 @@ export const Route = createFileRoute("/api/link-preview")({
 						}
 
 						const preview = yield* getOrFetchLinkPreviewEffect(previewUrl);
-						return jsonResponse({ ok: true, preview });
+						return jsonResponse(
+							linkPreviewResponseSchema.parse({ ok: true, preview }),
+						);
 					}),
 				),
 		},

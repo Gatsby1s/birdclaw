@@ -16,13 +16,23 @@ import {
 	useState,
 } from "react";
 import { MarkdownViewer } from "#/components/MarkdownViewer";
+import { useNdjsonRun } from "#/components/useNdjsonRun";
 import type {
 	SearchDiscussionContext,
 	SearchDiscussionRunResult,
 	SearchDiscussionSource,
 	SearchDiscussionStreamEvent,
 } from "#/lib/search-discussion";
+import {
+	isTerminalStreamEvent,
+	searchDiscussionStreamEventSchema,
+} from "#/lib/client-stream-contracts";
 import type { TweetSearchMode } from "#/lib/tweet-search-live";
+import {
+	type DiscussRouteSearch,
+	type RouteSearchChange,
+	validateDiscussSearch,
+} from "#/lib/route-search";
 import {
 	cx,
 	errorCopyClass,
@@ -42,6 +52,7 @@ import {
 
 export const Route = createFileRoute("/discuss")({
 	component: DiscussRoute,
+	validateSearch: validateDiscussSearch,
 });
 
 const sources: Array<{ value: SearchDiscussionSource; label: string }> = [
@@ -62,6 +73,16 @@ const modes: Array<{ value: TweetSearchMode; label: string }> = [
 ];
 const DISCUSS_SEARCH_LIMIT = 20_000;
 const DISCUSS_MAX_PAGES = 200;
+
+function discussionPrematureEofError() {
+	return new Error(
+		"Discussion connection closed before completion. Retry to continue.",
+	);
+}
+
+function discussionStreamError(cause: unknown) {
+	return cause instanceof Error ? cause.message : "Discussion failed";
+}
 
 function discussionUrl(
 	query: string,
@@ -129,31 +150,6 @@ function DropdownField<T extends string>({
 	);
 }
 
-async function discussionRequestError(response: Response) {
-	const status = `${String(response.status)}${response.statusText ? ` ${response.statusText}` : ""}`;
-	let detail = "";
-	try {
-		const contentType = response.headers.get("content-type") ?? "";
-		if (contentType.includes("application/json")) {
-			const payload = (await response.json()) as {
-				error?: unknown;
-				message?: unknown;
-			};
-			if (typeof payload.message === "string") detail = payload.message;
-			else if (typeof payload.error === "string") detail = payload.error;
-		} else {
-			detail = (await response.text()).trim();
-		}
-	} catch {
-		detail = "";
-	}
-	return new Error(
-		detail
-			? `Discussion request failed (${status}): ${detail}`
-			: `Discussion request failed (${status})`,
-	);
-}
-
 function formatCounts(context: SearchDiscussionContext | null) {
 	if (!context) return "Live keyword search with local memory.";
 	const counts = context.counts;
@@ -183,31 +179,16 @@ function useDiscussionStream(
 	const [markdown, setMarkdown] = useState("");
 	const [context, setContext] = useState<SearchDiscussionContext | null>(null);
 	const [result, setResult] = useState<SearchDiscussionRunResult | null>(null);
-	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
-	const abortRef = useRef<AbortController | null>(null);
-	const requestIdRef = useRef(0);
 
-	const run = useCallback(
-		(refresh = false) => {
+	const onStart = useCallback(() => {
+		setMarkdown("");
+		setContext(null);
+		setResult(null);
+	}, []);
+	const request = useCallback(
+		(signal: AbortSignal, refresh: boolean) => {
 			const trimmed = query.trim();
-			if (!trimmed) return;
-			abortRef.current?.abort();
-			const controller = new AbortController();
-			const requestId = requestIdRef.current + 1;
-			requestIdRef.current = requestId;
-			abortRef.current = controller;
-			const isActiveRequest = () =>
-				abortRef.current === controller &&
-				requestIdRef.current === requestId &&
-				!controller.signal.aborted;
-			setMarkdown("");
-			setContext(null);
-			setResult(null);
-			setError(null);
-			setLoading(true);
-
-			fetch(
+			return fetch(
 				discussionUrl(trimmed, {
 					source,
 					mode,
@@ -215,75 +196,74 @@ function useDiscussionStream(
 					question,
 					refresh,
 				}),
-				{ signal: controller.signal },
-			)
-				.then(async (response) => {
-					if (!response.ok) {
-						throw await discussionRequestError(response);
-					}
-					if (!response.body) {
-						throw new Error("Discussion request failed: empty response body");
-					}
-					const reader = response.body.getReader();
-					const decoder = new TextDecoder();
-					let buffer = "";
-					const pump = (): Promise<void> =>
-						reader.read().then(({ done, value }) => {
-							if (!isActiveRequest()) return;
-							if (done) return;
-							buffer += decoder.decode(value, { stream: true });
-							let newline = buffer.indexOf("\n");
-							while (newline >= 0) {
-								const line = buffer.slice(0, newline).trim();
-								buffer = buffer.slice(newline + 1);
-								if (line) {
-									const event = JSON.parse(line) as SearchDiscussionStreamEvent;
-									if (!isActiveRequest()) return;
-									if (event.type === "start") {
-										setContext(event.context);
-									} else if (event.type === "delta") {
-										setMarkdown((current) => current + event.delta);
-									} else if (event.type === "done") {
-										setResult(event.result);
-										setContext(event.result.context);
-										setMarkdown(event.result.markdown);
-									} else if (event.type === "error") {
-										setError(event.error);
-									}
-								}
-								newline = buffer.indexOf("\n");
-							}
-							return pump();
-						});
-					return pump();
-				})
-				.catch((cause: unknown) => {
-					if (!isActiveRequest()) return;
-					setError(
-						cause instanceof Error ? cause.message : "Discussion failed",
-					);
-				})
-				.finally(() => {
-					if (isActiveRequest()) {
-						setLoading(false);
-					}
-				});
+				{ signal },
+			);
 		},
 		[includeDms, mode, query, question, source],
 	);
-
-	useEffect(() => () => abortRef.current?.abort(), []);
+	const onEvent = useCallback((event: SearchDiscussionStreamEvent) => {
+		if (event.type === "start") setContext(event.context);
+		else if (event.type === "delta") {
+			setMarkdown((current) => current + event.delta);
+		} else if (event.type === "done") {
+			setResult(event.result);
+			setContext(event.result.context);
+			setMarkdown(event.result.markdown);
+		} else if (event.type === "error") throw new Error(event.error);
+	}, []);
+	const {
+		error,
+		loading,
+		run: runStream,
+	} = useNdjsonRun({
+		schema: searchDiscussionStreamEventSchema,
+		request,
+		onStart,
+		onEvent,
+		isTerminal: isTerminalStreamEvent,
+		errorLabel: "Discussion request failed",
+		emptyBodyMessage: "Discussion request failed: empty response body",
+		prematureEofError: discussionPrematureEofError,
+		formatError: discussionStreamError,
+	});
+	const run = useCallback(
+		(refresh = false) => {
+			if (query.trim()) runStream(refresh);
+		},
+		[query, runStream],
+	);
 
 	return { context, error, loading, markdown, result, run };
 }
 
 function DiscussRoute() {
-	const [query, setQuery] = useState("");
+	const search = Route.useSearch();
+	const navigate = Route.useNavigate();
+	return (
+		<DiscussRouteView
+			searchState={search}
+			onSearchChange={(next, options) =>
+				void navigate({ search: next, replace: options?.replace })
+			}
+		/>
+	);
+}
+
+export function DiscussRouteView({
+	searchState: controlledSearch,
+	onSearchChange,
+}: {
+	searchState?: DiscussRouteSearch;
+	onSearchChange?: RouteSearchChange<DiscussRouteSearch>;
+} = {}) {
+	const [localSearch, setLocalSearch] = useState(() =>
+		validateDiscussSearch({}),
+	);
+	const searchState = controlledSearch ?? localSearch;
+	const updateSearch: RouteSearchChange<DiscussRouteSearch> = (next, options) =>
+		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
+	const { q: query, question, source, mode, includeDms } = searchState;
 	const [submittedQuery, setSubmittedQuery] = useState("");
-	const [question, setQuestion] = useState("");
-	const [source, setSource] = useState<SearchDiscussionSource>("search");
-	const [mode, setMode] = useState<TweetSearchMode>("xurl");
-	const [includeDms, setIncludeDms] = useState(false);
 	const pendingSubmitRef = useRef(false);
 	const { context, error, loading, markdown, result, run } =
 		useDiscussionStream(submittedQuery, source, mode, includeDms, question);
@@ -343,14 +323,27 @@ function DiscussRoute() {
 							className={searchFieldInputClass}
 							placeholder="Keywords"
 							value={query}
-							onChange={(event) => setQuery(event.currentTarget.value)}
+							onChange={(event) =>
+								updateSearch(
+									{ ...searchState, q: event.currentTarget.value },
+									{ replace: true },
+								)
+							}
 						/>
 					</label>
 					<input
 						className={textFieldClass}
 						placeholder="Optional question"
 						value={question}
-						onChange={(event) => setQuestion(event.currentTarget.value)}
+						onChange={(event) =>
+							updateSearch(
+								{
+									...searchState,
+									question: event.currentTarget.value,
+								},
+								{ replace: true },
+							)
+						}
 					/>
 					<button
 						type="submit"
@@ -365,19 +358,28 @@ function DiscussRoute() {
 							label="Source"
 							options={sources}
 							value={source}
-							onChange={setSource}
+							onChange={(value) =>
+								updateSearch({ ...searchState, source: value })
+							}
 						/>
 						<DropdownField
 							label="Mode"
 							options={modes}
 							value={mode}
-							onChange={setMode}
+							onChange={(value) =>
+								updateSearch({ ...searchState, mode: value })
+							}
 						/>
 						<label className="inline-flex h-[54px] items-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--bg)] px-3 text-[13px] font-medium text-[var(--ink-soft)]">
 							<input
 								type="checkbox"
 								checked={includeDms}
-								onChange={(event) => setIncludeDms(event.currentTarget.checked)}
+								onChange={(event) =>
+									updateSearch({
+										...searchState,
+										includeDms: event.currentTarget.checked,
+									})
+								}
 							/>
 							DMs
 						</label>

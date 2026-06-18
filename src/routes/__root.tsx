@@ -13,7 +13,6 @@ import {
 	mainColumnClass,
 	mainColumnDmClass,
 	siteShellClass,
-	siteShellDmClass,
 } from "#/lib/ui";
 
 import appCss from "../styles.css?url";
@@ -67,7 +66,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 			<body className={bodyClass}>
 				<BirdclawQueryProvider>
 					<ThemeProvider>
-						<div className={wideMode ? siteShellDmClass : siteShellClass}>
+						<div className={siteShellClass}>
 							<AppNav compact={wideMode} />
 							<main className={wideMode ? mainColumnDmClass : mainColumnClass}>
 								{children}

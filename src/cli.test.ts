@@ -63,12 +63,12 @@ const exportBackupMock = vi.fn();
 const importBackupMock = vi.fn();
 const syncBackupMock = vi.fn();
 const validateBackupMock = vi.fn();
+const runProductionServerMock = vi.fn();
 const packageVersion = (
 	JSON.parse(
 		readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 	) as { version: string }
 ).version;
-const spawnMock = vi.fn();
 const execFileAsyncMock = vi.fn();
 const execFileMock = vi.fn();
 const consoleLogMock = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -249,6 +249,10 @@ vi.mock("#/lib/queries", () => ({
 	createDmReply: (...args: unknown[]) => createDmReplyMock(...args),
 }));
 
+vi.mock("#/lib/production-server", () => ({
+	runProductionServer: (...args: unknown[]) => runProductionServerMock(...args),
+}));
+
 vi.mock("#/lib/bird", () => ({
 	runDirectMessageRequestMutationViaBird: (...args: unknown[]) =>
 		runDirectMessageRequestMutationViaBirdMock(...args),
@@ -270,7 +274,6 @@ vi.mock("#/lib/whois", () => ({
 
 vi.mock("node:child_process", () => ({
 	execFile: execFileMock,
-	spawn: (...args: unknown[]) => spawnMock(...args),
 }));
 
 async function loadCli() {
@@ -343,7 +346,7 @@ describe("cli", () => {
 		importBackupMock.mockReset();
 		syncBackupMock.mockReset();
 		validateBackupMock.mockReset();
-		spawnMock.mockReset();
+		runProductionServerMock.mockReset();
 		execFileAsyncMock.mockReset();
 
 		ensureBirdclawDirsMock.mockReturnValue({
@@ -542,9 +545,7 @@ describe("cli", () => {
 		syncBackupMock.mockResolvedValue({ ok: true, synced: true });
 		validateBackupMock.mockResolvedValue({ ok: true });
 		execFileAsyncMock.mockRejectedValue(new Error("missing"));
-		spawnMock.mockReturnValue({
-			on: (_event: string, handler: (code: number) => void) => handler(0),
-		});
+		runProductionServerMock.mockResolvedValue(undefined);
 	});
 
 	afterEach(() => {
@@ -552,9 +553,6 @@ describe("cli", () => {
 	});
 
 	it("prints init, auth status, archive results, and db stats as json", async () => {
-		const exitMock = vi.spyOn(process, "exit").mockImplementation((() => {
-			return undefined as never;
-		}) as never);
 		const { runCli } = await loadCli();
 
 		await runCli(["node", "birdclaw", "--json", "init"]);
@@ -575,23 +573,11 @@ describe("cli", () => {
 		expect(consoleLogMock).toHaveBeenCalledWith(
 			expect.stringContaining('"stats"'),
 		);
-		expect(spawnMock).toHaveBeenCalledWith(
-			process.execPath,
-			[
-				"node_modules/vite/bin/vite.js",
-				"dev",
-				"--host",
-				"127.0.0.1",
-				"--port",
-				"3000",
-			],
-			expect.objectContaining({
-				cwd: expect.stringContaining("birdclaw"),
-				env: expect.objectContaining({ BIRDCLAW_LOCAL_WEB: "1" }),
-				stdio: "inherit",
-			}),
-		);
-		expect(exitMock).toHaveBeenCalledWith(0);
+		expect(runProductionServerMock).toHaveBeenCalledWith({
+			packageRoot: expect.stringContaining("birdclaw"),
+			host: "127.0.0.1",
+			port: 3000,
+		});
 	});
 
 	it("sets the preferred auth transport", async () => {

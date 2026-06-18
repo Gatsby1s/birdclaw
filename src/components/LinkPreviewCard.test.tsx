@@ -1,11 +1,9 @@
-import {
-	cleanup,
-	fireEvent,
-	render,
-	screen,
-	waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	createTestQueryClient,
+	renderWithQueryClient as render,
+} from "#/test/render";
 import { LinkPreviewCard } from "./LinkPreviewCard";
 
 afterEach(() => {
@@ -162,6 +160,51 @@ describe("LinkPreviewCard", () => {
 		expect(screen.getAllByText("example.com/fail-card").length).toBeGreaterThan(
 			0,
 		);
+	});
+
+	it("retries a failed preview when the card mounts again", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce({
+				ok: false,
+				json: () => Promise.resolve({ ok: false }),
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						ok: true,
+						preview: {
+							url: "https://example.com/retry",
+							title: "Retry succeeded",
+							description: null,
+							imageUrl: null,
+							siteName: "Example",
+						},
+					}),
+			});
+		vi.stubGlobal("fetch", fetchMock);
+		const queryClient = createTestQueryClient();
+		const card = (
+			<LinkPreviewCard
+				entry={{
+					url: "https://t.co/retry-card",
+					expandedUrl: "https://example.com/retry-card",
+					displayUrl: "example.com/retry-card",
+					start: 0,
+					end: 23,
+				}}
+				index={0}
+			/>
+		);
+
+		const first = render(card, { queryClient });
+		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+		first.unmount();
+		render(card, { queryClient });
+
+		expect(await screen.findByText("Retry succeeded")).toBeInTheDocument();
+		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 
 	it("waits for intersection before hydrating previews", async () => {

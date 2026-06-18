@@ -1,7 +1,12 @@
 import { ExternalLink, Image as ImageIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { LinkPreviewMetadata } from "#/lib/link-preview-metadata";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import type { TweetUrlEntity } from "#/lib/types";
+import {
+	linkPreviewResponseSchema,
+	type LinkPreviewResponse,
+} from "#/lib/api-contracts";
+import { fetchJson } from "#/lib/api-client";
 import {
 	cx,
 	linkPreviewCardClass,
@@ -10,6 +15,7 @@ import {
 	linkPreviewTitleClass,
 } from "#/lib/ui";
 import { safeHttpUrl } from "#/lib/url-safety";
+import { queryKeys } from "#/lib/query-client";
 
 type LinkPreviewState = Pick<
 	TweetUrlEntity,
@@ -21,7 +27,7 @@ type LinkPreviewState = Pick<
 	| "siteName"
 >;
 
-const previewCache = new Map<string, Promise<LinkPreviewMetadata | null>>();
+type LinkPreviewMetadata = LinkPreviewResponse["preview"];
 const MAX_CONCURRENT_PREVIEW_FETCHES = 2;
 let activePreviewFetches = 0;
 const queuedPreviewFetches: Array<() => void> = [];
@@ -56,12 +62,12 @@ function runQueuedPreviewFetches() {
 }
 
 function schedulePreviewFetch(task: () => Promise<LinkPreviewMetadata | null>) {
-	return new Promise<LinkPreviewMetadata | null>((resolve) => {
+	return new Promise<LinkPreviewMetadata | null>((resolve, reject) => {
 		queuedPreviewFetches.push(() => {
 			activePreviewFetches += 1;
 			task()
 				.then(resolve)
-				.catch(() => resolve(null))
+				.catch(reject)
 				.finally(() => {
 					activePreviewFetches = Math.max(0, activePreviewFetches - 1);
 					runQueuedPreviewFetches();
@@ -71,28 +77,21 @@ function schedulePreviewFetch(task: () => Promise<LinkPreviewMetadata | null>) {
 	});
 }
 
-function fetchPreview(entry: TweetUrlEntity) {
-	const targetUrl = safeHttpUrl(entry.expandedUrl || entry.url);
-	if (!targetUrl) return Promise.resolve(null);
-	const key = `${entry.url} ${targetUrl}`;
-	const cached = previewCache.get(key);
-	if (cached) return cached;
-
+export function linkPreviewQueryOptions(targetUrl: string) {
 	const params = new URLSearchParams({ url: targetUrl });
-	const promise = schedulePreviewFetch(() =>
-		fetch(`/api/link-preview?${params.toString()}`)
-			.then(async (response) => {
-				if (!response.ok) return null;
-				const data = (await response.json()) as {
-					ok?: boolean;
-					preview?: LinkPreviewMetadata;
-				};
-				return data.ok ? (data.preview ?? null) : null;
-			})
-			.catch(() => null),
-	);
-	previewCache.set(key, promise);
-	return promise;
+	return queryOptions({
+		queryKey: [...queryKeys.linkPreviews, targetUrl] as const,
+		queryFn: () =>
+			schedulePreviewFetch(() =>
+				fetchJson(
+					`/api/link-preview?${params.toString()}`,
+					undefined,
+					linkPreviewResponseSchema,
+					"Link preview unavailable",
+				).then((data) => data.preview),
+			),
+		staleTime: 30 * 60_000,
+	});
 }
 
 function displayHost(url: string, fallback: string) {
@@ -172,23 +171,37 @@ export function LinkPreviewCard({
 			previewUrl,
 		],
 	);
-	const [preview, setPreview] = useState(initialPreview);
 	const [imageFailed, setImageFailed] = useState(false);
-	const [hydratedKey, setHydratedKey] = useState("");
 	const [canHydrate, setCanHydrate] = useState(false);
+	const [hydrationReady, setHydrationReady] = useState(false);
 	const cardRef = useRef<HTMLAnchorElement | null>(null);
-	const cacheKey = `${entry.url} ${targetUrl}`;
+	const shouldHydrate = Boolean(targetUrl && needsHydration(initialPreview));
+	const previewQuery = useQuery({
+		...linkPreviewQueryOptions(targetUrl ?? ""),
+		enabled: shouldHydrate && canHydrate && hydrationReady,
+	});
+	const preview = useMemo<LinkPreviewState>(() => {
+		const metadata = previewQuery.data;
+		if (!metadata) return initialPreview;
+		return {
+			expandedUrl: safeHttpUrl(metadata.url) ?? initialPreview.expandedUrl,
+			displayUrl: initialPreview.displayUrl,
+			title: metadata.title ?? initialPreview.title,
+			description: metadata.description ?? initialPreview.description,
+			imageUrl: metadata.imageUrl ?? initialPreview.imageUrl,
+			siteName: metadata.siteName ?? initialPreview.siteName,
+		};
+	}, [initialPreview, previewQuery.data]);
 
 	useEffect(() => {
-		setPreview(initialPreview);
 		setImageFailed(false);
-		setHydratedKey("");
 		setCanHydrate(false);
+		setHydrationReady(false);
 	}, [initialPreview]);
 
 	useEffect(() => {
 		if (!targetUrl) return;
-		if (!needsHydration(preview)) return;
+		if (!shouldHydrate) return;
 		const node = cardRef.current;
 		if (!node || typeof IntersectionObserver === "undefined") {
 			setCanHydrate(true);
@@ -205,32 +218,15 @@ export function LinkPreviewCard({
 		);
 		observer.observe(node);
 		return () => observer.disconnect();
-	}, [preview, targetUrl]);
+	}, [shouldHydrate, targetUrl]);
 
 	useEffect(() => {
-		if (!targetUrl || !canHydrate) return;
-		if (!needsHydration(preview)) return;
-		if (hydratedKey === cacheKey) return;
-		let cancelled = false;
+		if (!targetUrl || !canHydrate || !shouldHydrate) return;
 		const timer = window.setTimeout(() => {
-			setHydratedKey(cacheKey);
-			void fetchPreview(entry).then((metadata) => {
-				if (cancelled || !metadata) return;
-				setPreview((current) => ({
-					expandedUrl: safeHttpUrl(metadata.url) ?? current.expandedUrl,
-					displayUrl: current.displayUrl,
-					title: metadata.title ?? current.title,
-					description: metadata.description ?? current.description,
-					imageUrl: metadata.imageUrl ?? current.imageUrl,
-					siteName: metadata.siteName ?? current.siteName,
-				}));
-			});
+			setHydrationReady(true);
 		}, 100);
-		return () => {
-			cancelled = true;
-			window.clearTimeout(timer);
-		};
-	}, [cacheKey, canHydrate, entry, hydratedKey, preview, targetUrl]);
+		return () => window.clearTimeout(timer);
+	}, [canHydrate, shouldHydrate, targetUrl]);
 
 	if (!targetUrl) return null;
 

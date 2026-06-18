@@ -11,16 +11,17 @@ import { DmWorkspace } from "#/components/DmWorkspace";
 import { FeedEmpty, FeedError, FeedLoading } from "#/components/FeedState";
 import { SyncNowButton } from "#/components/SyncNowButton";
 import { useSelectedAccountId } from "#/components/account-selection";
-import {
-	fetchQueryEnvelope,
-	fetchQueryResponse,
-	postAction,
-} from "#/lib/api-client";
+import { fetchJson, fetchQueryEnvelope, postAction } from "#/lib/api-client";
+import { dmQueryResponseSchema, type QueryResponse } from "#/lib/api-contracts";
 import { queryKeys } from "#/lib/query-client";
+import {
+	type DmsRouteSearch,
+	type RouteSearchChange,
+	validateDmsSearch,
+} from "#/lib/route-search";
 import type {
 	DmConversationItem,
 	DmMessageItem,
-	QueryResponse,
 	ReplyFilter,
 } from "#/lib/types";
 import { useDebouncedValue } from "#/components/useDebouncedValue";
@@ -45,6 +46,7 @@ import {
 
 export const Route = createFileRoute("/dms")({
 	component: DmsRoute,
+	validateSearch: validateDmsSearch,
 });
 
 const TABS: Array<{ value: ReplyFilter; label: string }> = [
@@ -70,16 +72,37 @@ const filterNumberFieldClass =
 	"flex h-[46px] shrink-0 items-center gap-2 rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-0 text-[14px] text-[var(--ink)] outline-none transition-colors duration-150 focus-within:border-[var(--accent)] focus-within:shadow-[0_0_0_1px_var(--accent)]";
 
 function DmsRoute() {
+	const search = Route.useSearch();
+	const navigate = Route.useNavigate();
+	return (
+		<DmsRouteView
+			searchState={search}
+			onSearchChange={(next, options) =>
+				void navigate({ search: next, replace: options?.replace })
+			}
+		/>
+	);
+}
+
+export function DmsRouteView({
+	searchState: controlledSearch,
+	onSearchChange,
+}: {
+	searchState?: DmsRouteSearch;
+	onSearchChange?: RouteSearchChange<DmsRouteSearch>;
+} = {}) {
 	const queryClient = useQueryClient();
-	const [selectedConversationId, setSelectedConversationId] = useState<
-		string | undefined
-	>();
-	const [inboxFilter, setInboxFilter] = useState<DmInboxFilter>("all");
-	const [replyFilter, setReplyFilter] = useState<ReplyFilter>("unreplied");
-	const [minFollowers, setMinFollowers] = useState("");
-	const [minInfluenceScore, setMinInfluenceScore] = useState("");
-	const [sort, setSort] = useState<"recent" | "followers">("recent");
-	const [search, setSearch] = useState("");
+	const [localSearch, setLocalSearch] = useState(() => validateDmsSearch({}));
+	const searchState = controlledSearch ?? localSearch;
+	const updateSearch: RouteSearchChange<DmsRouteSearch> = (next, options) =>
+		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
+	const inboxFilter = searchState.inbox;
+	const replyFilter = searchState.reply;
+	const minFollowers = searchState.minFollowers;
+	const minInfluenceScore = searchState.minInfluence;
+	const sort = searchState.sort;
+	const search = searchState.q;
+	const selectedConversationId = searchState.conversation || undefined;
 	const [replyDraft, setReplyDraft] = useState("");
 	const statusQuery = useQuery({
 		queryKey: queryKeys.status,
@@ -124,25 +147,36 @@ function DmsRoute() {
 			if (debouncedSearch.trim()) {
 				url.searchParams.set("search", debouncedSearch.trim());
 			}
-			return fetchQueryResponse(url, { signal });
+			return fetchJson(
+				url,
+				{ signal },
+				dmQueryResponseSchema,
+				"Direct messages unavailable",
+			);
 		},
 		placeholderData: keepPreviousData,
 		staleTime: 5 * 60_000,
 	});
-	const items = (dmsQuery.data?.items ?? []) as DmConversationItem[];
-	const messages = dmsQuery.data?.selectedConversation?.messages ?? [];
-	const loadedConversationId =
-		dmsQuery.data?.selectedConversation?.conversation.id;
+	const queryData = dmsQuery.data;
+	const dmsData = queryData?.resource === "dms" ? queryData : null;
+	const items: DmConversationItem[] = dmsData?.items ?? [];
+	const messages = dmsData?.selectedConversation?.messages ?? [];
+	const loadedConversationId = dmsData?.selectedConversation?.conversation.id;
 
 	useEffect(() => {
 		if (!dmsQuery.data) return;
 		const nextSelected = loadedConversationId ?? items[0]?.id;
-		setSelectedConversationId((current) => {
-			if (!current) return nextSelected;
-			return items.some((conversation) => conversation.id === current)
-				? current
+		const resolved =
+			selectedConversationId &&
+			items.some((conversation) => conversation.id === selectedConversationId)
+				? selectedConversationId
 				: nextSelected;
-		});
+		if (resolved && resolved !== selectedConversationId) {
+			updateSearch(
+				{ ...searchState, conversation: resolved },
+				{ replace: true },
+			);
+		}
 	}, [dmsQuery.data, items, loadedConversationId]);
 
 	const selectedConversation =
@@ -169,7 +203,9 @@ function DmsRoute() {
 		onMutate: async ({ conversationId, text }) => {
 			await queryClient.cancelQueries({ queryKey: dmsQueryKey });
 			const previous = queryClient.getQueryData<QueryResponse>(dmsQueryKey);
-			if (!previous || !selectedConversation) return { previous };
+			if (!previous || previous.resource !== "dms" || !selectedConversation) {
+				return { previous };
+			}
 			const now = new Date().toISOString();
 			const accountRecord = meta?.accounts.find(
 				(account) => account.id === selectedConversation.accountId,
@@ -195,10 +231,9 @@ function DmsRoute() {
 					createdAt: now,
 				},
 			};
-			const previousItems = previous.items as DmConversationItem[];
 			queryClient.setQueryData<QueryResponse>(dmsQueryKey, {
 				...previous,
-				items: previousItems.map((item) =>
+				items: previous.items.map((item) =>
 					item.id === conversationId
 						? {
 								...item,
@@ -239,7 +274,7 @@ function DmsRoute() {
 		setReplyDraft("");
 		try {
 			await replyMutation.mutateAsync({ conversationId, text });
-			setSelectedConversationId(conversationId);
+			updateSearch({ ...searchState, conversation: conversationId });
 		} catch {
 			setReplyDraft(text);
 		}
@@ -293,7 +328,9 @@ function DmsRoute() {
 									segmentClass,
 									inboxFilter === filter.value && segmentActiveClass,
 								)}
-								onClick={() => setInboxFilter(filter.value)}
+								onClick={() =>
+									updateSearch({ ...searchState, inbox: filter.value })
+								}
 								type="button"
 							>
 								{filter.label}
@@ -304,7 +341,12 @@ function DmsRoute() {
 						<Search className={searchFieldIconClass} strokeWidth={2} />
 						<input
 							className={searchFieldInputClass}
-							onChange={(event) => setSearch(event.target.value)}
+							onChange={(event) =>
+								updateSearch(
+									{ ...searchState, q: event.target.value },
+									{ replace: true },
+								)
+							}
 							placeholder="Search DMs"
 							value={search}
 						/>
@@ -316,7 +358,15 @@ function DmsRoute() {
 						<input
 							className="min-w-0 flex-1 border-0 bg-transparent text-right text-[14px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]"
 							inputMode="numeric"
-							onChange={(event) => setMinFollowers(event.target.value)}
+							onChange={(event) =>
+								updateSearch(
+									{
+										...searchState,
+										minFollowers: event.target.value,
+									},
+									{ replace: true },
+								)
+							}
 							placeholder="Any"
 							value={minFollowers}
 						/>
@@ -328,7 +378,15 @@ function DmsRoute() {
 						<input
 							className="min-w-0 flex-1 border-0 bg-transparent text-right text-[14px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)]"
 							inputMode="numeric"
-							onChange={(event) => setMinInfluenceScore(event.target.value)}
+							onChange={(event) =>
+								updateSearch(
+									{
+										...searchState,
+										minInfluence: event.target.value,
+									},
+									{ replace: true },
+								)
+							}
 							placeholder="Any"
 							value={minInfluenceScore}
 						/>
@@ -341,7 +399,9 @@ function DmsRoute() {
 									segmentClass,
 									option.value === sort && segmentActiveClass,
 								)}
-								onClick={() => setSort(option.value)}
+								onClick={() =>
+									updateSearch({ ...searchState, sort: option.value })
+								}
 								type="button"
 							>
 								{option.label}
@@ -358,7 +418,9 @@ function DmsRoute() {
 								type="button"
 								aria-pressed={active}
 								className={cx(tabButtonClass, active && tabButtonActiveClass)}
-								onClick={() => setReplyFilter(tab.value)}
+								onClick={() =>
+									updateSearch({ ...searchState, reply: tab.value })
+								}
 							>
 								<span className="relative inline-flex flex-col items-center justify-center py-1">
 									{tab.value}
@@ -404,7 +466,9 @@ function DmsRoute() {
 					conversations={items}
 					onReplyDraftChange={setReplyDraft}
 					onReplySend={replyToConversation}
-					onSelectConversation={setSelectedConversationId}
+					onSelectConversation={(conversation) =>
+						updateSearch({ ...searchState, conversation })
+					}
 					replyDraft={replyDraft}
 					selectedConversation={selectedConversation}
 					selectedMessages={messages}

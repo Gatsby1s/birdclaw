@@ -5,11 +5,9 @@ import {
 	screen,
 	waitFor,
 } from "@testing-library/react";
-import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Route } from "./discuss";
-
-const DiscussRoute = Route.options.component as ComponentType;
+import { ndjsonResponse } from "#/test/ndjson";
+import { DiscussRouteView as DiscussRoute } from "./discuss";
 
 function discussionResult(markdown: string) {
 	return {
@@ -79,13 +77,6 @@ function discussionResult(markdown: string) {
 		cached: false,
 		updatedAt: "2026-05-23T08:20:00.000Z",
 	};
-}
-
-function ndjsonResponse(events: unknown[]) {
-	const body = events.map((event) => `${JSON.stringify(event)}\n`).join("");
-	return new Response(body, {
-		headers: { "content-type": "application/x-ndjson" },
-	});
 }
 
 describe("discuss route", () => {
@@ -266,6 +257,25 @@ describe("discuss route", () => {
 		expect(
 			await screen.findByText((content) =>
 				/JSON|Unexpected|Expected|not valid/.test(content),
+			),
+		).toBeInTheDocument();
+	});
+
+	it("reports a stream that closes before a terminal event", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => ndjsonResponse([{ type: "delta", delta: "partial" }])),
+		);
+
+		render(<DiscussRoute />);
+		fireEvent.change(screen.getByPlaceholderText("Keywords"), {
+			target: { value: "OpenAI" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+
+		expect(
+			await screen.findByText(
+				"Discussion connection closed before completion. Retry to continue.",
 			),
 		).toBeInTheDocument();
 	});

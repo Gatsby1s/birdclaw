@@ -1,29 +1,13 @@
-import {
-	cleanup,
-	fireEvent,
-	render,
-	screen,
-	waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ndjsonBody } from "#/test/ndjson";
+import { renderWithQueryClient as render } from "#/test/render";
 import { ProfileRouteView } from "./profiles.$handle";
 
 afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
 });
-
-function streamEvents(events: unknown[]) {
-	const encoder = new TextEncoder();
-	return new ReadableStream({
-		start(controller) {
-			for (const event of events) {
-				controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-			}
-			controller.close();
-		},
-	});
-}
 
 function profileContext() {
 	return {
@@ -133,9 +117,12 @@ describe("profile route", () => {
 					JSON.stringify({
 						ok: true,
 						results: hydratedProfiles.map((profile) => ({
+							handle: profile.handle,
 							status: "hit",
+							source: "bird",
 							profile,
 						})),
+						hydratedProfiles: hydratedProfiles.length,
 					}),
 					{
 						headers: { "content-type": "application/json" },
@@ -143,7 +130,7 @@ describe("profile route", () => {
 				);
 			}
 			return new Response(
-				streamEvents([
+				ndjsonBody([
 					{ type: "status", label: "Fetching profile tweets" },
 					{ type: "start", context, cached: true },
 					{

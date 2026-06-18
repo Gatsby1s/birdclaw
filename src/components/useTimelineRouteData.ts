@@ -114,7 +114,8 @@ export function useTimelineRouteData({
 				{ signal },
 			),
 		getNextPageParam: (lastPage) => {
-			const items = lastPage.items as TimelineItem[];
+			if (lastPage.resource === "dms") return undefined;
+			const items = lastPage.items;
 			const lastItem = items.at(-1);
 			return items.length >= PAGE_SIZE && lastItem
 				? { until: lastItem.createdAt, untilId: lastItem.id }
@@ -126,7 +127,8 @@ export function useTimelineRouteData({
 		const seen = new Set<string>();
 		const merged: TimelineItem[] = [];
 		for (const page of timelineQuery.data?.pages ?? []) {
-			for (const item of page.items as TimelineItem[]) {
+			if (page.resource === "dms") continue;
+			for (const item of page.items) {
 				if (seen.has(item.id)) continue;
 				seen.add(item.id);
 				merged.push(item);

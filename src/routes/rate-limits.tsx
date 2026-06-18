@@ -9,11 +9,12 @@ import {
 	ShieldCheck,
 } from "lucide-react";
 import { useMemo } from "react";
+import { xurlRateLimitSnapshotSchema } from "#/lib/api-contracts";
+import { fetchJson } from "#/lib/api-client";
 import { queryKeys } from "#/lib/query-client";
 import type {
 	XurlRateLimitEndpointSnapshot,
 	XurlRateLimitEvent,
-	XurlRateLimitSnapshot,
 } from "#/lib/xurl-rate-limits";
 import {
 	cx,
@@ -32,11 +33,12 @@ export const Route = createFileRoute("/rate-limits")({
 });
 
 async function fetchRateLimits() {
-	const response = await fetch("/api/xurl-rate-limits");
-	if (!response.ok) {
-		throw new Error(`Rate limits request failed (${String(response.status)})`);
-	}
-	return (await response.json()) as XurlRateLimitSnapshot;
+	return fetchJson(
+		"/api/xurl-rate-limits",
+		undefined,
+		xurlRateLimitSnapshotSchema,
+		"Rate limits request failed",
+	);
 }
 
 function formatNumber(value: number) {

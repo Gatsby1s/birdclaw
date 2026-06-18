@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { xurlRateLimitSnapshotSchema } from "#/lib/api-contracts";
 import {
 	jsonResponse,
 	runRouteEffect,
@@ -16,7 +17,9 @@ export const Route = createFileRoute("/api/xurl-rate-limits")({
 						const denied = sensitiveRequestErrorResponse(request);
 						if (denied) return denied;
 
-						return jsonResponse(getXurlRateLimitSnapshot());
+						return jsonResponse(
+							xurlRateLimitSnapshotSchema.parse(getXurlRateLimitSnapshot()),
+						);
 					}),
 				),
 		},

@@ -40,7 +40,17 @@ describe("api profile analysis route", () => {
 						model: "gpt-5.5",
 						cached: false,
 						serviceTier: "priority",
-						context: { handle: "alice", counts: { tweets: 1 } },
+						context: {
+							handle: "alice",
+							profile: { handle: "alice" },
+							tweets: [],
+							conversations: [],
+							counts: {
+								tweets: 1,
+								conversationTweets: 0,
+								conversationsScanned: 0,
+							},
+						},
 						analysis: { title: "Alice" },
 					},
 				});

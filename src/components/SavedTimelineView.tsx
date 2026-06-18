@@ -1,25 +1,13 @@
-import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
-import {
-	FeedEmpty,
-	FeedError,
-	FeedLoading,
-	TweetSkeletonRows,
-} from "#/components/FeedState";
 import { SyncNowButton } from "#/components/SyncNowButton";
 import { TimelineCard } from "#/components/TimelineCard";
-import { useTimelineRouteData } from "#/components/useTimelineRouteData";
-import { ConversationSurfaceScope } from "#/lib/conversation-surface";
 import {
-	feedClass,
-	pageHeaderClass,
-	pageHeaderRowClass,
-	pageSubtitleClass,
-	pageTitleClass,
-	searchFieldIconClass,
-	searchFieldInputClass,
-	searchFieldShellClass,
-} from "#/lib/ui";
+	TimelineFeedHeader,
+	TimelineFeedShell,
+	TimelineHeaderSubtitle,
+	TimelineSearchField,
+} from "#/components/TimelineFeedShell";
+import { useTimelineRouteData } from "#/components/useTimelineRouteData";
 
 interface SavedTimelineViewProps {
 	filter: "liked" | "bookmarked";
@@ -68,88 +56,57 @@ export function SavedTimelineView({
 		}
 		return `${String(items.length)} visible · ${meta.transport.statusText}`;
 	}, [items.length, loadingLabel, meta]);
-
 	const syncKind = filter === "liked" ? "likes" : "bookmarks";
 
 	return (
-		<>
-			<header className={pageHeaderClass}>
-				<div className={pageHeaderRowClass}>
-					<div className="flex min-w-0 flex-col">
-						<h1 className={pageTitleClass}>{TITLES[filter]}</h1>
-						<p className={pageSubtitleClass}>{title}</p>
-						<p className={pageSubtitleClass}>{subtitle}</p>
-					</div>
-					<SyncNowButton
-						accounts={meta?.accounts}
-						kind={syncKind}
-						label={filter === "liked" ? "Sync likes" : "Sync bookmarks"}
-						onSynced={refreshLocalView}
-					/>
-				</div>
-				<div className="px-4 pb-3">
-					<label className={searchFieldShellClass}>
-						<Search className={searchFieldIconClass} strokeWidth={2} />
-						<input
-							className={searchFieldInputClass}
-							onChange={(event) => setSearch(event.target.value)}
+		<TimelineFeedShell
+			header={
+				<TimelineFeedHeader
+					title={TITLES[filter]}
+					subtitles={
+						<>
+							<TimelineHeaderSubtitle>{title}</TimelineHeaderSubtitle>
+							<TimelineHeaderSubtitle>{subtitle}</TimelineHeaderSubtitle>
+						</>
+					}
+					action={
+						<SyncNowButton
+							accounts={meta?.accounts}
+							kind={syncKind}
+							label={filter === "liked" ? "Sync likes" : "Sync bookmarks"}
+							onSynced={refreshLocalView}
+						/>
+					}
+					controls={
+						<TimelineSearchField
+							onChange={setSearch}
 							placeholder={searchPlaceholder}
 							value={search}
 						/>
-					</label>
-				</div>
-			</header>
-			<ConversationSurfaceScope>
-				<section className={feedClass}>
-					{loading ? (
-						<FeedLoading
-							detail={`Reading local ${TITLES[filter].toLowerCase()}`}
-							label={loadingLabel}
-						>
-							<TweetSkeletonRows />
-						</FeedLoading>
-					) : error ? (
-						<FeedError
-							action={
-								<button
-									className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-[14px] font-bold text-white"
-									onClick={retry}
-									type="button"
-								>
-									Retry
-								</button>
-							}
-							message={error}
-							title={`Could not load ${TITLES[filter].toLowerCase()}`}
-						/>
-					) : items.length === 0 ? (
-						<FeedEmpty
-							detail="Sync this collection or broaden the search."
-							label="Nothing saved here yet"
-						/>
-					) : null}
-					{items.map((item) => (
-						<TimelineCard
-							key={item.id}
-							item={item}
-							onReply={replyToTweet}
-							showReplyControls={false}
-						/>
-					))}
-					{!loading && !error && hasMore ? (
-						<div className="flex justify-center py-4">
-							<button
-								className="rounded-full bg-[var(--accent)] px-5 py-1.5 text-[14px] font-bold text-white disabled:opacity-60"
-								disabled={loadingMore}
-								onClick={loadMore}
-								type="button"
-							>
-								{loadingMore ? "Loading…" : "Load more"}
-							</button>
-						</div>
-					) : null}
-				</section>
-			</ConversationSurfaceScope>
-		</>
+					}
+				/>
+			}
+			loading={loading}
+			loadingLabel={loadingLabel}
+			loadingDetail={`Reading local ${TITLES[filter].toLowerCase()}`}
+			error={error}
+			errorTitle={`Could not load ${TITLES[filter].toLowerCase()}`}
+			onRetry={retry}
+			empty={items.length === 0}
+			emptyLabel="Nothing saved here yet"
+			emptyDetail="Sync this collection or broaden the search."
+			hasMore={hasMore}
+			loadingMore={loadingMore}
+			onLoadMore={loadMore}
+		>
+			{items.map((item) => (
+				<TimelineCard
+					key={item.id}
+					item={item}
+					onReply={replyToTweet}
+					showReplyControls={false}
+				/>
+			))}
+		</TimelineFeedShell>
 	);
 }

@@ -1,13 +1,22 @@
-import {
-	cleanup,
-	fireEvent,
-	render,
-	screen,
-	within,
-} from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resetConversationSurface } from "#/lib/conversation-surface";
+import type { ReactNode } from "react";
+import { ConversationSurfaceScope } from "#/lib/conversation-surface";
+import { renderWithQueryClient } from "#/test/render";
 import { TimelineCard } from "./TimelineCard";
+
+function render(ui: ReactNode) {
+	const result = renderWithQueryClient(
+		<ConversationSurfaceScope>{ui}</ConversationSurfaceScope>,
+	);
+	return {
+		...result,
+		rerender: (nextUi: ReactNode) =>
+			result.rerender(
+				<ConversationSurfaceScope>{nextUi}</ConversationSurfaceScope>,
+			),
+	};
+}
 
 const item = {
 	id: "tweet_1",
@@ -106,7 +115,6 @@ const item = {
 describe("TimelineCard", () => {
 	afterEach(() => {
 		cleanup();
-		resetConversationSurface();
 		vi.unstubAllGlobals();
 	});
 

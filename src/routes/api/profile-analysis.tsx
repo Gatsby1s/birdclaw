@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { profileAnalysisStreamEventSchema } from "#/lib/client-stream-contracts";
 import { maybeAutoUpdateBackupEffect } from "#/lib/backup";
 import {
 	parseBoundedInteger,
@@ -68,6 +69,7 @@ export const Route = createFileRoute("/api/profile-analysis")({
 						const options = parseOptions(url);
 						return createEffectNdjsonResponse<ProfileAnalysisStreamEvent>({
 							request,
+							schema: profileAnalysisStreamEventSchema,
 							initialEvents: [
 								{
 									type: "status",

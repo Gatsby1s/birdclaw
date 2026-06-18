@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { inboxResponseSchema } from "#/lib/api-contracts";
 import { maybeAutoUpdateBackupEffect } from "#/lib/backup";
 import {
 	jsonResponse,
@@ -28,13 +29,15 @@ export const Route = createFileRoute("/api/inbox")({
 						const url = new URL(request.url);
 						const kind = (url.searchParams.get("kind") ?? "mixed") as InboxKind;
 						return jsonResponse(
-							listInboxItems({
-								kind: kind === "mentions" || kind === "dms" ? kind : "mixed",
-								account: url.searchParams.get("account") ?? undefined,
-								minScore: parseNumber(url.searchParams.get("minScore")),
-								hideLowSignal: url.searchParams.get("hideLowSignal") === "1",
-								limit: parseNumber(url.searchParams.get("limit")) ?? 20,
-							}),
+							inboxResponseSchema.parse(
+								listInboxItems({
+									kind: kind === "mentions" || kind === "dms" ? kind : "mixed",
+									account: url.searchParams.get("account") ?? undefined,
+									minScore: parseNumber(url.searchParams.get("minScore")),
+									hideLowSignal: url.searchParams.get("hideLowSignal") === "1",
+									limit: parseNumber(url.searchParams.get("limit")) ?? 20,
+								}),
+							),
 						);
 					}),
 				),

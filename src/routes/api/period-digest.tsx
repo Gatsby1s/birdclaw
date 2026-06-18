@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { periodDigestStreamEventSchema } from "#/lib/client-stream-contracts";
 import { maybeAutoUpdateBackupEffect } from "#/lib/backup";
 import {
 	jsonResponse,
@@ -74,6 +75,7 @@ export const Route = createFileRoute("/api/period-digest")({
 						}
 						return createEffectNdjsonResponse<PeriodDigestStreamEvent>({
 							request,
+							schema: periodDigestStreamEventSchema,
 							initialEvents: [
 								{
 									type: "status",

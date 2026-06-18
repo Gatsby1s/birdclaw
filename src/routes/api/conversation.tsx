@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { tweetConversationResponseSchema } from "#/lib/api-contracts";
 import { maybeAutoUpdateBackupEffect } from "#/lib/backup";
 import {
 	runRouteEffect,
@@ -37,7 +38,12 @@ export const Route = createFileRoute("/api/conversation")({
 							return json({ ok: false, error: "Tweet not found" }, 404);
 						}
 
-						return json({ ok: true, ...conversation });
+						return json(
+							tweetConversationResponseSchema.parse({
+								ok: true,
+								...conversation,
+							}),
+						);
 					}),
 				),
 		},

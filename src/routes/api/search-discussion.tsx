@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { searchDiscussionStreamEventSchema } from "#/lib/client-stream-contracts";
 import { maybeAutoUpdateBackupEffect } from "#/lib/backup";
 import {
 	parseBoundedInteger,
@@ -85,6 +86,7 @@ export const Route = createFileRoute("/api/search-discussion")({
 						const options = parseOptions(url);
 						return createEffectNdjsonResponse<SearchDiscussionStreamEvent>({
 							request,
+							schema: searchDiscussionStreamEventSchema,
 							run: ({ signal, emit }) =>
 								maybeAutoUpdateBackupEffect().pipe(
 									Effect.flatMap(() =>

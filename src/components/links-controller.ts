@@ -1,7 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { formatCompactNumber } from "#/lib/present";
+import { hydrateProfileHandles } from "#/lib/profile-hydration-client";
 import { queryKeys } from "#/lib/query-client";
+import type { LinksRouteSearch, RouteSearchChange } from "#/lib/route-search";
 import type {
 	LinkInsightKind,
 	LinkInsightRange,
@@ -11,19 +13,18 @@ import type {
 import {
 	LINK_INSIGHTS_CACHE_MAX_AGE_MS,
 	PROFILE_HYDRATION_DELAY_MS,
+	PROFILE_HYDRATION_LIMIT,
 	collectProfilesForHydration,
 	fetchLinkInsights,
-	hydratingLinkProfileHandles,
 	linkInsightQueryKey,
 } from "./links-model";
 
-export function useLinksController() {
+export function useLinksController(
+	filters: LinksRouteSearch,
+	onFiltersChange: RouteSearchChange<LinksRouteSearch>,
+) {
 	const queryClient = useQueryClient();
-	const [kind, setKind] = useState<LinkInsightKind>("links");
-	const [range, setRange] = useState<LinkInsightRange>("week");
-	const [source, setSource] = useState<LinkInsightSource>("all");
-	const [sort, setSort] = useState<LinkInsightSort>("rank");
-	const [search, setSearch] = useState("");
+	const { kind, range, source, sort, q: search } = filters;
 	const insightsQuery = useQuery({
 		queryKey: linkInsightQueryKey(kind, range, sort, source),
 		queryFn: ({ signal }) =>
@@ -47,53 +48,27 @@ export function useLinksController() {
 	}, [data, kind, queryClient, range, sort, source]);
 
 	useEffect(() => {
-		const handles = collectProfilesForHydration(data).filter((handle) => {
-			const normalized = handle.toLowerCase();
-			return (
-				queryClient.getQueryData([
-					...queryKeys.profileHydration,
-					normalized,
-				]) !== true && !hydratingLinkProfileHandles.has(normalized)
-			);
-		});
+		const handles = collectProfilesForHydration(data);
 		if (handles.length === 0) return;
 
-		const controller = new AbortController();
-		const url = new URL("/api/profile-hydrate", window.location.origin);
-		url.searchParams.set("handles", handles.join(","));
-		for (const handle of handles) {
-			hydratingLinkProfileHandles.add(handle.toLowerCase());
-		}
-		const finishHydration = (succeeded: boolean) => {
-			for (const handle of handles) {
-				const normalized = handle.toLowerCase();
-				hydratingLinkProfileHandles.delete(normalized);
-				if (succeeded) {
-					queryClient.setQueryData(
-						[...queryKeys.profileHydration, normalized],
-						true,
-					);
-				}
-			}
-		};
-
+		let active = true;
 		let idleId: number | null = null;
 		const runHydration = () => {
-			fetch(url, { signal: controller.signal })
-				.then((response) => response.json())
-				.then((response: { hydratedProfiles?: number }) => {
-					finishHydration(true);
-					if ((response.hydratedProfiles ?? 0) > 0) {
+			hydrateProfileHandles(queryClient, handles, {
+				limit: PROFILE_HYDRATION_LIMIT,
+			})
+				.then((response) => {
+					if (!active) return;
+					if (
+						response.fetchedResults.some((result) => result.status === "hit")
+					) {
 						void queryClient.invalidateQueries({
 							queryKey: queryKeys.linkInsights,
 						});
 					}
 				})
 				.catch((error: unknown) => {
-					finishHydration(false);
-					if (error instanceof DOMException && error.name === "AbortError") {
-						return;
-					}
+					if (!active) return;
 					console.warn("Profile hydration failed", error);
 				});
 		};
@@ -106,8 +81,7 @@ export function useLinksController() {
 		}, PROFILE_HYDRATION_DELAY_MS);
 
 		return () => {
-			controller.abort();
-			finishHydration(false);
+			active = false;
 			window.clearTimeout(timer);
 			if (idleId !== null && "cancelIdleCallback" in window) {
 				window.cancelIdleCallback(idleId);
@@ -140,15 +114,20 @@ export function useLinksController() {
 
 	return {
 		kind,
-		setKind,
+		setKind: (value: LinkInsightKind) =>
+			onFiltersChange({ ...filters, kind: value }),
 		range,
-		setRange,
+		setRange: (value: LinkInsightRange) =>
+			onFiltersChange({ ...filters, range: value }),
 		source,
-		setSource,
+		setSource: (value: LinkInsightSource) =>
+			onFiltersChange({ ...filters, source: value }),
 		sort,
-		setSort,
+		setSort: (value: LinkInsightSort) =>
+			onFiltersChange({ ...filters, sort: value }),
 		search,
-		setSearch,
+		setSearch: (value: string) =>
+			onFiltersChange({ ...filters, q: value }, { replace: true }),
 		items,
 		subtitle,
 		loading: insightsQuery.isPending,

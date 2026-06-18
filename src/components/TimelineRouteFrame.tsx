@@ -1,26 +1,17 @@
-import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
-import {
-	FeedEmpty,
-	FeedError,
-	FeedLoading,
-	TweetSkeletonRows,
-} from "#/components/FeedState";
 import { SyncNowButton } from "#/components/SyncNowButton";
 import { TimelineCard } from "#/components/TimelineCard";
-import { ConversationSurfaceScope } from "#/lib/conversation-surface";
-import type { QueryEnvelope, ReplyFilter } from "#/lib/types";
+import {
+	TimelineFeedHeader,
+	TimelineFeedShell,
+	TimelineHeaderSubtitle,
+	TimelineSearchField,
+} from "#/components/TimelineFeedShell";
+import type { QueryEnvelope } from "#/lib/api-contracts";
+import type { ReplyFilter } from "#/lib/types";
 import type { WebSyncKind } from "#/lib/web-sync";
 import {
 	cx,
-	feedClass,
-	pageHeaderClass,
-	pageHeaderRowClass,
-	pageSubtitleClass,
-	pageTitleClass,
-	searchFieldIconClass,
-	searchFieldInputClass,
-	searchFieldShellClass,
 	tabButtonActiveClass,
 	tabButtonClass,
 	tabButtonIndicatorClass,
@@ -90,97 +81,80 @@ export function TimelineRouteFrame({
 	const subtitleText = useMemo(() => subtitle(meta), [meta, subtitle]);
 
 	return (
-		<>
-			<header className={pageHeaderClass}>
-				<div className={pageHeaderRowClass}>
-					<div className="flex min-w-0 flex-col">
-						<h1 className={pageTitleClass}>{title}</h1>
-						<p className={pageSubtitleClass}>{subtitleText}</p>
-					</div>
-					<SyncNowButton
-						accounts={meta?.accounts}
-						kind={syncKind}
-						label={syncLabel}
-						onSynced={refreshLocalView}
-						showAccountPicker
-					/>
-				</div>
-				<div className="px-4 pb-3">
-					<label className={searchFieldShellClass}>
-						<Search className={searchFieldIconClass} strokeWidth={2} />
-						<input
-							className={searchFieldInputClass}
-							onChange={(event) => setSearch(event.target.value)}
-							placeholder={searchPlaceholder}
-							value={search}
+		<TimelineFeedShell
+			header={
+				<TimelineFeedHeader
+					title={title}
+					subtitles={
+						<TimelineHeaderSubtitle>{subtitleText}</TimelineHeaderSubtitle>
+					}
+					action={
+						<SyncNowButton
+							accounts={meta?.accounts}
+							kind={syncKind}
+							label={syncLabel}
+							onSynced={refreshLocalView}
+							showAccountPicker
 						/>
-					</label>
-				</div>
-				<div className={tabStripClass}>
-					{TABS.map((tab) => {
-						const active = replyFilter === tab.value;
-						return (
-							<button
-								key={tab.value}
-								type="button"
-								aria-pressed={active}
-								className={cx(tabButtonClass, active && tabButtonActiveClass)}
-								onClick={() => setReplyFilter(tab.value)}
-							>
-								<span className="relative inline-flex flex-col items-center justify-center py-1">
-									{tab.label}
-									{active ? <span className={tabButtonIndicatorClass} /> : null}
-								</span>
-							</button>
-						);
-					})}
-				</div>
-			</header>
-			{replyError ? (
-				<p className={cx(timestampClass, "px-4 py-2 text-red-500")}>
-					{replyError}
-				</p>
-			) : null}
-			<ConversationSurfaceScope>
-				<section className={feedClass}>
-					{loading ? (
-						<FeedLoading detail={loadingDetail} label={loadingLabel}>
-							<TweetSkeletonRows />
-						</FeedLoading>
-					) : error ? (
-						<FeedError
-							action={
-								<button
-									className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-[14px] font-bold text-white"
-									onClick={retry}
-									type="button"
-								>
-									Retry
-								</button>
-							}
-							message={error}
-							title={errorTitle}
-						/>
-					) : items.length === 0 ? (
-						<FeedEmpty detail={emptyDetail} label={emptyLabel} />
-					) : null}
-					{items.map((item) => (
-						<TimelineCard key={item.id} item={item} onReply={replyToTweet} />
-					))}
-					{!loading && !error && hasMore ? (
-						<div className="flex justify-center py-4">
-							<button
-								className="rounded-full bg-[var(--accent)] px-5 py-1.5 text-[14px] font-bold text-white disabled:opacity-60"
-								disabled={loadingMore}
-								onClick={loadMore}
-								type="button"
-							>
-								{loadingMore ? "Loading…" : "Load more"}
-							</button>
-						</div>
-					) : null}
-				</section>
-			</ConversationSurfaceScope>
-		</>
+					}
+					controls={
+						<>
+							<TimelineSearchField
+								onChange={setSearch}
+								placeholder={searchPlaceholder}
+								value={search}
+							/>
+							<div className={tabStripClass}>
+								{TABS.map((tab) => {
+									const active = replyFilter === tab.value;
+									return (
+										<button
+											key={tab.value}
+											type="button"
+											aria-pressed={active}
+											className={cx(
+												tabButtonClass,
+												active && tabButtonActiveClass,
+											)}
+											onClick={() => setReplyFilter(tab.value)}
+										>
+											<span className="relative inline-flex flex-col items-center justify-center py-1">
+												{tab.label}
+												{active ? (
+													<span className={tabButtonIndicatorClass} />
+												) : null}
+											</span>
+										</button>
+									);
+								})}
+							</div>
+						</>
+					}
+				/>
+			}
+			notice={
+				replyError ? (
+					<p className={cx(timestampClass, "px-4 py-2 text-red-500")}>
+						{replyError}
+					</p>
+				) : null
+			}
+			loading={loading}
+			loadingLabel={loadingLabel}
+			loadingDetail={loadingDetail}
+			error={error}
+			errorTitle={errorTitle}
+			onRetry={retry}
+			empty={items.length === 0}
+			emptyLabel={emptyLabel}
+			emptyDetail={emptyDetail}
+			hasMore={hasMore}
+			loadingMore={loadingMore}
+			onLoadMore={loadMore}
+		>
+			{items.map((item) => (
+				<TimelineCard key={item.id} item={item} onReply={replyToTweet} />
+			))}
+		</TimelineFeedShell>
 	);
 }

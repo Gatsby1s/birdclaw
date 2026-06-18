@@ -12,12 +12,18 @@ import {
 import { fetchQueryEnvelope } from "#/lib/api-client";
 import type { NetworkMapKind } from "#/lib/network-map";
 import { queryKeys } from "#/lib/query-client";
+import type {
+	NetworkMapRouteSearch,
+	RouteSearchChange,
+} from "#/lib/route-search";
 
-export function useNetworkMapController() {
+export function useNetworkMapController(
+	filters: NetworkMapRouteSearch,
+	onFiltersChange: RouteSearchChange<NetworkMapRouteSearch>,
+) {
 	const queryClient = useQueryClient();
-	const [type, setType] = useState<NetworkMapKind>("all");
+	const { type, q: visibleSearch } = filters;
 	const [viewport, setViewport] = useState<MapViewport>(WORLD_VIEWPORT);
-	const [visibleSearch, setVisibleSearch] = useState("");
 	const statusQuery = useQuery({
 		queryKey: queryKeys.status,
 		queryFn: ({ signal }) => fetchQueryEnvelope({ signal }),
@@ -64,11 +70,13 @@ export function useNetworkMapController() {
 
 	return {
 		type,
-		setType,
+		setType: (value: NetworkMapKind) =>
+			onFiltersChange({ ...filters, type: value }),
 		viewport,
 		setViewport,
 		visibleSearch,
-		setVisibleSearch,
+		setVisibleSearch: (value: string) =>
+			onFiltersChange({ ...filters, q: value }, { replace: true }),
 		data,
 		loading,
 		error: queryError

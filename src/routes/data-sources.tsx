@@ -10,11 +10,12 @@ import {
 	XCircle,
 } from "lucide-react";
 import { useMemo } from "react";
+import { liveDataSourcesResponseSchema } from "#/lib/api-contracts";
+import { fetchJson } from "#/lib/api-client";
 import { queryKeys } from "#/lib/query-client";
 import type {
 	LiveDataSourceCapability,
 	LiveDataSourceKind,
-	LiveDataSourcesResponse,
 	LiveDataSourceStatus,
 } from "#/lib/types";
 import {
@@ -34,11 +35,12 @@ export const Route = createFileRoute("/data-sources")({
 });
 
 async function fetchDataSources() {
-	const response = await fetch("/api/data-sources");
-	if (!response.ok) {
-		throw new Error(`Data source status failed (${String(response.status)})`);
-	}
-	return (await response.json()) as LiveDataSourcesResponse;
+	return fetchJson(
+		"/api/data-sources",
+		undefined,
+		liveDataSourcesResponseSchema,
+		"Data source status failed",
+	);
 }
 
 function sourceIcon(source: LiveDataSourceKind) {
