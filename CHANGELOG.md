@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Show full tweet text in Today citation popovers instead of truncating long posts after six lines.
 - Show inline tweet images in Today citation popovers instead of leaving media-only `t.co` links in the preview text.
 
 ## 0.8.5 - 2026-06-21

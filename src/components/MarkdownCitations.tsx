@@ -319,7 +319,7 @@ function TweetPreviewToken({
 								</span>
 							</span>
 						</span>
-						<span className="line-clamp-6 whitespace-pre-wrap [overflow-wrap:anywhere]">
+						<span className="whitespace-pre-wrap [overflow-wrap:anywhere]">
 							{previewText}
 						</span>
 						<TweetPreviewMedia items={media} />

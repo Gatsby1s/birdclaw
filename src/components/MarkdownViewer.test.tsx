@@ -639,6 +639,43 @@ describe("MarkdownViewer", () => {
 		expect(screen.queryByRole("tooltip")).toBeNull();
 	});
 
+	it("shows the full text of long tweets in citation popovers", () => {
+		const longText =
+			"Great explanation of one of the biggest issues in Europe and why they can't build startups is they can't recruit early talent and compete with American startups by paying them stock options because the taxing of them means it makes no sense to take European stock options so you better take the American startup offer.";
+		const longTweetContext = {
+			...context,
+			tweets: [
+				{
+					...context.tweets[0],
+					id: "2068909347585884176",
+					url: "https://x.com/levelsio/status/2068909347585884176",
+					author: "levelsio",
+					name: "@levelsio",
+					text: longText,
+					entities: { urls: [] },
+				},
+			],
+		} satisfies PeriodDigestContext;
+		render(
+			<MarkdownViewer
+				context={longTweetContext}
+				markdown={
+					"European startup equity drew attention (tweet_2068909347585884176)."
+				}
+			/>,
+		);
+
+		fireEvent.pointerEnter(
+			screen.getByRole("link", {
+				name: "European startup equity drew attention",
+			}).parentElement as Element,
+		);
+
+		const tweetText = screen.getByText(longText);
+		expect(tweetText).not.toHaveClass("line-clamp-6");
+		expect(tweetText).toHaveClass("whitespace-pre-wrap");
+	});
+
 	it("expands Twitter Articles inside citation popovers", () => {
 		const articleContext = {
 			...context,
