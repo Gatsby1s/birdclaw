@@ -341,7 +341,36 @@ describe("database init", () => {
 		}) as number;
 		expect(busyTimeout).toBe(SQLITE_BUSY_TIMEOUT_MS);
 		expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
-		expect(db.pragma("user_version", { simple: true })).toBe(2);
+		expect(db.pragma("user_version", { simple: true })).toBe(3);
+	});
+
+	it("normalizes legacy tweet timestamps during startup migration", () => {
+		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-date-"));
+		tempDirs.push(tempDir);
+		process.env.BIRDCLAW_HOME = tempDir;
+		resetBirdclawPathsForTests();
+
+		const dbPath = path.join(tempDir, "birdclaw.sqlite");
+		const legacy = new NativeSqliteDatabase(dbPath);
+		legacy.exec(`
+      create table tweets (
+        id text primary key,
+        created_at text not null
+      );
+      insert into tweets (id, created_at)
+      values ('tweet_legacy_date', 'Tue Jun 23 06:06:01 +0000 2026');
+      pragma user_version = 2;
+    `);
+		legacy.close();
+
+		const db = getNativeDb({ seedDemoData: false });
+
+		expect(
+			db
+				.prepare("select created_at from tweets where id = ?")
+				.get("tweet_legacy_date"),
+		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
+		expect(db.pragma("user_version", { simple: true })).toBe(3);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

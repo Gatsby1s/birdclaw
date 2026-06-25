@@ -205,6 +205,39 @@ describe("live timeline collection sync", () => {
 		});
 	});
 
+	it("normalizes non-ISO tweet timestamps before storing them", async () => {
+		setupTempHome();
+		mocks.listLikedTweetsViaXurl.mockResolvedValue({
+			data: [
+				{
+					id: "liked_twitter_date",
+					author_id: "42",
+					text: "twitter date item",
+					created_at: "Tue Jun 23 06:06:01 +0000 2026",
+				},
+			],
+			includes: {
+				users: [makeUser()],
+			},
+			meta: { result_count: 1 },
+		});
+		const { syncTimelineCollection } =
+			await import("./timeline-collections-live");
+
+		await syncTimelineCollection({
+			kind: "likes",
+			mode: "xurl",
+			limit: 5,
+			refresh: true,
+		});
+
+		expect(
+			getNativeDb()
+				.prepare("select created_at from tweets where id = ?")
+				.get("liked_twitter_date"),
+		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
+	});
+
 	it("persists xurl video variants in media_json", async () => {
 		setupTempHome();
 		mocks.listLikedTweetsViaXurl.mockResolvedValue({

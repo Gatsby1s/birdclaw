@@ -12,6 +12,7 @@ import {
 	type DatabaseConnectionRole,
 	recordDatabaseStatement,
 } from "./database-metrics";
+import { normalizeTimestampToIso } from "./timestamps";
 
 let nativeDb: Database | undefined;
 let readDbs: Database[] = [];
@@ -769,7 +770,22 @@ function normalizeTweetState(db: Database) {
 	  drop table tweets_legacy_state;
 	  create index idx_tweets_created on tweets(created_at desc);
 	  create index idx_tweets_quoted on tweets(quoted_tweet_id);
-	`);
+		`);
+}
+
+function normalizeStoredTweetTimestamps(db: Database) {
+	const rows = db.prepare("select id, created_at from tweets").all() as Array<{
+		id: string;
+		created_at: string;
+	}>;
+	const update = db.prepare("update tweets set created_at = ? where id = ?");
+
+	for (const row of rows) {
+		const normalized = normalizeTimestampToIso(row.created_at);
+		if (normalized !== row.created_at) {
+			update.run(normalized, row.id);
+		}
+	}
 }
 
 const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
@@ -799,6 +815,11 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		version: 2,
 		name: "normalize tweet account and collection state",
 		up: normalizeTweetState,
+	},
+	{
+		version: 3,
+		name: "normalize tweet created timestamps",
+		up: normalizeStoredTweetTimestamps,
 	},
 ];
 
