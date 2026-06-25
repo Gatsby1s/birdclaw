@@ -6,6 +6,7 @@ import {
 	type TweetAccountEdgeKind,
 	upsertTweetAccountEdge,
 } from "./tweet-account-edges";
+import { normalizeTimestampToIso } from "./timestamps";
 import { ensureStubProfileForXUser, upsertProfileFromXUser } from "./x-profile";
 
 export interface IngestTweetPayloadOptions {
@@ -113,7 +114,7 @@ export function ingestTweetPayload(
 				tweet.id,
 				profile.profile.id,
 				tweet.text,
-				tweet.created_at,
+				normalizeTimestampToIso(tweet.created_at),
 				markRepliesAsReplied && replyToId ? 1 : 0,
 				replyToId,
 				Number(tweet.public_metrics?.like_count ?? 0),
