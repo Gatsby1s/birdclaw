@@ -199,6 +199,9 @@ describe("home route", () => {
 			const queryUrl = queryUrls.at(-1);
 			expect(queryUrl?.searchParams.get("search")).toBe("signal");
 			expect(queryUrl?.searchParams.get("replyFilter")).toBe("replied");
+			expect(queryUrl?.searchParams.get("includeRepliesToOthers")).toBe(
+				"false",
+			);
 		});
 
 		fireEvent.click(screen.getByRole("button", { name: "Find me" }));
@@ -206,6 +209,54 @@ describe("home route", () => {
 			"/api/action",
 			expect.anything(),
 		);
+	});
+
+	it("lets home users opt into replies to others", async () => {
+		const queryUrls: URL[] = [];
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.endsWith("/api/status")) {
+				return new Response(
+					JSON.stringify({
+						stats: { home: 3, mentions: 2, dms: 4, needsReply: 2, inbox: 4 },
+						transport: { statusText: "local" },
+						accounts: [],
+						archives: [],
+					}),
+				);
+			}
+			if (url.includes("/api/query")) {
+				queryUrls.push(new URL(url));
+				return new Response(
+					JSON.stringify({
+						resource: "home",
+						items: [{ id: "tweet_reply_toggle", text: "Toggle me" }],
+					}),
+				);
+			}
+			throw new Error(`Unexpected fetch ${url}`);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<HomeRoute />);
+
+		const checkbox = await screen.findByRole("checkbox", {
+			name: "Replies to others",
+		});
+		expect(checkbox).not.toBeChecked();
+		await waitFor(() => {
+			expect(queryUrls.at(-1)?.searchParams.get("includeRepliesToOthers")).toBe(
+				"false",
+			);
+		});
+
+		fireEvent.click(checkbox);
+
+		await waitFor(() => {
+			expect(queryUrls.at(-1)?.searchParams.get("includeRepliesToOthers")).toBe(
+				null,
+			);
+		});
 	});
 
 	it("runs a live timeline sync and reloads local data", async () => {

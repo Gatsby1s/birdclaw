@@ -25,6 +25,7 @@ interface UseTimelineRouteDataOptions {
 	replyFilter?: ReplyFilter;
 	likedOnly?: boolean;
 	bookmarkedOnly?: boolean;
+	includeRepliesToOthers?: boolean;
 }
 
 interface TimelinePageParam {
@@ -38,6 +39,7 @@ function buildTimelineQueryUrl({
 	replyFilter,
 	likedOnly,
 	bookmarkedOnly,
+	includeRepliesToOthers,
 	selectedAccountId,
 	pageParam,
 }: {
@@ -46,6 +48,7 @@ function buildTimelineQueryUrl({
 	replyFilter?: ReplyFilter;
 	likedOnly: boolean;
 	bookmarkedOnly: boolean;
+	includeRepliesToOthers: boolean;
 	selectedAccountId?: string;
 	pageParam?: TimelinePageParam;
 }) {
@@ -57,6 +60,7 @@ function buildTimelineQueryUrl({
 	if (replyFilter) params.set("replyFilter", replyFilter);
 	if (likedOnly) params.set("liked", "true");
 	if (bookmarkedOnly) params.set("bookmarked", "true");
+	if (!includeRepliesToOthers) params.set("includeRepliesToOthers", "false");
 	if (search.trim()) params.set("search", search.trim());
 	if (pageParam) {
 		params.set("until", pageParam.until);
@@ -77,6 +81,7 @@ export function useTimelineRouteData({
 	replyFilter,
 	likedOnly = false,
 	bookmarkedOnly = false,
+	includeRepliesToOthers = true,
 }: UseTimelineRouteDataOptions) {
 	const queryClient = useQueryClient();
 	const statusQuery = useQuery({
@@ -94,6 +99,7 @@ export function useTimelineRouteData({
 			replyFilter: replyFilter ?? "all",
 			likedOnly,
 			bookmarkedOnly,
+			includeRepliesToOthers,
 			selectedAccountId: selectedAccountId ?? null,
 		},
 	] as const;
@@ -108,6 +114,7 @@ export function useTimelineRouteData({
 					replyFilter,
 					likedOnly,
 					bookmarkedOnly,
+					includeRepliesToOthers,
 					selectedAccountId,
 					pageParam,
 				}),

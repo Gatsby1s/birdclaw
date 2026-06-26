@@ -18,6 +18,7 @@ function HomeRoute() {
 			emptyLabel="No posts in this view"
 			errorFallback="Timeline unavailable"
 			errorTitle="Could not load posts"
+			initialIncludeRepliesToOthers={false}
 			initialReplyFilter="all"
 			loadingDetail="Reading the local timeline store"
 			loadingLabel="Loading posts"
@@ -26,6 +27,7 @@ function HomeRoute() {
 			subtitle={homeSubtitle}
 			syncKind="timeline"
 			syncLabel="Sync timeline"
+			showRepliesToOthersControl
 			title="Home"
 		/>
 	);

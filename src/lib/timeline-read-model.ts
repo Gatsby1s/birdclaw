@@ -496,6 +496,7 @@ export function listTimelineItems({
 	until,
 	untilId,
 	includeReplies = true,
+	includeRepliesToOthers = true,
 	qualityFilter = "all",
 	lowQualityThreshold,
 	includeQualityReason = false,
@@ -620,6 +621,20 @@ export function listTimelineItems({
 
 	if (!includeReplies) {
 		where += " and t.text not like '@%'";
+	}
+
+	if (!includeRepliesToOthers) {
+		where += `
+      and (
+        t.reply_to_id is null
+        or exists (
+          select 1
+          from tweets parent_for_reply_filter
+          where parent_for_reply_filter.id = t.reply_to_id
+            and parent_for_reply_filter.author_profile_id = t.author_profile_id
+        )
+      )
+    `;
 	}
 
 	if (since?.trim()) {
