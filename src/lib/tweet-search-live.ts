@@ -103,6 +103,7 @@ function mergeResponses(
 	const seenTweetIds = new Set<string>();
 	const data = [];
 	const usersById = new Map();
+	const tweetsById = new Map();
 	const mediaByKey = new Map();
 	let pageCount = 0;
 
@@ -110,6 +111,9 @@ function mergeResponses(
 		pageCount += Number(response.meta?.page_count ?? 1);
 		for (const user of response.includes?.users ?? []) {
 			usersById.set(user.id, user);
+		}
+		for (const tweet of response.includes?.tweets ?? []) {
+			tweetsById.set(tweet.id, tweet);
 		}
 		for (const media of response.includes?.media ?? []) {
 			mediaByKey.set(media.media_key, media);
@@ -125,6 +129,7 @@ function mergeResponses(
 		data,
 		includes: {
 			users: [...usersById.values()],
+			tweets: [...tweetsById.values()],
 			media: [...mediaByKey.values()],
 		},
 		meta: {
