@@ -87,6 +87,19 @@ export function TimelineRouteFrame({
 		includeRepliesToOthers,
 	});
 	const subtitleText = useMemo(() => subtitle(meta), [meta, subtitle]);
+	const repliesToOthersControl = showRepliesToOthersControl ? (
+		<label className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-[13px] font-medium text-[var(--ink-soft)] shadow-sm">
+			<input
+				checked={includeRepliesToOthers}
+				className="size-4 rounded border-[var(--line)] accent-[var(--accent)]"
+				onChange={(event) =>
+					setIncludeRepliesToOthers(event.currentTarget.checked)
+				}
+				type="checkbox"
+			/>
+			<span>Replies to others</span>
+		</label>
+	) : null;
 
 	return (
 		<TimelineFeedShell
@@ -97,13 +110,16 @@ export function TimelineRouteFrame({
 						<TimelineHeaderSubtitle>{subtitleText}</TimelineHeaderSubtitle>
 					}
 					action={
-						<SyncNowButton
-							accounts={meta?.accounts}
-							kind={syncKind}
-							label={syncLabel}
-							onSynced={refreshLocalView}
-							showAccountPicker
-						/>
+						<div className="flex flex-wrap items-center justify-end gap-3">
+							{repliesToOthersControl}
+							<SyncNowButton
+								accounts={meta?.accounts}
+								kind={syncKind}
+								label={syncLabel}
+								onSynced={refreshLocalView}
+								showAccountPicker
+							/>
+						</div>
 					}
 					controls={
 						<>
@@ -112,19 +128,6 @@ export function TimelineRouteFrame({
 								placeholder={searchPlaceholder}
 								value={search}
 							/>
-							{showRepliesToOthersControl ? (
-								<label className="flex items-center gap-2 px-1 text-[13px] font-medium text-[var(--ink-soft)]">
-									<input
-										checked={includeRepliesToOthers}
-										className="size-4 rounded border-[var(--line)] accent-[var(--accent)]"
-										onChange={(event) =>
-											setIncludeRepliesToOthers(event.currentTarget.checked)
-										}
-										type="checkbox"
-									/>
-									<span>Replies to others</span>
-								</label>
-							) : null}
 							<div className={tabStripClass}>
 								{TABS.map((tab) => {
 									const active = replyFilter === tab.value;
