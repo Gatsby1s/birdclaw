@@ -566,6 +566,92 @@ describe("birdclaw queries", () => {
 		expect(items[0]?.searchSnippet).toContain("<mark>Agents</mark>");
 	});
 
+	it("hides replies to others while keeping self-thread replies", () => {
+		setupTempHome();
+		const db = getNativeDb();
+		db.prepare(
+			`
+      insert into profiles (
+        id, handle, display_name, bio, followers_count, avatar_hue, created_at
+      ) values (
+        'profile_other_thread', 'other_thread', 'Other Thread', 'outside author',
+        100, 42, '2026-03-08T00:00:00.000Z'
+      )
+      `,
+		).run();
+		insertTestTweet(db, {
+			id: "tweet_self_thread_root",
+			text: "Self thread root",
+			createdAt: "2026-03-09T16:00:00.000Z",
+		});
+		insertTestTweet(db, {
+			id: "tweet_self_thread_reply",
+			text: "Self thread follow-up",
+			createdAt: "2026-03-09T16:01:00.000Z",
+			replyToId: "tweet_self_thread_root",
+		});
+		insertTestTweet(db, {
+			id: "tweet_other_thread_root",
+			text: "Outside conversation starter",
+			createdAt: "2026-03-09T16:02:00.000Z",
+			authorProfileId: "profile_other_thread",
+		});
+		insertTestTweet(db, {
+			id: "tweet_reply_to_other",
+			text: "Replying into someone else's conversation",
+			createdAt: "2026-03-09T16:03:00.000Z",
+			replyToId: "tweet_other_thread_root",
+		});
+		insertTestTweet(db, {
+			id: "tweet_regular_home",
+			text: "Regular home post",
+			createdAt: "2026-03-09T16:04:00.000Z",
+		});
+		for (const [id, createdAt] of [
+			["tweet_self_thread_reply", "2026-03-09T16:01:00.000Z"],
+			["tweet_reply_to_other", "2026-03-09T16:03:00.000Z"],
+			["tweet_regular_home", "2026-03-09T16:04:00.000Z"],
+		] as const) {
+			insertTestEdge(db, id, createdAt);
+		}
+
+		const quietItems = listTimelineItems({
+			resource: "home",
+			account: "acct_primary",
+			since: "2026-03-09T16:00:00.000Z",
+			until: "2026-03-09T17:00:00.000Z",
+			includeRepliesToOthers: false,
+			limit: 20,
+		});
+		const noisyItems = listTimelineItems({
+			resource: "home",
+			account: "acct_primary",
+			since: "2026-03-09T16:00:00.000Z",
+			until: "2026-03-09T17:00:00.000Z",
+			includeRepliesToOthers: true,
+			limit: 20,
+		});
+
+		expect(quietItems.map((item) => item.id)).toEqual([
+			"tweet_regular_home",
+			"tweet_self_thread_reply",
+		]);
+		expect(quietItems[1]?.replyToTweet).toMatchObject({
+			id: "tweet_self_thread_root",
+			text: "Self thread root",
+		});
+		expect(noisyItems.map((item) => item.id)).toEqual([
+			"tweet_regular_home",
+			"tweet_reply_to_other",
+			"tweet_self_thread_reply",
+		]);
+		expect(noisyItems[1]?.replyToTweet).toMatchObject({
+			id: "tweet_other_thread_root",
+			text: "Outside conversation starter",
+			author: { handle: "other_thread" },
+		});
+	});
+
 	it("keeps timeline membership account-scoped for the same canonical tweet", () => {
 		setupTempHome();
 		const db = getNativeDb();

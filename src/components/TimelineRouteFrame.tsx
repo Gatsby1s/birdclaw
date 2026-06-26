@@ -40,6 +40,8 @@ interface TimelineRouteFrameProps {
 	emptyLabel: string;
 	emptyDetail: string;
 	subtitle: (meta: QueryEnvelope | null) => string;
+	showRepliesToOthersControl?: boolean;
+	initialIncludeRepliesToOthers?: boolean;
 }
 
 export function TimelineRouteFrame({
@@ -56,10 +58,15 @@ export function TimelineRouteFrame({
 	emptyLabel,
 	emptyDetail,
 	subtitle,
+	showRepliesToOthersControl = false,
+	initialIncludeRepliesToOthers = true,
 }: TimelineRouteFrameProps) {
 	const [replyFilter, setReplyFilter] =
 		useState<ReplyFilter>(initialReplyFilter);
 	const [search, setSearch] = useState("");
+	const [includeRepliesToOthers, setIncludeRepliesToOthers] = useState(
+		initialIncludeRepliesToOthers,
+	);
 	const {
 		meta,
 		items,
@@ -77,6 +84,7 @@ export function TimelineRouteFrame({
 		replyFilter,
 		search,
 		errorFallback,
+		includeRepliesToOthers,
 	});
 	const subtitleText = useMemo(() => subtitle(meta), [meta, subtitle]);
 
@@ -104,6 +112,19 @@ export function TimelineRouteFrame({
 								placeholder={searchPlaceholder}
 								value={search}
 							/>
+							{showRepliesToOthersControl ? (
+								<label className="flex items-center gap-2 px-1 text-[13px] font-medium text-[var(--ink-soft)]">
+									<input
+										checked={includeRepliesToOthers}
+										className="size-4 rounded border-[var(--line)] accent-[var(--accent)]"
+										onChange={(event) =>
+											setIncludeRepliesToOthers(event.currentTarget.checked)
+										}
+										type="checkbox"
+									/>
+									<span>Replies to others</span>
+								</label>
+							) : null}
 							<div className={tabStripClass}>
 								{TABS.map((tab) => {
 									const active = replyFilter === tab.value;

@@ -67,6 +67,8 @@ export const Route = createFileRoute("/api/query")({
 							since: url.searchParams.get("since") ?? undefined,
 							until: url.searchParams.get("until") ?? undefined,
 							includeReplies: url.searchParams.get("originalsOnly") !== "true",
+							includeRepliesToOthers:
+								url.searchParams.get("includeRepliesToOthers") !== "false",
 							qualityFilter: parseQualityFilter(
 								url.searchParams.get("qualityFilter"),
 							),
