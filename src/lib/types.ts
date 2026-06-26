@@ -591,10 +591,7 @@ export interface ProfileRepliesResponse {
 
 export interface XurlMentionsResponse {
 	data: XurlMentionData[];
-	includes?: {
-		users?: XurlMentionUser[];
-		media?: XurlMediaItem[];
-	};
+	includes?: XurlTweetIncludes;
 	meta?: Record<string, unknown>;
 }
 
@@ -621,10 +618,7 @@ export interface XurlDmEventsResponse {
 
 export interface XurlTweetsResponse {
 	data: XurlTweetData[];
-	includes?: {
-		users?: XurlMentionUser[];
-		media?: XurlMediaItem[];
-	};
+	includes?: XurlTweetIncludes;
 	meta?: Record<string, unknown>;
 }
 

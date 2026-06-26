@@ -14,6 +14,7 @@ import type {
 	XurlMentionData,
 	XurlMentionsResponse,
 	XurlMediaItem,
+	XurlTweetData,
 	XurlMentionUser,
 } from "./types";
 import { ingestTweetPayload } from "./tweet-repository";
@@ -63,6 +64,8 @@ function assertXurlLimit(limit: number) {
 function mergePayloads(pages: XurlMentionsResponse[]): XurlMentionsResponse {
 	const tweets: XurlMentionData[] = [];
 	const seenTweetIds = new Set<string>();
+	const includedTweets: XurlTweetData[] = [];
+	const seenIncludedTweetIds = new Set<string>();
 	const users: XurlMentionUser[] = [];
 	const seenUserIds = new Set<string>();
 	const media: XurlMediaItem[] = [];
@@ -85,6 +88,14 @@ function mergePayloads(pages: XurlMentionsResponse[]): XurlMentionsResponse {
 			users.push(user);
 		}
 
+		for (const tweet of page.includes?.tweets ?? []) {
+			if (seenIncludedTweetIds.has(tweet.id)) {
+				continue;
+			}
+			seenIncludedTweetIds.add(tweet.id);
+			includedTweets.push(tweet);
+		}
+
 		for (const item of page.includes?.media ?? []) {
 			if (seenMediaKeys.has(item.media_key)) {
 				continue;
@@ -97,11 +108,15 @@ function mergePayloads(pages: XurlMentionsResponse[]): XurlMentionsResponse {
 	const lastPage = pages.at(-1);
 	const includes = {
 		...(users.length > 0 ? { users } : {}),
+		...(includedTweets.length > 0 ? { tweets: includedTweets } : {}),
 		...(media.length > 0 ? { media } : {}),
 	};
 	return {
 		data: tweets,
-		includes: users.length > 0 || media.length > 0 ? includes : undefined,
+		includes:
+			users.length > 0 || includedTweets.length > 0 || media.length > 0
+				? includes
+				: undefined,
 		meta: {
 			result_count: tweets.length,
 			page_count: pages.length,

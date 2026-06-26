@@ -16,7 +16,8 @@ const RICH_USER_FIELDS =
 	"description%2Centities%2Clocation%2Cpublic_metrics%2Cprofile_image_url%2Curl%2Ccreated_at%2Cverified%2Cverified_type";
 const FOLLOW_USER_FIELDS =
 	"id%2Cusername%2Cname%2Cdescription%2Cverified%2Cprotected%2Cpublic_metrics%2Cprofile_image_url%2Ccreated_at";
-const AUTHOR_MEDIA_EXPANSIONS = "author_id%2Cattachments.media_keys";
+const AUTHOR_MEDIA_EXPANSIONS =
+	"author_id%2Cattachments.media_keys%2Creferenced_tweets.id%2Creferenced_tweets.id.author_id";
 const MEDIA_EXPANSION = "attachments.media_keys";
 const MEDIA_FIELDS =
 	"variants%2Cpreview_image_url%2Curl%2Cduration_ms%2Calt_text%2Ctype%2Cwidth%2Cheight%2Cpublic_metrics";

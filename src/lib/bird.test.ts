@@ -545,6 +545,80 @@ describe("bird transport wrapper", () => {
 		expectBirdCommandCall(1, ["home", "-n", "9", "--json", "--following"]);
 	});
 
+	it("keeps nested bird quoted and retweeted tweets as included tweets", async () => {
+		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
+		mockBirdStdoutOnce(
+			JSON.stringify([
+				{
+					id: "home_quote",
+					text: "quoting from bird",
+					createdAt: "Mon May 04 07:19:34 +0000 2026",
+					authorId: "45",
+					author: { username: "riley", name: "Riley" },
+					quotedTweet: {
+						id: "quote_source",
+						text: "nested quote text",
+						createdAt: "Mon May 04 07:17:34 +0000 2026",
+						authorId: "46",
+						author: { username: "lee", name: "Lee" },
+						likeCount: 8,
+					},
+				},
+				{
+					id: "home_retweet",
+					text: "RT @lee: nested retweet text",
+					createdAt: "Mon May 04 07:18:34 +0000 2026",
+					authorId: "45",
+					author: { username: "riley", name: "Riley" },
+					retweetedTweet: {
+						id: "retweet_source",
+						text: "nested retweet text",
+						createdAt: "Mon May 04 07:16:34 +0000 2026",
+						authorId: "46",
+						author: { username: "lee", name: "Lee" },
+						likeCount: 9,
+					},
+				},
+			]),
+		);
+		const { listHomeTimelineViaBird } = await import("./bird");
+
+		await expect(
+			listHomeTimelineViaBird({ maxResults: 9, following: true }),
+		).resolves.toEqual({
+			data: [
+				expect.objectContaining({
+					id: "home_quote",
+					referenced_tweets: [{ type: "quoted", id: "quote_source" }],
+				}),
+				expect.objectContaining({
+					id: "home_retweet",
+					referenced_tweets: [{ type: "retweeted", id: "retweet_source" }],
+				}),
+			],
+			includes: {
+				users: [
+					{ id: "45", username: "riley", name: "Riley" },
+					{ id: "46", username: "lee", name: "Lee" },
+				],
+				tweets: [
+					expect.objectContaining({
+						id: "quote_source",
+						author_id: "46",
+						text: "nested quote text",
+					}),
+					expect.objectContaining({
+						id: "retweet_source",
+						author_id: "46",
+						text: "nested retweet text",
+					}),
+				],
+			},
+			meta: expect.objectContaining({ result_count: 2 }),
+		});
+		expectBirdCommandCall(1, ["home", "-n", "9", "--json", "--following"]);
+	});
+
 	it("maps bird follower lists into xurl-compatible users", async () => {
 		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
 		mockBirdStdoutOnce(

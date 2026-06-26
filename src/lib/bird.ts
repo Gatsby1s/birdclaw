@@ -12,6 +12,7 @@ import type {
 	XurlMentionsResponse,
 	XurlMentionUser,
 	XurlReferencedTweet,
+	XurlTweetData,
 	XurlTweetsResponse,
 } from "./types";
 
@@ -35,6 +36,8 @@ interface BirdTweetArticle {
 	coverImageUrl?: string;
 }
 
+type BirdReferencedTweetItem = Partial<BirdTweetItem> & { id?: string | null };
+
 interface BirdTweetItem {
 	id: string;
 	text: string;
@@ -46,8 +49,8 @@ interface BirdTweetItem {
 	inReplyToStatusId?: string | null;
 	quotedStatusId?: string | null;
 	retweetedStatusId?: string | null;
-	quotedTweet?: { id?: string | null } | null;
-	retweetedTweet?: { id?: string | null } | null;
+	quotedTweet?: BirdReferencedTweetItem | null;
+	retweetedTweet?: BirdReferencedTweetItem | null;
 	author?: BirdTweetAuthor;
 	authorId?: string;
 	media?: BirdTweetMedia[];
@@ -444,41 +447,73 @@ function toReferencedTweets(item: BirdTweetItem) {
 	return references.length > 0 ? references : undefined;
 }
 
+function toTweetData(item: BirdTweetItem): XurlTweetData {
+	const authorId = String(item.authorId ?? item.author?.username ?? "unknown");
+	return {
+		id: item.id,
+		author_id: authorId,
+		text: item.text,
+		created_at: toIsoTimestamp(item.createdAt),
+		conversation_id: item.conversationId ?? item.id,
+		entities: toTweetEntities(item),
+		referenced_tweets: toReferencedTweets(item),
+		public_metrics: {
+			reply_count: Number(item.replyCount ?? 0),
+			retweet_count: Number(item.retweetCount ?? 0),
+			like_count: Number(item.likeCount ?? 0),
+		},
+		edit_history_tweet_ids: [item.id],
+	};
+}
+
+function addBirdUser(users: Map<string, XurlMentionUser>, item: BirdTweetItem) {
+	const authorId = String(item.authorId ?? item.author?.username ?? "unknown");
+	if (users.has(authorId)) {
+		return;
+	}
+	users.set(authorId, {
+		id: authorId,
+		username: item.author?.username ?? `user_${authorId}`,
+		name: item.author?.name ?? item.author?.username ?? `user_${authorId}`,
+	});
+}
+
+function isFullBirdTweetItem(
+	item: BirdReferencedTweetItem | null | undefined,
+): item is BirdTweetItem {
+	return (
+		typeof item?.id === "string" &&
+		typeof item.text === "string" &&
+		typeof item.createdAt === "string"
+	);
+}
+
 function normalizeBirdTweets(items: BirdTweetItem[]): XurlMentionsResponse {
 	const users = new Map<string, XurlMentionUser>();
+	const includedTweets = new Map<string, XurlTweetData>();
 	const data = items.map((item): XurlMentionData => {
-		const authorId = String(
-			item.authorId ?? item.author?.username ?? "unknown",
-		);
-		if (!users.has(authorId)) {
-			users.set(authorId, {
-				id: authorId,
-				username: item.author?.username ?? `user_${authorId}`,
-				name: item.author?.name ?? item.author?.username ?? `user_${authorId}`,
-			});
+		addBirdUser(users, item);
+		for (const included of [item.quotedTweet, item.retweetedTweet]) {
+			if (!isFullBirdTweetItem(included)) {
+				continue;
+			}
+			addBirdUser(users, included);
+			includedTweets.set(included.id, toTweetData(included));
 		}
-
-		return {
-			id: item.id,
-			author_id: authorId,
-			text: item.text,
-			created_at: toIsoTimestamp(item.createdAt),
-			conversation_id: item.conversationId ?? item.id,
-			entities: toTweetEntities(item),
-			referenced_tweets: toReferencedTweets(item),
-			public_metrics: {
-				reply_count: Number(item.replyCount ?? 0),
-				retweet_count: Number(item.retweetCount ?? 0),
-				like_count: Number(item.likeCount ?? 0),
-			},
-			edit_history_tweet_ids: [item.id],
-		};
+		return toTweetData(item);
 	});
 
 	return {
 		data,
 		includes:
-			users.size > 0 ? { users: Array.from(users.values()) } : undefined,
+			users.size > 0 || includedTweets.size > 0
+				? {
+						...(users.size > 0 ? { users: Array.from(users.values()) } : {}),
+						...(includedTweets.size > 0
+							? { tweets: Array.from(includedTweets.values()) }
+							: {}),
+					}
+				: undefined,
 		meta: {
 			result_count: data.length,
 			page_count: 1,

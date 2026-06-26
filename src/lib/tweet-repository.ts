@@ -80,6 +80,28 @@ export function ingestTweetPayload(
 
 	db.transaction(() => {
 		const observedAt = new Date().toISOString();
+		for (const includedTweet of payload.includes?.tweets ?? []) {
+			const author = usersById.get(includedTweet.author_id);
+			const profile = author
+				? upsertProfileFromXUser(db, author)
+				: ensureStubProfileForXUser(db, includedTweet.author_id);
+			const replyToId = getReferencedTweetId(includedTweet, "replied_to");
+			const quotedTweetId = getReferencedTweetId(includedTweet, "quoted");
+			upsertTweet.run(
+				includedTweet.id,
+				profile.profile.id,
+				includedTweet.text,
+				includedTweet.created_at,
+				markRepliesAsReplied && replyToId ? 1 : 0,
+				replyToId,
+				Number(includedTweet.public_metrics?.like_count ?? 0),
+				countTweetMedia(includedTweet),
+				JSON.stringify(tweetEntitiesFromXurl(includedTweet.entities)),
+				buildMediaJsonFromIncludes(includedTweet, payload.includes?.media),
+				quotedTweetId,
+			);
+			replaceTweetFts(db, includedTweet.id, includedTweet.text);
+		}
 		for (const tweet of payload.data) {
 			const author = usersById.get(tweet.author_id);
 			const profile = author

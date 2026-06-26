@@ -360,6 +360,81 @@ describe("live home timeline sync", () => {
 		).toEqual({ source: "xurl" });
 	});
 
+	it("stores included quoted and retweeted tweets for timeline card rendering", async () => {
+		makeTempHome();
+		listHomeTimelineViaXurlMock.mockResolvedValueOnce({
+			data: [
+				{
+					id: "home_quote",
+					author_id: "42",
+					text: "quoting this market read",
+					created_at: "2026-04-26T13:43:34.000Z",
+					referenced_tweets: [{ type: "quoted", id: "quote_source" }],
+					public_metrics: { like_count: 12 },
+				},
+				{
+					id: "home_retweet",
+					author_id: "42",
+					text: "RT @lee: original retweet text",
+					created_at: "2026-04-26T13:42:34.000Z",
+					referenced_tweets: [{ type: "retweeted", id: "retweet_source" }],
+				},
+			],
+			includes: {
+				users: [
+					{ id: "42", username: "sam", name: "Sam" },
+					{ id: "43", username: "lee", name: "Lee" },
+				],
+				tweets: [
+					{
+						id: "quote_source",
+						author_id: "43",
+						text: "quoted original text",
+						created_at: "2026-04-26T13:40:34.000Z",
+						public_metrics: { like_count: 7 },
+					},
+					{
+						id: "retweet_source",
+						author_id: "43",
+						text: "original retweet text",
+						created_at: "2026-04-26T13:39:34.000Z",
+						public_metrics: { like_count: 9 },
+					},
+				],
+			},
+			meta: { result_count: 2 },
+		});
+		const { syncHomeTimeline } = await import("./timeline-live");
+
+		await syncHomeTimeline({
+			account: "acct_primary",
+			mode: "xurl",
+			limit: 5,
+			refresh: true,
+		});
+
+		const items = listTimelineItems({
+			resource: "home",
+			account: "acct_primary",
+			limit: 5,
+		});
+		expect(items.find((item) => item.id === "home_quote")).toMatchObject({
+			quotedTweet: {
+				id: "quote_source",
+				text: "quoted original text",
+				author: { handle: "lee", displayName: "Lee" },
+			},
+		});
+		expect(items.find((item) => item.id === "home_retweet")).toMatchObject({
+			retweetedTweet: {
+				id: "retweet_source",
+				text: "original retweet text",
+				likeCount: 9,
+				author: { handle: "lee", displayName: "Lee" },
+			},
+		});
+	});
+
 	it("walks xurl home timeline until the selected start time without a page cap", async () => {
 		makeTempHome();
 		listHomeTimelineViaXurlMock
