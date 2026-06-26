@@ -490,6 +490,100 @@ describe("period digest", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 
+	it("reuses yesterday's latest digest after the freshness window", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-03-09T04:00:00.000Z"));
+		const streamed = [
+			sseFrame({
+				type: "response.output_text.delta",
+				delta:
+					'# Yesterday\n\nFirst pass.\n\n---\n{"title":"Yesterday","summary":"First pass","keyTopics":[],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[]}',
+			}),
+			"data: [DONE]\n\n",
+		].join("");
+		const fetchMock = vi.fn().mockResolvedValue(streamResponse(streamed));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const first = await streamPeriodDigest({
+			period: "yesterday",
+			refresh: true,
+		});
+		const profile = first.context.tweets[0]?.authorProfile;
+		expect(first.context.window.label).toBe("Yesterday");
+		expect(profile).toBeDefined();
+		getNativeDb()
+			.prepare(
+				`
+				update sync_cache
+				set updated_at = '2020-01-01T00:00:00.000Z',
+					value_json = json_set(
+						value_json,
+						'$.updatedAt',
+						'2020-01-01T00:00:00.000Z'
+					)
+				where cache_key like 'period-digest-latest:%'
+				`,
+			)
+			.run();
+		getNativeDb()
+			.prepare("update profiles set bio = ? where id = ?")
+			.run("Changed after yesterday was already summarized.", profile?.id);
+		vi.setSystemTime(new Date("2026-03-09T10:00:00.000Z"));
+
+		const cached = await streamPeriodDigest({ period: "yesterday" });
+
+		expect(cached.cached).toBe(true);
+		expect(cached.context.hash).toBe(first.context.hash);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps rolling today digests behind the freshness window", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-03-08T04:30:00.000Z"));
+		const streamed = [
+			sseFrame({
+				type: "response.output_text.delta",
+				delta:
+					'# Today\n\nFirst pass.\n\n---\n{"title":"Today","summary":"First pass","keyTopics":[],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[]}',
+			}),
+			"data: [DONE]\n\n",
+		].join("");
+		const fetchMock = vi.fn().mockResolvedValue(streamResponse(streamed));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const first = await streamPeriodDigest({
+			period: "today",
+			refresh: true,
+		});
+		const profile = first.context.tweets[0]?.authorProfile;
+		expect(first.context.window.label).toBe("Today");
+		expect(profile).toBeDefined();
+		getNativeDb()
+			.prepare(
+				`
+				update sync_cache
+				set updated_at = '2020-01-01T00:00:00.000Z',
+					value_json = json_set(
+						value_json,
+						'$.updatedAt',
+						'2020-01-01T00:00:00.000Z'
+					)
+				where cache_key like 'period-digest-latest:%'
+				`,
+			)
+			.run();
+		getNativeDb()
+			.prepare("update profiles set bio = ? where id = ?")
+			.run("Changed while today is still moving.", profile?.id);
+		vi.setSystemTime(new Date("2026-03-08T10:00:00.000Z"));
+
+		const regenerated = await streamPeriodDigest({ period: "today" });
+
+		expect(regenerated.cached).toBe(false);
+		expect(regenerated.context.hash).not.toBe(first.context.hash);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
 	it("does not promote an old exact cache entry as recently generated", async () => {
 		const streamed = [
 			sseFrame({

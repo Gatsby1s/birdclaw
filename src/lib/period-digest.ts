@@ -983,6 +983,11 @@ function isFreshDigestCache(updatedAt: string) {
 	);
 }
 
+function canReuseStaleLatestDigest(options: PeriodDigestOptions) {
+	if (options.since?.trim() || options.until?.trim()) return false;
+	return normalizePeriod(options.period) === "yesterday";
+}
+
 function emitCachedDigest(
 	result: PeriodDigestRunResult,
 	handlers: PeriodDigestStreamHandlers,
@@ -1269,7 +1274,10 @@ export function streamPeriodDigestEffect(
 		if (
 			latestCached &&
 			latestContext &&
-			isFreshDigestCache(latestCached.value.updatedAt ?? latestCached.updatedAt)
+			(canReuseStaleLatestDigest(resolvedOptions) ||
+				isFreshDigestCache(
+					latestCached.value.updatedAt ?? latestCached.updatedAt,
+				))
 		) {
 			const result = yield* tryDigestSync(() =>
 				cachedDigestResult(latestCached, latestContext),
