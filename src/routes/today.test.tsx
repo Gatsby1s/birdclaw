@@ -217,6 +217,41 @@ describe("today route", () => {
 		).toBe(true);
 	});
 
+	it("exports a completed digest through the browser PDF flow", async () => {
+		document.title = "birdclaw";
+		const printMock = vi.spyOn(window, "print").mockImplementation(() => {
+			expect(document.title).toBe("BirdClaw Today digest");
+			window.dispatchEvent(new Event("afterprint"));
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return new Response(JSON.stringify({ ok: true, results: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				const markdown = "# Today\n\nDone.";
+				return ndjsonResponse([
+					{ type: "delta", delta: markdown },
+					{ type: "done", result: digestResult("Today", markdown) },
+				]);
+			}),
+		);
+
+		render(<TodayRoute />);
+
+		await screen.findByRole("heading", { name: "Today", level: 1 });
+		const exportButton = screen.getByRole("button", { name: "Export PDF" });
+		expect(exportButton).toBeEnabled();
+
+		fireEvent.click(exportButton);
+
+		expect(printMock).toHaveBeenCalledTimes(1);
+		expect(document.title).toBe("birdclaw");
+	});
+
 	it("shows request errors", async () => {
 		vi.stubGlobal(
 			"fetch",
