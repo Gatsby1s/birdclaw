@@ -176,6 +176,9 @@ describe("today route", () => {
 		expect(
 			screen.getByText("3 home · 2 mentions · 4 links"),
 		).toBeInTheDocument();
+		const todayButton = screen.getByRole("button", { name: "Today" });
+		expect(todayButton).toHaveClass("!bg-[var(--accent)]");
+		expect(todayButton).toHaveClass("!text-[var(--accent-text)]");
 		await waitFor(() =>
 			expect(urls.some((url) => url.pathname === "/api/profile-hydrate")).toBe(
 				true,

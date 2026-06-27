@@ -39,7 +39,6 @@ import {
 	pageSubtitleClass,
 	pageTitleClass,
 	secondaryButtonClass,
-	segmentActiveClass,
 	segmentClass,
 	segmentedClass,
 } from "#/lib/ui";
@@ -55,6 +54,8 @@ const PROFILE_HYDRATION_DELAY_MS = 300;
 const DIGEST_STATUS_MESSAGES = {
 	524: "Digest startup timed out at Cloudflare (524). Retry to open a new stream.",
 } as const;
+const todayPeriodSegmentActiveClass =
+	"!bg-[var(--accent)] !text-[var(--accent-text)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent)_35%,transparent)]";
 
 const periods: Array<{ value: PeriodOption; label: string }> = [
 	{ value: "today", label: "Today" },
@@ -425,7 +426,7 @@ export function TodayRouteView({
 								type="button"
 								className={cx(
 									segmentClass,
-									period === item.value && segmentActiveClass,
+									period === item.value && todayPeriodSegmentActiveClass,
 								)}
 								onClick={() =>
 									updateSearch({ ...searchState, period: item.value })
