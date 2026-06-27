@@ -574,7 +574,7 @@ describe("cli", () => {
 			expect.stringContaining('"stats"'),
 		);
 		expect(runProductionServerMock).toHaveBeenCalledWith({
-			packageRoot: expect.stringContaining("birdclaw"),
+			packageRoot: expect.stringMatching(/[Bb]ird[Cc]law/),
 			host: "127.0.0.1",
 			port: 3000,
 		});

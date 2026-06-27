@@ -1,11 +1,19 @@
 # CHANGELOG
 
-## 0.8.6 - Unreleased
+## 0.8.6 - 2026-06-27
+
+### Added
+
+- Add a Home filter for replies to other accounts, including query/read-model support and route coverage.
+- Add PDF export for digest summaries.
 
 ### Fixed
 
 - Show full tweet text in Today citation popovers instead of truncating long posts after six lines.
 - Show inline tweet images in Today citation popovers instead of leaving media-only `t.co` links in the preview text.
+- Hydrate quoted and retweeted tweets so embedded timeline cards render the referenced post content.
+- Keep yesterday digest cache lookups from reusing the wrong period summary.
+- Normalize tweet timestamps before sorting timelines.
 
 ## 0.8.5 - 2026-06-21
 
