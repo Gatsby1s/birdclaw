@@ -4,6 +4,7 @@ import {
 	Scripts,
 	useRouterState,
 } from "@tanstack/react-router";
+import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { AppNav } from "#/components/AppNav";
 import { BirdclawQueryProvider } from "#/lib/query-client";
@@ -16,6 +17,9 @@ import {
 } from "#/lib/ui";
 
 import appCss from "../styles.css?url";
+
+const liveVersionManifestPath = "/birdclaw-live-version.json";
+const liveVersionPollMs = 30_000;
 
 export const Route = createRootRoute({
 	head: () => ({
@@ -66,6 +70,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 			<body className={bodyClass}>
 				<BirdclawQueryProvider>
 					<ThemeProvider>
+						<LiveVersionReloader />
 						<div className={siteShellClass}>
 							<AppNav compact={wideMode} />
 							<main className={wideMode ? mainColumnDmClass : mainColumnClass}>
@@ -78,4 +83,60 @@ function RootDocument({ children }: { children: ReactNode }) {
 			</body>
 		</html>
 	);
+}
+
+function manifestCommit(data: unknown) {
+	if (!data || typeof data !== "object") return undefined;
+	const commit = (data as { commit?: unknown }).commit;
+	return typeof commit === "string" && commit.length > 0 ? commit : undefined;
+}
+
+export function LiveVersionReloader({
+	manifestPath = liveVersionManifestPath,
+	pollMs = liveVersionPollMs,
+	reloadPage = () => window.location.reload(),
+	fetchManifest = globalThis.fetch,
+}: {
+	manifestPath?: string;
+	pollMs?: number;
+	reloadPage?: () => void;
+	fetchManifest?: typeof fetch;
+}) {
+	useEffect(() => {
+		let disposed = false;
+		let currentCommit: string | undefined;
+
+		async function checkManifest() {
+			try {
+				const response = await fetchManifest(
+					`${manifestPath}?t=${Date.now()}`,
+					{ cache: "no-store" },
+				);
+				if (!response.ok) return;
+				const nextCommit = manifestCommit(await response.json());
+				if (!nextCommit || disposed) return;
+				if (!currentCommit) {
+					currentCommit = nextCommit;
+					return;
+				}
+				if (nextCommit !== currentCommit) {
+					reloadPage();
+				}
+			} catch {
+				// The manifest only exists for source-served local installs.
+			}
+		}
+
+		void checkManifest();
+		const timer = window.setInterval(() => {
+			void checkManifest();
+		}, pollMs);
+
+		return () => {
+			disposed = true;
+			window.clearInterval(timer);
+		};
+	}, [fetchManifest, manifestPath, pollMs, reloadPage]);
+
+	return null;
 }

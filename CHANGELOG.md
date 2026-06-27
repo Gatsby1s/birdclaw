@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.8 - 2026-06-27
+
+### Added
+
+- Reload already-open local web tabs when the source-served 3001 app is rebuilt from a newer `Gatsby1s/birdclaw` commit.
+
 ## 0.8.7 - 2026-06-27
 
 ### Changed

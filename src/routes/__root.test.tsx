@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { act, cleanup, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const routerState = vi.hoisted(() => ({ path: "/inbox" }));
 const appNavProps: Array<{ compact?: boolean }> = vi.hoisted(() => []);
@@ -23,7 +24,24 @@ vi.mock("#/components/AppNav", () => ({
 	},
 }));
 
-import { Route } from "./__root";
+import { LiveVersionReloader, Route } from "./__root";
+
+afterEach(() => {
+	cleanup();
+	vi.useRealTimers();
+	vi.restoreAllMocks();
+});
+
+function versionResponse(commit: string) {
+	return new Response(JSON.stringify({ commit }), {
+		headers: { "content-type": "application/json" },
+	});
+}
+
+async function flushPromises() {
+	await Promise.resolve();
+	await Promise.resolve();
+}
 
 describe("root route", () => {
 	it("exposes document metadata and renders shell chrome", () => {
@@ -110,5 +128,64 @@ describe("root route", () => {
 		expect(markup).not.toContain("max-w-[680px]");
 		expect(markup).toContain("birdclaw nav compact");
 		expect(appNavProps).toEqual([{ compact: true }]);
+	});
+
+	it("reloads an open local tab when the served version changes", async () => {
+		vi.useFakeTimers();
+		const fetchManifest = vi
+			.fn()
+			.mockResolvedValueOnce(versionResponse("commit-a"))
+			.mockResolvedValueOnce(versionResponse("commit-b"));
+		const reloadPage = vi.fn();
+
+		render(
+			<LiveVersionReloader
+				fetchManifest={fetchManifest as unknown as typeof fetch}
+				pollMs={1_000}
+				reloadPage={reloadPage}
+			/>,
+		);
+
+		await act(async () => {
+			await flushPromises();
+		});
+		expect(fetchManifest).toHaveBeenCalledTimes(1);
+		expect(reloadPage).not.toHaveBeenCalled();
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1_000);
+			await flushPromises();
+		});
+
+		expect(fetchManifest).toHaveBeenCalledTimes(2);
+		expect(reloadPage).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps the page stable while the served version is unchanged", async () => {
+		vi.useFakeTimers();
+		const fetchManifest = vi
+			.fn()
+			.mockResolvedValueOnce(versionResponse("commit-a"))
+			.mockResolvedValueOnce(versionResponse("commit-a"));
+		const reloadPage = vi.fn();
+
+		render(
+			<LiveVersionReloader
+				fetchManifest={fetchManifest as unknown as typeof fetch}
+				pollMs={1_000}
+				reloadPage={reloadPage}
+			/>,
+		);
+
+		await act(async () => {
+			await flushPromises();
+		});
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1_000);
+			await flushPromises();
+		});
+
+		expect(fetchManifest).toHaveBeenCalledTimes(2);
+		expect(reloadPage).not.toHaveBeenCalled();
 	});
 });

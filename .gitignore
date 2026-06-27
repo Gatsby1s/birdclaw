@@ -19,3 +19,4 @@ coverage
 playwright-report
 test-results
 .pnpm-store/
+/public/birdclaw-live-version.json
