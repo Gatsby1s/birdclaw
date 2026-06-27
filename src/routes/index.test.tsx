@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import {
+	act,
+	cleanup,
+	fireEvent,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient as render } from "#/test/render";
@@ -28,6 +34,9 @@ describe("home route", () => {
 
 	afterEach(() => {
 		cleanup();
+		window.localStorage.clear();
+		vi.unstubAllGlobals();
+		vi.useRealTimers();
 	});
 
 	it("loads timeline items and posts replies", async () => {
@@ -291,9 +300,7 @@ describe("home route", () => {
 		expect(
 			screen.getByRole("checkbox", { name: "Auto refresh timeline" }),
 		).not.toBeChecked();
-		expect(screen.getByLabelText("Auto refresh interval minutes")).toHaveValue(
-			5,
-		);
+		expect(screen.getByLabelText("Auto refresh interval")).toHaveValue("1");
 	});
 
 	it("runs a live timeline sync and reloads local data", async () => {
@@ -356,6 +363,89 @@ describe("home route", () => {
 			expect(queryUrls.length).toBeGreaterThan(initialQueryCount);
 		});
 		expect(screen.getByText("Synced 12 items")).toBeInTheDocument();
+	});
+
+	it("auto-syncs hourly and requests fresh local timeline data", async () => {
+		const queryUrls: URL[] = [];
+		const syncBodies: unknown[] = [];
+		const fetchMock = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input);
+				if (url.endsWith("/api/status")) {
+					return new Response(
+						JSON.stringify({
+							stats: { home: 3, mentions: 2, dms: 4, needsReply: 2, inbox: 4 },
+							transport: { statusText: "local" },
+							accounts: [],
+							archives: [],
+						}),
+					);
+				}
+				if (url.includes("/api/query")) {
+					queryUrls.push(new URL(url));
+					return new Response(
+						JSON.stringify({
+							resource: "home",
+							items: [
+								{
+									id: `tweet_auto_${String(queryUrls.length)}`,
+									text: "Before scheduled sync",
+								},
+							],
+						}),
+					);
+				}
+				if (url.endsWith("/api/sync") && init?.body) {
+					syncBodies.push(JSON.parse(String(init.body)));
+					return new Response(
+						JSON.stringify({
+							id: "sync_timeline_auto_hourly",
+							kind: "timeline",
+							status: "succeeded",
+							startedAt: "2026-05-15T12:00:00.000Z",
+							summary: "Synced hourly timeline",
+							inProgress: false,
+							result: {
+								ok: true,
+								kind: "timeline",
+								summary: "Synced hourly timeline",
+								steps: [],
+							},
+						}),
+					);
+				}
+				throw new Error(`Unexpected fetch ${url}`);
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<HomeRoute />);
+
+		expect(
+			await screen.findByText("Before scheduled sync"),
+		).toBeInTheDocument();
+		const initialQueryCount = queryUrls.length;
+		vi.useFakeTimers();
+		fireEvent.click(
+			screen.getByRole("checkbox", { name: "Auto refresh timeline" }),
+		);
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(60 * 60_000 - 1);
+		});
+		expect(syncBodies).toEqual([]);
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1);
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+
+		expect(syncBodies).toEqual([{ kind: "timeline" }]);
+		vi.useRealTimers();
+		await waitFor(() => {
+			expect(queryUrls.length).toBeGreaterThan(initialQueryCount);
+		});
+		expect(screen.getByText("Synced hourly timeline")).toBeInTheDocument();
 	});
 
 	it("shows a retryable error when timeline loading fails", async () => {

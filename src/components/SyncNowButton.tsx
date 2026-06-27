@@ -21,21 +21,23 @@ interface SyncNowButtonProps {
 	onSynced: (result: WebSyncResponse) => void;
 	showAutoRefreshControls?: boolean;
 	autoRefreshStorageKey?: string;
-	defaultAutoRefreshMinutes?: number;
+	defaultAutoRefreshHours?: number;
 	showAccountPicker?: boolean;
 	syncOptions?: WebSyncOptions;
 }
 
-const AUTO_REFRESH_DEFAULT_MINUTES = 5;
-const AUTO_REFRESH_MIN_MINUTES = 1;
-const AUTO_REFRESH_MAX_MINUTES = 180;
+const AUTO_REFRESH_DEFAULT_HOURS = 1;
+const AUTO_REFRESH_HOUR_MS = 60 * 60_000;
+const AUTO_REFRESH_HOUR_OPTIONS = [1, 2, 4, 6, 12, 24] as const;
 const AUTO_REFRESH_STATUS_TICK_MS = 30_000;
 
-function clampAutoRefreshMinutes(value: number, fallback: number) {
+function normalizeAutoRefreshHours(value: number, fallback: number) {
 	if (!Number.isFinite(value)) return fallback;
-	return Math.min(
-		AUTO_REFRESH_MAX_MINUTES,
-		Math.max(AUTO_REFRESH_MIN_MINUTES, Math.round(value)),
+	const rounded = Math.max(1, Math.round(value));
+	return (
+		AUTO_REFRESH_HOUR_OPTIONS.find((option) => option >= rounded) ??
+		AUTO_REFRESH_HOUR_OPTIONS[AUTO_REFRESH_HOUR_OPTIONS.length - 1] ??
+		fallback
 	);
 }
 
@@ -44,19 +46,35 @@ function readAutoRefreshEnabled(storageKey: string) {
 	return window.localStorage.getItem(`${storageKey}:enabled`) === "1";
 }
 
-function readAutoRefreshMinutes(storageKey: string, fallback: number) {
+function readAutoRefreshHours(storageKey: string, fallback: number) {
 	if (typeof window === "undefined") return fallback;
-	const stored = window.localStorage.getItem(`${storageKey}:minutes`);
-	if (stored === null) return fallback;
-	return clampAutoRefreshMinutes(Number(stored), fallback);
+	const storedHours = window.localStorage.getItem(`${storageKey}:hours`);
+	if (storedHours !== null) {
+		return normalizeAutoRefreshHours(Number(storedHours), fallback);
+	}
+	const storedMinutes = window.localStorage.getItem(`${storageKey}:minutes`);
+	if (storedMinutes !== null) {
+		return normalizeAutoRefreshHours(
+			Math.ceil(Number(storedMinutes) / 60),
+			fallback,
+		);
+	}
+	return fallback;
 }
 
 function formatAutoRefreshStatus(nextAt: number | null, now: number) {
 	if (nextAt === null) return "Auto on";
 	const remainingMs = nextAt - now;
 	if (remainingMs <= 0) return "Next now";
-	const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60_000));
-	return `Next ${String(remainingMinutes)}m`;
+	const remainingHours = Math.max(
+		1,
+		Math.ceil(remainingMs / AUTO_REFRESH_HOUR_MS),
+	);
+	return `Next ${String(remainingHours)}h`;
+}
+
+function autoRefreshHourLabel(hours: number) {
+	return hours === 1 ? "1 hour" : `${String(hours)} hours`;
 }
 
 export function SyncNowButton({
@@ -66,7 +84,7 @@ export function SyncNowButton({
 	onSynced,
 	showAutoRefreshControls = false,
 	autoRefreshStorageKey,
-	defaultAutoRefreshMinutes = AUTO_REFRESH_DEFAULT_MINUTES,
+	defaultAutoRefreshHours = AUTO_REFRESH_DEFAULT_HOURS,
 	showAccountPicker = false,
 	syncOptions,
 }: SyncNowButtonProps) {
@@ -75,15 +93,15 @@ export function SyncNowButton({
 	const [error, setError] = useState<string | null>(null);
 	const accountList = accounts ?? [];
 	const storageKey = autoRefreshStorageKey ?? `birdclaw:auto-sync:${kind}`;
-	const fallbackAutoRefreshMinutes = clampAutoRefreshMinutes(
-		defaultAutoRefreshMinutes,
-		AUTO_REFRESH_DEFAULT_MINUTES,
+	const fallbackAutoRefreshHours = normalizeAutoRefreshHours(
+		defaultAutoRefreshHours,
+		AUTO_REFRESH_DEFAULT_HOURS,
 	);
 	const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(() =>
 		readAutoRefreshEnabled(storageKey),
 	);
-	const [autoRefreshMinutes, setAutoRefreshMinutes] = useState(() =>
-		readAutoRefreshMinutes(storageKey, fallbackAutoRefreshMinutes),
+	const [autoRefreshHours, setAutoRefreshHours] = useState(() =>
+		readAutoRefreshHours(storageKey, fallbackAutoRefreshHours),
 	);
 	const [nextAutoRefreshAt, setNextAutoRefreshAt] = useState<number | null>(
 		null,
@@ -91,7 +109,7 @@ export function SyncNowButton({
 	const [autoRefreshNow, setAutoRefreshNow] = useState(() => Date.now());
 	const syncingRef = useRef(false);
 	const syncNowRef = useRef<() => Promise<void>>(async () => undefined);
-	const autoRefreshMinutesRef = useRef(autoRefreshMinutes);
+	const autoRefreshHoursRef = useRef(autoRefreshHours);
 	const globalAccountId = useSelectedAccountId(accounts);
 	const defaultAccountId = useMemo(
 		() => getDefaultAccountId(accounts),
@@ -124,16 +142,16 @@ export function SyncNowButton({
 	}, [syncing]);
 
 	useEffect(() => {
-		autoRefreshMinutesRef.current = autoRefreshMinutes;
-	}, [autoRefreshMinutes]);
+		autoRefreshHoursRef.current = autoRefreshHours;
+	}, [autoRefreshHours]);
 
 	useEffect(() => {
 		if (!showAutoRefreshControls) return;
 		setAutoRefreshEnabled(readAutoRefreshEnabled(storageKey));
-		setAutoRefreshMinutes(
-			readAutoRefreshMinutes(storageKey, fallbackAutoRefreshMinutes),
+		setAutoRefreshHours(
+			readAutoRefreshHours(storageKey, fallbackAutoRefreshHours),
 		);
-	}, [fallbackAutoRefreshMinutes, showAutoRefreshControls, storageKey]);
+	}, [fallbackAutoRefreshHours, showAutoRefreshControls, storageKey]);
 
 	useEffect(() => {
 		if (!showAutoRefreshControls || typeof window === "undefined") return;
@@ -142,12 +160,16 @@ export function SyncNowButton({
 			autoRefreshEnabled ? "1" : "0",
 		);
 		window.localStorage.setItem(
+			`${storageKey}:hours`,
+			String(autoRefreshHours),
+		);
+		window.localStorage.setItem(
 			`${storageKey}:minutes`,
-			String(autoRefreshMinutes),
+			String(autoRefreshHours * 60),
 		);
 	}, [
 		autoRefreshEnabled,
-		autoRefreshMinutes,
+		autoRefreshHours,
 		showAutoRefreshControls,
 		storageKey,
 	]);
@@ -198,8 +220,8 @@ export function SyncNowButton({
 		}
 		const now = Date.now();
 		setAutoRefreshNow(now);
-		setNextAutoRefreshAt(now + autoRefreshMinutes * 60_000);
-	}, [autoRefreshEnabled, autoRefreshMinutes, showAutoRefreshControls]);
+		setNextAutoRefreshAt(now + autoRefreshHours * AUTO_REFRESH_HOUR_MS);
+	}, [autoRefreshEnabled, autoRefreshHours, showAutoRefreshControls]);
 
 	useEffect(() => {
 		if (!showAutoRefreshControls || !autoRefreshEnabled) return;
@@ -225,7 +247,9 @@ export function SyncNowButton({
 				if (disposed) return;
 				const now = Date.now();
 				setAutoRefreshNow(now);
-				setNextAutoRefreshAt(now + autoRefreshMinutesRef.current * 60_000);
+				setNextAutoRefreshAt(
+					now + autoRefreshHoursRef.current * AUTO_REFRESH_HOUR_MS,
+				);
 			})();
 		}, delayMs);
 		return () => {
@@ -251,23 +275,25 @@ export function SyncNowButton({
 						<Clock3 className="size-3.5" strokeWidth={2} />
 						<span>Auto</span>
 					</label>
-					<input
-						aria-label="Auto refresh interval minutes"
-						className="h-6 w-12 rounded-md border border-[var(--line)] bg-[var(--bg)] px-1 text-center text-[12px] font-semibold tabular-nums text-[var(--ink)] outline-none focus:border-[var(--accent)]"
-						max={AUTO_REFRESH_MAX_MINUTES}
-						min={AUTO_REFRESH_MIN_MINUTES}
+					<select
+						aria-label="Auto refresh interval"
+						className="h-6 w-[86px] rounded-md border border-[var(--line)] bg-[var(--bg)] px-2 text-[12px] font-semibold text-[var(--ink)] outline-none focus:border-[var(--accent)]"
 						onChange={(event) =>
-							setAutoRefreshMinutes(
-								clampAutoRefreshMinutes(
+							setAutoRefreshHours(
+								normalizeAutoRefreshHours(
 									Number(event.currentTarget.value),
-									fallbackAutoRefreshMinutes,
+									fallbackAutoRefreshHours,
 								),
 							)
 						}
-						type="number"
-						value={autoRefreshMinutes}
-					/>
-					<span>min</span>
+						value={autoRefreshHours}
+					>
+						{AUTO_REFRESH_HOUR_OPTIONS.map((hours) => (
+							<option key={hours} value={hours}>
+								{autoRefreshHourLabel(hours)}
+							</option>
+						))}
+					</select>
 				</div>
 			) : null}
 			{showAccountPicker && accountAwareSync && accountList.length > 1 ? (

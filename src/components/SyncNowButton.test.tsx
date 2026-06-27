@@ -635,7 +635,7 @@ describe("SyncNowButton", () => {
 			/>,
 		);
 
-		fireEvent.change(screen.getByLabelText("Auto refresh interval minutes"), {
+		fireEvent.change(screen.getByLabelText("Auto refresh interval"), {
 			target: { value: "2" },
 		});
 		fireEvent.click(
@@ -643,7 +643,7 @@ describe("SyncNowButton", () => {
 		);
 
 		await act(async () => {
-			await vi.advanceTimersByTimeAsync(119_999);
+			await vi.advanceTimersByTimeAsync(2 * 60 * 60_000 - 1);
 		});
 		expect(fetchMock).not.toHaveBeenCalled();
 
@@ -664,6 +664,24 @@ describe("SyncNowButton", () => {
 			expect.objectContaining({ summary: "Auto synced 8 items" }),
 		);
 		expect(screen.getByText("Auto synced 8 items")).toBeInTheDocument();
+	});
+
+	it("migrates legacy minute intervals to hourly options", () => {
+		window.localStorage.setItem("birdclaw:auto-sync:timeline:minutes", "5");
+
+		render(
+			<SyncNowButton
+				kind="timeline"
+				label="Sync timeline"
+				onSynced={vi.fn()}
+				showAutoRefreshControls
+			/>,
+		);
+
+		expect(screen.getByLabelText("Auto refresh interval")).toHaveValue("1");
+		expect(
+			screen.queryByLabelText("Auto refresh interval minutes"),
+		).not.toBeInTheDocument();
 	});
 
 	it("keeps the next auto-sync deadline across parent rerenders", async () => {
@@ -693,7 +711,7 @@ describe("SyncNowButton", () => {
 		function AutoSyncHarness({ marker }: { marker: number }) {
 			return (
 				<SyncNowButton
-					defaultAutoRefreshMinutes={1}
+					defaultAutoRefreshHours={1}
 					kind="timeline"
 					label="Sync timeline"
 					onSynced={(result) => onSynced(marker, result)}
@@ -708,11 +726,11 @@ describe("SyncNowButton", () => {
 			screen.getByRole("checkbox", { name: "Auto refresh timeline" }),
 		);
 		await act(async () => {
-			await vi.advanceTimersByTimeAsync(30_000);
+			await vi.advanceTimersByTimeAsync(30 * 60_000);
 		});
 		rerender(<AutoSyncHarness marker={2} />);
 		await act(async () => {
-			await vi.advanceTimersByTimeAsync(29_999);
+			await vi.advanceTimersByTimeAsync(30 * 60_000 - 1);
 		});
 		expect(fetchMock).not.toHaveBeenCalled();
 
