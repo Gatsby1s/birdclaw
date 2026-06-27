@@ -1,4 +1,5 @@
 import {
+	act,
 	cleanup,
 	fireEvent,
 	render,
@@ -599,6 +600,70 @@ describe("SyncNowButton", () => {
 
 		expect(await screen.findByText("Synced 4 items")).toBeInTheDocument();
 		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("auto-syncs on the configured interval", async () => {
+		vi.useFakeTimers();
+		const onSynced = vi.fn();
+		const fetchMock = vi.fn(
+			async () =>
+				new Response(
+					JSON.stringify({
+						id: "sync_timeline_auto",
+						kind: "timeline",
+						status: "succeeded",
+						startedAt: "2026-05-15T12:00:00.000Z",
+						summary: "Auto synced 8 items",
+						inProgress: false,
+						result: {
+							ok: true,
+							kind: "timeline",
+							summary: "Auto synced 8 items",
+							steps: [],
+						},
+					}),
+				),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(
+			<SyncNowButton
+				kind="timeline"
+				label="Sync timeline"
+				onSynced={onSynced}
+				showAutoRefreshControls
+			/>,
+		);
+
+		fireEvent.change(screen.getByLabelText("Auto refresh interval minutes"), {
+			target: { value: "2" },
+		});
+		fireEvent.click(
+			screen.getByRole("checkbox", { name: "Auto refresh timeline" }),
+		);
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(119_999);
+		});
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1);
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+
+		expect(fetchMock).toHaveBeenCalledWith(
+			"/api/sync",
+			expect.objectContaining({
+				method: "POST",
+				body: JSON.stringify({ kind: "timeline" }),
+			}),
+		);
+		expect(onSynced).toHaveBeenCalledWith(
+			expect.objectContaining({ summary: "Auto synced 8 items" }),
+		);
+		expect(screen.getByText("Auto synced 8 items")).toBeInTheDocument();
 	});
 
 	it("surfaces in-progress sync summaries", async () => {

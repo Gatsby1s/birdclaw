@@ -204,6 +204,7 @@ describe("home route", () => {
 			);
 		});
 
+		expect(await screen.findByText("Find me")).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "Find me" }));
 		expect(fetchMock).not.toHaveBeenCalledWith(
 			"/api/action",
@@ -257,6 +258,42 @@ describe("home route", () => {
 				null,
 			);
 		});
+	});
+
+	it("shows custom auto refresh controls for the home timeline", async () => {
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.endsWith("/api/status")) {
+				return new Response(
+					JSON.stringify({
+						stats: { home: 3, mentions: 2, dms: 4, needsReply: 2, inbox: 4 },
+						transport: { statusText: "local" },
+						accounts: [],
+						archives: [],
+					}),
+				);
+			}
+			if (url.includes("/api/query")) {
+				return new Response(
+					JSON.stringify({
+						resource: "home",
+						items: [{ id: "tweet_auto_refresh", text: "Refreshable" }],
+					}),
+				);
+			}
+			throw new Error(`Unexpected fetch ${url}`);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<HomeRoute />);
+
+		expect(await screen.findByText("Refreshable")).toBeInTheDocument();
+		expect(
+			screen.getByRole("checkbox", { name: "Auto refresh timeline" }),
+		).not.toBeChecked();
+		expect(screen.getByLabelText("Auto refresh interval minutes")).toHaveValue(
+			5,
+		);
 	});
 
 	it("runs a live timeline sync and reloads local data", async () => {

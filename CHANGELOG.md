@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.9 - 2026-06-27
+
+### Added
+
+- Restore the Home timeline auto-refresh controls with a persisted custom minute interval next to `Sync timeline`.
+
 ## 0.8.8 - 2026-06-27
 
 ### Added

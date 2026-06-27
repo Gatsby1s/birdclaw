@@ -27,6 +27,7 @@ function HomeRoute() {
 			subtitle={homeSubtitle}
 			syncKind="timeline"
 			syncLabel="Sync timeline"
+			showAutoRefreshControl
 			showRepliesToOthersControl
 			title="Home"
 		/>

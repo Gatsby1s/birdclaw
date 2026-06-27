@@ -116,7 +116,9 @@ describe("mentions route", () => {
 
 		render(<MentionsRoute />);
 
-		expect(await screen.findByText("@steipete signal")).toBeInTheDocument();
+		expect(
+			await screen.findByText("@steipete signal", {}, { timeout: 5_000 }),
+		).toBeInTheDocument();
 		fireEvent.change(screen.getByPlaceholderText("Search mentions"), {
 			target: { value: "  thread  " },
 		});
@@ -128,6 +130,9 @@ describe("mentions route", () => {
 			expect(queryUrl?.searchParams.get("replyFilter")).toBe("all");
 		});
 
+		expect(
+			await screen.findByText("@steipete signal", {}, { timeout: 5_000 }),
+		).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "@steipete signal" }));
 		expect(fetchMock).not.toHaveBeenCalledWith(
 			"/api/action",

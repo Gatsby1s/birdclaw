@@ -40,6 +40,7 @@ interface TimelineRouteFrameProps {
 	emptyLabel: string;
 	emptyDetail: string;
 	subtitle: (meta: QueryEnvelope | null) => string;
+	showAutoRefreshControl?: boolean;
 	showRepliesToOthersControl?: boolean;
 	initialIncludeRepliesToOthers?: boolean;
 }
@@ -58,6 +59,7 @@ export function TimelineRouteFrame({
 	emptyLabel,
 	emptyDetail,
 	subtitle,
+	showAutoRefreshControl = false,
 	showRepliesToOthersControl = false,
 	initialIncludeRepliesToOthers = true,
 }: TimelineRouteFrameProps) {
@@ -117,6 +119,7 @@ export function TimelineRouteFrame({
 								kind={syncKind}
 								label={syncLabel}
 								onSynced={refreshLocalView}
+								showAutoRefreshControls={showAutoRefreshControl}
 								showAccountPicker
 							/>
 						</div>
