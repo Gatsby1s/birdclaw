@@ -263,6 +263,24 @@ html.theme-transition::view-transition-new(theme) {
 @media print {
 	@page {
 		margin: 16mm;
+
+		/* Own the print margin boxes so the PDF keeps page counts without Chrome's date or URL chrome. */
+		@top-left {
+			content: "";
+		}
+
+		@bottom-left {
+			content: "";
+		}
+
+		@bottom-right {
+			color: #0f1419;
+			content: counter(page) "/" counter(pages);
+			font-family:
+				-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+				"Helvetica Neue", Arial, sans-serif;
+			font-size: 10px;
+		}
 	}
 
 	html,
