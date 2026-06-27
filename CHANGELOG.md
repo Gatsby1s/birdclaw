@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.10 - 2026-06-27
+
+### Fixed
+
+- Route Today/digest and inbox OpenAI requests through `OPENAI_BASE_URL` again so local OpenAI-compatible gateways work.
+- Redact OpenAI API keys from surfaced HTTP error messages.
+
 ## 0.8.9 - 2026-06-27
 
 ### Added

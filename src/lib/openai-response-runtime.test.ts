@@ -5,11 +5,14 @@ import {
 	createOpenAIStreamState,
 	processOpenAIResponseSseChunk,
 	readOpenAIResponseStreamEffect,
+	redactOpenAIError,
 	requestOpenAIResponseEffect,
+	resolveOpenAIUrl,
 } from "./openai-response-runtime";
 
 afterEach(() => {
 	delete process.env.OPENAI_API_KEY;
+	delete process.env.OPENAI_BASE_URL;
 	vi.unstubAllGlobals();
 });
 
@@ -75,5 +78,45 @@ describe("OpenAI response runtime", () => {
 		await expect(
 			Effect.runPromise(requestOpenAIResponseEffect({ body: {} })),
 		).rejects.toThrow("400 bad request");
+	});
+
+	it("builds OpenAI-compatible URLs from custom base URLs", () => {
+		expect(resolveOpenAIUrl("/v1/responses")).toBe(
+			"https://api.openai.com/v1/responses",
+		);
+		expect(resolveOpenAIUrl("/v1/responses", "http://127.0.0.1:8080")).toBe(
+			"http://127.0.0.1:8080/v1/responses",
+		);
+		expect(resolveOpenAIUrl("/v1/responses", "http://127.0.0.1:8080/v1")).toBe(
+			"http://127.0.0.1:8080/v1/responses",
+		);
+	});
+
+	it("uses OPENAI_BASE_URL and redacts API keys from HTTP failures", async () => {
+		process.env.OPENAI_API_KEY = "test";
+		process.env.OPENAI_BASE_URL = "http://127.0.0.1:8080";
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(
+				new Response(
+					"Incorrect API key provided: sk-a69a0abcdefghijklmnopqrstuvwxyzf13a",
+					{ status: 401 },
+				),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		let message = "";
+		try {
+			await Effect.runPromise(requestOpenAIResponseEffect({ body: {} }));
+		} catch (error) {
+			message = error instanceof Error ? error.message : String(error);
+		}
+		expect(message).toContain("sk-a69a...f13a");
+		expect(message).not.toContain("sk-a69a0abcdefghijklmnopqrstuvwxyzf13a");
+		expect(fetchMock).toHaveBeenCalledWith(
+			"http://127.0.0.1:8080/v1/responses",
+			expect.any(Object),
+		);
+		expect(redactOpenAIError("short sk-abcd")).toBe("short sk-...");
 	});
 });

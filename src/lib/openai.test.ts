@@ -13,6 +13,7 @@ beforeEach(() => {
 afterEach(() => {
 	process.env.OPENAI_API_KEY = "";
 	delete process.env.BIRDCLAW_OPENAI_MODEL;
+	delete process.env.OPENAI_BASE_URL;
 	vi.unstubAllGlobals();
 });
 
@@ -77,6 +78,47 @@ describe("openai inbox scoring", () => {
 			summary: "Strong ask",
 			reasoning: "Concrete and relevant",
 		});
+	});
+
+	it("uses OPENAI_BASE_URL when a local OpenAI-compatible endpoint is configured", async () => {
+		process.env.OPENAI_API_KEY = "test-key";
+		process.env.OPENAI_BASE_URL = "http://127.0.0.1:8080";
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					choices: [
+						{
+							message: {
+								content: JSON.stringify({
+									score: 51,
+									summary: "Local route",
+									reasoning: "Uses configured base URL",
+								}),
+							},
+						},
+					],
+				}),
+			),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		await scoreInboxItemWithOpenAI({
+			entityKind: "mention",
+			title: "Mention",
+			text: "question?",
+			influenceScore: 80,
+			participant: {
+				handle: "amelia",
+				displayName: "Amelia",
+				bio: "bio",
+				followersCount: 4200,
+			},
+		});
+
+		expect(fetchMock).toHaveBeenCalledWith(
+			"http://127.0.0.1:8080/v1/chat/completions",
+			expect.any(Object),
+		);
 	});
 
 	it("exposes inbox scoring as an Effect program", async () => {

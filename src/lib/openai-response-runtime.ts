@@ -7,6 +7,7 @@ import {
 
 const DEFAULT_DELIMITER_PATTERN = /\n---\s*\n/;
 const DEFAULT_DELIMITER_HOLD = 8;
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com";
 
 export interface OpenAIStreamState {
 	eventBuffer: string;
@@ -26,6 +27,21 @@ export interface OpenAIStreamResult {
 
 function toError(error: unknown) {
 	return error instanceof Error ? error : new Error(String(error));
+}
+
+export function resolveOpenAIUrl(path: string, baseUrl?: string) {
+	const base = (baseUrl || DEFAULT_OPENAI_BASE_URL).replace(/\/+$/, "");
+	if (base.endsWith("/v1") && path.startsWith("/v1/")) {
+		return `${base}${path.slice(3)}`;
+	}
+	return `${base}${path}`;
+}
+
+export function redactOpenAIError(text: string) {
+	return text.replace(/\bsk-[A-Za-z0-9_-]+\b/g, (key) => {
+		if (key.length <= 12) return "sk-...";
+		return `${key.slice(0, 7)}...${key.slice(-4)}`;
+	});
 }
 
 export function createOpenAIStreamState(): OpenAIStreamState {
@@ -225,8 +241,12 @@ export function requestOpenAIResponseEffect({
 		if (!apiKey) {
 			return yield* Effect.fail(new Error("OPENAI_API_KEY is not set"));
 		}
+		const url = resolveOpenAIUrl(
+			"/v1/responses",
+			runtime.env("OPENAI_BASE_URL"),
+		);
 		const response = yield* tryPromise(() =>
-			runtime.fetch("https://api.openai.com/v1/responses", {
+			runtime.fetch(url, {
 				method: "POST",
 				signal,
 				headers: {
@@ -242,7 +262,7 @@ export function requestOpenAIResponseEffect({
 			);
 			return yield* Effect.fail(
 				new Error(
-					`OpenAI request failed: ${String(response.status)} ${text.slice(0, 400)}`,
+					`OpenAI request failed: ${String(response.status)} ${redactOpenAIError(text).slice(0, 400)}`,
 				),
 			);
 		}
