@@ -429,7 +429,7 @@ export function TimelineCard({
 										className={cx(
 											feedRowStatePillClass,
 											feedRowStatePillOpenClass,
-											"cursor-pointer transition-colors hover:border-[color:color-mix(in_srgb,var(--accent)_45%,var(--line))] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
+											"reply-open-pill cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
 										)}
 										href={openTweetUrl}
 										rel="noreferrer"

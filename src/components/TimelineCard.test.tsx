@@ -141,6 +141,9 @@ describe("TimelineCard", () => {
 			"target",
 			"_blank",
 		);
+		expect(screen.getByRole("link", { name: "Reply open" })).toHaveClass(
+			"reply-open-pill",
+		);
 		expect(container.querySelectorAll("header p")).toHaveLength(0);
 		fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 		expect(onReply).toHaveBeenCalledWith("tweet_1");

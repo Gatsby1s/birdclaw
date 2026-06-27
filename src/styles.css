@@ -129,6 +129,17 @@ textarea {
 	background: color-mix(in srgb, var(--ink-soft) 55%, transparent);
 }
 
+.reply-open-pill {
+	text-decoration: none;
+}
+
+.reply-open-pill:hover,
+.reply-open-pill:focus-visible {
+	background: var(--accent-soft);
+	border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+	color: var(--accent);
+}
+
 [data-theme="dark"] .mapboxgl-ctrl-group {
 	background: var(--bg-elevated);
 	border: 1px solid var(--line-strong);
