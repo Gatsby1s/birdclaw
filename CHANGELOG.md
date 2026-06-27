@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.11 - 2026-06-27
+
+### Fixed
+
+- Keep custom page numbers in exported Today digest PDFs while suppressing browser date and URL print chrome.
+
 ## 0.8.10 - 2026-06-27
 
 ### Fixed
