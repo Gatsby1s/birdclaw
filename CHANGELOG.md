@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.12 - 2026-06-27
+
+### Fixed
+
+- Keep Home timeline auto-refresh timers on schedule across page rerenders, show a compact next-run status, and group the refresh controls into one toolbar.
+- Restore the active Today digest period segment to the accent blue background with white text even when Tailwind utility order would otherwise keep the inactive transparent style.
+
 ## 0.8.11 - 2026-06-27
 
 ### Fixed
