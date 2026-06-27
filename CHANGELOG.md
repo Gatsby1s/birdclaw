@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.13 - 2026-06-28
+
+### Fixed
+
+- Make the Home timeline `open` reply pill a real external link to the original X post, including hover/focus feedback.
+
 ## 0.8.12 - 2026-06-27
 
 ### Fixed
