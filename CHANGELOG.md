@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.14 - 2026-06-28
+
+### Changed
+
+- Replace the Home timeline auto-refresh minute input with fixed hourly choices from 1 to 24 hours, migrate legacy minute settings to at least 1 hour, and verify scheduled syncs refresh local timeline data.
+
 ## 0.8.13 - 2026-06-28
 
 ### Fixed
