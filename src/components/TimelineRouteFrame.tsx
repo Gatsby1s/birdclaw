@@ -102,6 +102,19 @@ export function TimelineRouteFrame({
 			<span>Replies to others</span>
 		</label>
 	) : null;
+	const toolbarControls = (
+		<div className="flex flex-wrap items-center justify-end gap-2 px-4 pb-3">
+			{repliesToOthersControl}
+			<SyncNowButton
+				accounts={meta?.accounts}
+				kind={syncKind}
+				label={syncLabel}
+				onSynced={refreshLocalView}
+				showAutoRefreshControls={showAutoRefreshControl}
+				showAccountPicker
+			/>
+		</div>
+	);
 
 	return (
 		<TimelineFeedShell
@@ -111,21 +124,9 @@ export function TimelineRouteFrame({
 					subtitles={
 						<TimelineHeaderSubtitle>{subtitleText}</TimelineHeaderSubtitle>
 					}
-					action={
-						<div className="flex flex-wrap items-center justify-end gap-3">
-							{repliesToOthersControl}
-							<SyncNowButton
-								accounts={meta?.accounts}
-								kind={syncKind}
-								label={syncLabel}
-								onSynced={refreshLocalView}
-								showAutoRefreshControls={showAutoRefreshControl}
-								showAccountPicker
-							/>
-						</div>
-					}
 					controls={
 						<>
+							{toolbarControls}
 							<TimelineSearchField
 								onChange={setSearch}
 								placeholder={searchPlaceholder}

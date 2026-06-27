@@ -29,6 +29,7 @@ interface SyncNowButtonProps {
 const AUTO_REFRESH_DEFAULT_MINUTES = 5;
 const AUTO_REFRESH_MIN_MINUTES = 1;
 const AUTO_REFRESH_MAX_MINUTES = 180;
+const AUTO_REFRESH_STATUS_TICK_MS = 30_000;
 
 function clampAutoRefreshMinutes(value: number, fallback: number) {
 	if (!Number.isFinite(value)) return fallback;
@@ -48,6 +49,14 @@ function readAutoRefreshMinutes(storageKey: string, fallback: number) {
 	const stored = window.localStorage.getItem(`${storageKey}:minutes`);
 	if (stored === null) return fallback;
 	return clampAutoRefreshMinutes(Number(stored), fallback);
+}
+
+function formatAutoRefreshStatus(nextAt: number | null, now: number) {
+	if (nextAt === null) return "Auto on";
+	const remainingMs = nextAt - now;
+	if (remainingMs <= 0) return "Next now";
+	const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+	return `Next ${String(remainingMinutes)}m`;
 }
 
 export function SyncNowButton({
@@ -76,7 +85,13 @@ export function SyncNowButton({
 	const [autoRefreshMinutes, setAutoRefreshMinutes] = useState(() =>
 		readAutoRefreshMinutes(storageKey, fallbackAutoRefreshMinutes),
 	);
+	const [nextAutoRefreshAt, setNextAutoRefreshAt] = useState<number | null>(
+		null,
+	);
+	const [autoRefreshNow, setAutoRefreshNow] = useState(() => Date.now());
 	const syncingRef = useRef(false);
+	const syncNowRef = useRef<() => Promise<void>>(async () => undefined);
+	const autoRefreshMinutesRef = useRef(autoRefreshMinutes);
 	const globalAccountId = useSelectedAccountId(accounts);
 	const defaultAccountId = useMemo(
 		() => getDefaultAccountId(accounts),
@@ -101,12 +116,16 @@ export function SyncNowButton({
 			: (error ??
 				message ??
 				(autoRefreshEnabled
-					? `Auto every ${String(autoRefreshMinutes)} min`
+					? formatAutoRefreshStatus(nextAutoRefreshAt, autoRefreshNow)
 					: ""));
 
 	useEffect(() => {
 		syncingRef.current = syncing;
 	}, [syncing]);
+
+	useEffect(() => {
+		autoRefreshMinutesRef.current = autoRefreshMinutes;
+	}, [autoRefreshMinutes]);
 
 	useEffect(() => {
 		if (!showAutoRefreshControls) return;
@@ -169,23 +188,57 @@ export function SyncNowButton({
 	]);
 
 	useEffect(() => {
+		syncNowRef.current = syncNow;
+	}, [syncNow]);
+
+	useEffect(() => {
+		if (!showAutoRefreshControls || !autoRefreshEnabled) {
+			setNextAutoRefreshAt(null);
+			return;
+		}
+		const now = Date.now();
+		setAutoRefreshNow(now);
+		setNextAutoRefreshAt(now + autoRefreshMinutes * 60_000);
+	}, [autoRefreshEnabled, autoRefreshMinutes, showAutoRefreshControls]);
+
+	useEffect(() => {
 		if (!showAutoRefreshControls || !autoRefreshEnabled) return;
 		const timer = window.setInterval(() => {
-			void syncNow();
-		}, autoRefreshMinutes * 60_000);
+			setAutoRefreshNow(Date.now());
+		}, AUTO_REFRESH_STATUS_TICK_MS);
 		return () => window.clearInterval(timer);
-	}, [
-		autoRefreshEnabled,
-		autoRefreshMinutes,
-		showAutoRefreshControls,
-		syncNow,
-	]);
+	}, [autoRefreshEnabled, showAutoRefreshControls]);
+
+	useEffect(() => {
+		if (
+			!showAutoRefreshControls ||
+			!autoRefreshEnabled ||
+			nextAutoRefreshAt === null
+		) {
+			return;
+		}
+		let disposed = false;
+		const delayMs = Math.max(0, nextAutoRefreshAt - Date.now());
+		const timer = window.setTimeout(() => {
+			void (async () => {
+				await syncNowRef.current();
+				if (disposed) return;
+				const now = Date.now();
+				setAutoRefreshNow(now);
+				setNextAutoRefreshAt(now + autoRefreshMinutesRef.current * 60_000);
+			})();
+		}, delayMs);
+		return () => {
+			disposed = true;
+			window.clearTimeout(timer);
+		};
+	}, [autoRefreshEnabled, nextAutoRefreshAt, showAutoRefreshControls]);
 
 	return (
 		<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
 			{showAutoRefreshControls ? (
-				<div className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--panel)] px-2.5 text-[12px] font-medium text-[var(--ink-soft)] shadow-sm">
-					<label className="inline-flex items-center gap-1.5">
+				<div className="inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--panel)] px-2.5 text-[12px] font-medium text-[var(--ink-soft)] shadow-sm">
+					<label className="inline-flex items-center gap-1.5 whitespace-nowrap">
 						<input
 							aria-label="Auto refresh timeline"
 							checked={autoRefreshEnabled}
@@ -200,8 +253,7 @@ export function SyncNowButton({
 					</label>
 					<input
 						aria-label="Auto refresh interval minutes"
-						className="h-6 w-10 rounded-md border border-[var(--line)] bg-[var(--bg)] px-1 text-center text-[12px] font-semibold text-[var(--ink)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
-						disabled={!autoRefreshEnabled}
+						className="h-6 w-12 rounded-md border border-[var(--line)] bg-[var(--bg)] px-1 text-center text-[12px] font-semibold tabular-nums text-[var(--ink)] outline-none focus:border-[var(--accent)]"
 						max={AUTO_REFRESH_MAX_MINUTES}
 						min={AUTO_REFRESH_MIN_MINUTES}
 						onChange={(event) =>
@@ -262,7 +314,7 @@ export function SyncNowButton({
 			</button>
 			<span
 				className={cx(
-					"hidden max-w-[190px] truncate text-[12px] sm:inline",
+					"hidden max-w-[120px] truncate text-[12px] tabular-nums sm:inline",
 					error ? "text-[var(--alert)]" : "text-[var(--ink-soft)]",
 				)}
 				role="status"
