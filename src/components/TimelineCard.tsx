@@ -2,6 +2,7 @@ import {
 	BookmarkCheck,
 	CheckCircle2,
 	Circle,
+	ExternalLink,
 	Heart,
 	Image,
 	MessageCircle,
@@ -233,6 +234,12 @@ function isInteractiveTarget(target: EventTarget | null) {
 	);
 }
 
+function tweetPermalink(handle: string | null | undefined, tweetId: string) {
+	const cleanHandle = handle?.trim().replace(/^@/, "");
+	if (!cleanHandle || !tweetId) return null;
+	return `https://x.com/${encodeURIComponent(cleanHandle)}/status/${encodeURIComponent(tweetId)}`;
+}
+
 function TweetPresentation({
 	tweet,
 	hiddenUrlRanges,
@@ -321,6 +328,14 @@ export function TimelineCard({
 	const displayLikeCount = displayTweet.likeCount ?? item.likeCount;
 	const displayBookmarked = displayTweet.bookmarked ?? item.bookmarked;
 	const displayLiked = displayTweet.liked ?? item.liked;
+	const openTweetIsManualRetweetFallback =
+		item.retweetedTweet != null && displayTweetId === `${item.id}:retweeted`;
+	const openTweetUrl = tweetPermalink(
+		openTweetIsManualRetweetFallback
+			? item.author.handle
+			: displayAuthor.handle,
+		openTweetIsManualRetweetFallback ? item.id : displayTweetId,
+	);
 	const showLikeIndicator = displayLiked || displayLikeCount > 0;
 	const showMediaIndicator = displayMediaCount > 0;
 	const hasConversation = Boolean(
@@ -390,23 +405,41 @@ export function TimelineCard({
 								</span>
 							) : null}
 							{canReply ? (
-								<span
-									aria-label={displayIsReplied ? "We replied" : "Reply open"}
-									className={cx(
-										feedRowStatePillClass,
-										displayIsReplied
-											? feedRowStatePillActiveClass
-											: feedRowStatePillOpenClass,
-									)}
-									title={displayIsReplied ? "We replied" : "Reply open"}
-								>
-									{displayIsReplied ? (
-										<CheckCircle2 className="size-3.5" strokeWidth={2} />
-									) : (
-										<Circle className="size-3" strokeWidth={2.2} />
-									)}
-									{displayIsReplied ? "replied" : "open"}
-								</span>
+								displayIsReplied || !openTweetUrl ? (
+									<span
+										aria-label={displayIsReplied ? "We replied" : "Reply open"}
+										className={cx(
+											feedRowStatePillClass,
+											displayIsReplied
+												? feedRowStatePillActiveClass
+												: feedRowStatePillOpenClass,
+										)}
+										title={displayIsReplied ? "We replied" : "Reply open"}
+									>
+										{displayIsReplied ? (
+											<CheckCircle2 className="size-3.5" strokeWidth={2} />
+										) : (
+											<Circle className="size-3" strokeWidth={2.2} />
+										)}
+										{displayIsReplied ? "replied" : "open"}
+									</span>
+								) : (
+									<a
+										aria-label="Reply open"
+										className={cx(
+											feedRowStatePillClass,
+											feedRowStatePillOpenClass,
+											"cursor-pointer transition-colors hover:border-[color:color-mix(in_srgb,var(--accent)_45%,var(--line))] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
+										)}
+										href={openTweetUrl}
+										rel="noreferrer"
+										target="_blank"
+										title="Open original tweet"
+									>
+										<ExternalLink className="size-3.5" strokeWidth={2} />
+										open
+									</a>
+								)
 							) : null}
 						</span>
 					) : null}

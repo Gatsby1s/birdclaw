@@ -133,6 +133,14 @@ describe("TimelineCard", () => {
 		expect(
 			screen.queryByRole("img", { name: "Demo link" }),
 		).not.toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "Reply open" })).toHaveAttribute(
+			"href",
+			"https://x.com/sam/status/tweet_1",
+		);
+		expect(screen.getByRole("link", { name: "Reply open" })).toHaveAttribute(
+			"target",
+			"_blank",
+		);
 		expect(container.querySelectorAll("header p")).toHaveLength(0);
 		fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 		expect(onReply).toHaveBeenCalledWith("tweet_1");
@@ -191,6 +199,7 @@ describe("TimelineCard", () => {
 		expect(screen.getByText("Original app idea")).toBeInTheDocument();
 		expect(screen.getAllByText("@ava").length).toBeGreaterThan(0);
 		expect(screen.getByLabelText("We replied")).toBeInTheDocument();
+		expect(screen.queryByRole("link", { name: "Reply open" })).toBeNull();
 		expect(screen.getByText("7")).toBeInTheDocument();
 		expect(screen.queryByText("not bookmarked")).not.toBeInTheDocument();
 		expect(screen.queryByText("Reposted tweet")).not.toBeInTheDocument();
@@ -247,6 +256,10 @@ describe("TimelineCard", () => {
 		);
 
 		expect(screen.getByText("Original app idea")).toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "Reply open" })).toHaveAttribute(
+			"href",
+			"https://x.com/sam/status/tweet_manual",
+		);
 		fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 		expect(onReply).toHaveBeenCalledWith("tweet_manual");
 
@@ -319,6 +332,9 @@ describe("TimelineCard", () => {
 		const first = rows[0];
 		const second = rows[1];
 		if (!first || !second) throw new Error("timeline cards missing");
+		expect(
+			within(first as HTMLElement).getByRole("link", { name: "Reply open" }),
+		).toHaveAttribute("href", "https://x.com/ava/status/tweet_original");
 
 		fireEvent.click(first);
 
