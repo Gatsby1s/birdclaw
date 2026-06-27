@@ -12,7 +12,7 @@ import {
 const root = process.cwd();
 const docsDir = path.join(root, "docs");
 const outDir = path.join(root, "dist", "docs-site");
-const repoBase = "https://github.com/steipete/birdclaw";
+const repoBase = "https://github.com/Gatsby1s/birdclaw";
 const repoEditBase = `${repoBase}/edit/main/docs`;
 const cname = readCname();
 const siteBase = cname ? `https://${cname}` : "";
@@ -21,7 +21,7 @@ const productName = "birdclaw";
 const productTagline = "Local Twitter memory in SQLite";
 const productDescription =
 	"birdclaw is a local-first Twitter workspace: archive import, cached live reads, focused triage, and reply flows in one local web app + CLI.";
-const brewInstall = "brew install steipete/tap/birdclaw";
+const brewInstall = "npm install -g birdclaw";
 
 const sections = [
 	[

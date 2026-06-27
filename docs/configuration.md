@@ -48,8 +48,8 @@ The Playwright test home is `.playwright-home` in the repo, which is why CI neve
 		"birdCommand": "/Users/steipete/Projects/bird/bird"
 	},
 	"backup": {
-		"repoPath": "/Users/steipete/Projects/backup-birdclaw",
-		"remote": "https://github.com/steipete/backup-birdclaw.git",
+		"repoPath": "/Users/bijiben/Projects/backup-birdclaw",
+		"remote": "https://github.com/Gatsby1s/backup-birdclaw.git",
 		"autoSync": true,
 		"staleAfterSeconds": 900
 	}

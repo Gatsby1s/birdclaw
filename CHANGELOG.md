@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.7 - 2026-06-27
+
+### Changed
+
+- Point repository metadata, documentation links, docs-site links, backup examples, and request user-agent URLs at `Gatsby1s/birdclaw`.
+- Restrict the Homebrew tap updater to manual dispatch for the `Gatsby1s` fork instead of firing automatically on every release.
+
 ## 0.8.6 - 2026-06-27
 
 ### Added

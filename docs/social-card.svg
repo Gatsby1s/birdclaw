@@ -64,7 +64,7 @@
     <!-- install pill -->
     <rect x="0" y="0" width="420" height="48" rx="11" fill="#0f1419"/>
     <text x="20" y="32" fill="#71c9f8" font-family="JetBrains Mono, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="500">$</text>
-    <text x="42" y="32" fill="#e7eef6" font-family="JetBrains Mono, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="600">brew install steipete/tap/birdclaw</text>
+    <text x="42" y="32" fill="#e7eef6" font-family="JetBrains Mono, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="600">npm install -g birdclaw</text>
 
     <!-- URL pill -->
     <rect x="440" y="0" width="150" height="48" rx="11" fill="#ffffff" stroke="#cfd9de"/>

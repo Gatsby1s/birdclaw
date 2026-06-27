@@ -10,7 +10,7 @@ Set up a local SQLite workspace for your tweets, DMs, likes, and bookmarks, then
 ## 1. Install
 
 ```bash
-brew install steipete/tap/birdclaw
+npm install -g birdclaw
 birdclaw --version
 ```
 
@@ -126,7 +126,7 @@ birdclaw compose dm dm_003 "Send it over."
 ```bash
 birdclaw backup sync \
   --repo ~/Projects/backup-birdclaw \
-  --remote https://github.com/steipete/backup-birdclaw.git \
+  --remote https://github.com/Gatsby1s/backup-birdclaw.git \
   --json
 ```
 

@@ -96,8 +96,8 @@ function seedResearchThread() {
 			urls: [
 				{
 					url: "https://t.co/demo",
-					expanded_url: "https://github.com/steipete/birdclaw",
-					display_url: "github.com/steipete/birdclaw",
+					expanded_url: "https://github.com/Gatsby1s/birdclaw",
+					display_url: "github.com/Gatsby1s/birdclaw",
 					start: 6,
 					end: 23,
 				},
@@ -184,12 +184,12 @@ describe("research mode", () => {
 			"tweet_reply_3",
 		]);
 		expect(report.items[0]?.links).toContain(
-			"https://github.com/steipete/birdclaw",
+			"https://github.com/Gatsby1s/birdclaw",
 		);
 		expect(report.items[0]?.handles).toContain("@researchlee");
 		expect(report.markdown).toContain("# Birdclaw Research");
 		expect(report.markdown).toContain("tweet_reply_2");
-		expect(report.markdown).toContain("github.com/steipete/birdclaw");
+		expect(report.markdown).toContain("github.com/Gatsby1s/birdclaw");
 		expect(report.markdown.indexOf("Follow-up with details")).toBeLessThan(
 			report.markdown.indexOf("Another branch"),
 		);

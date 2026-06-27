@@ -22,14 +22,14 @@ Optional but encouraged:
 
 birdclaw still works in pure local/archive mode without any of the above.
 
-## Homebrew (macOS, Linux)
+## Global install (npm)
 
 ```bash
-brew install steipete/tap/birdclaw
+npm install -g birdclaw
 birdclaw --version
 ```
 
-The Homebrew formula lives in `steipete/homebrew-tap` and installs the `birdclaw` binary plus a launchd plist target.
+This fork is maintained from `Gatsby1s/birdclaw`. Use the npm package or source install path unless a dedicated `Gatsby1s` Homebrew tap is configured later.
 
 ## npm / pnpm
 
@@ -46,7 +46,7 @@ The package is published as [`birdclaw`](https://www.npmjs.com/package/birdclaw)
 ## From source
 
 ```bash
-git clone https://github.com/steipete/birdclaw.git
+git clone https://github.com/Gatsby1s/birdclaw.git
 cd birdclaw
 fnm use
 pnpm install

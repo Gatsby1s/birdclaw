@@ -1,6 +1,6 @@
 # birdclaw 🪶 — Local Twitter memory in SQLite: archives, DMs, likes, bookmarks
 
-`birdclaw` is a local-first Twitter workspace: archive import, cached live reads, focused triage, and reply flows in one local web app + CLI. Built by [@steipete](https://github.com/steipete/).
+`birdclaw` is a local-first Twitter workspace: archive import, cached live reads, focused triage, and reply flows in one local web app + CLI. Maintained independently by [@Gatsby1s](https://github.com/Gatsby1s/); originally built by [@steipete](https://github.com/steipete/).
 
 Status: WIP. Real and usable. Not done. Expect schema churn, transport gaps, and rough edges while the core settles.
 
@@ -184,10 +184,10 @@ Notes:
 
 ## Install
 
-Homebrew:
+Global npm install:
 
 ```bash
-brew install steipete/tap/birdclaw
+npm install -g birdclaw
 ```
 
 From source:
@@ -252,7 +252,7 @@ Valid `--select` slices are `tweets`, `likes`, `bookmarks`, `profiles`, `directM
 Back up the local SQLite store as canonical JSONL text:
 
 ```bash
-birdclaw backup sync --repo ~/Projects/backup-birdclaw --remote https://github.com/steipete/backup-birdclaw.git --json
+birdclaw backup sync --repo ~/Projects/backup-birdclaw --remote https://github.com/Gatsby1s/backup-birdclaw.git --json
 ```
 
 Merge the backup into the current `BIRDCLAW_HOME`:
@@ -585,7 +585,7 @@ Tweets are sharded by year for human browsing and yearly analysis. Collection-on
 Use `backup sync` when the target is a private Git repo. It pulls first, merge-imports the remote backup into local SQLite, exports the local union back into text shards, commits, and pushes.
 
 ```bash
-pnpm cli backup sync --repo ~/Projects/backup-birdclaw --remote https://github.com/steipete/backup-birdclaw.git --json
+pnpm cli backup sync --repo ~/Projects/backup-birdclaw --remote https://github.com/Gatsby1s/backup-birdclaw.git --json
 pnpm cli backup validate ~/Projects/backup-birdclaw --json
 ```
 
@@ -594,8 +594,8 @@ Configure stale-aware backup reads in `~/.birdclaw/config.json`:
 ```json
 {
 	"backup": {
-		"repoPath": "/Users/steipete/Projects/backup-birdclaw",
-		"remote": "https://github.com/steipete/backup-birdclaw.git",
+		"repoPath": "/Users/bijiben/Projects/backup-birdclaw",
+		"remote": "https://github.com/Gatsby1s/backup-birdclaw.git",
 		"autoSync": true,
 		"staleAfterSeconds": 900
 	}

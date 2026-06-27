@@ -157,7 +157,7 @@ birdclaw backup export --repo ~/Projects/birdclaw-store --commit --push
 - commits and pushes the backup repo
 
 ```bash
-birdclaw backup sync --repo ~/Projects/backup-birdclaw --remote https://github.com/steipete/backup-birdclaw.git --json
+birdclaw backup sync --repo ~/Projects/backup-birdclaw --remote https://github.com/Gatsby1s/backup-birdclaw.git --json
 ```
 
 Shard contract:
@@ -177,8 +177,8 @@ Backup auto-sync config lives in `~/.birdclaw/config.json`:
 ```json
 {
 	"backup": {
-		"repoPath": "/Users/steipete/Projects/backup-birdclaw",
-		"remote": "https://github.com/steipete/backup-birdclaw.git",
+		"repoPath": "/Users/bijiben/Projects/backup-birdclaw",
+		"remote": "https://github.com/Gatsby1s/backup-birdclaw.git",
 		"autoSync": true,
 		"staleAfterSeconds": 900
 	}

@@ -1,8 +1,8 @@
 # birdclaw Spec
 
 Status: draft 3
-Owner: Peter Steinberger
-Repo: `steipete/birdclaw`
+Owner: Gatsby1s
+Repo: `Gatsby1s/birdclaw`
 
 ## One-liner
 

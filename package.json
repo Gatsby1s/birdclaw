@@ -1,12 +1,12 @@
 {
 	"name": "birdclaw",
-	"version": "0.8.6",
+	"version": "0.8.7",
 	"description": "Local Twitter memory in SQLite for archives, DMs, likes, bookmarks, and moderation",
-	"homepage": "https://github.com/steipete/birdclaw#readme",
+	"homepage": "https://github.com/Gatsby1s/birdclaw#readme",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/steipete/birdclaw.git"
+		"url": "git+https://github.com/Gatsby1s/birdclaw.git"
 	},
 	"bin": {
 		"birdclaw": "bin/birdclaw.mjs"

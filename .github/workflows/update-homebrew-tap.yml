@@ -1,8 +1,6 @@
 name: Update Homebrew Tap
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -47,10 +45,10 @@ jobs:
           set -euo pipefail
           test -n "$GH_TOKEN"
           gh workflow run update-formula.yml \
-            --repo steipete/homebrew-tap \
+            --repo Gatsby1s/homebrew-tap \
             -f formula=birdclaw \
             -f tag="$RELEASE_TAG" \
-            -f repository=steipete/birdclaw \
+            -f repository=Gatsby1s/birdclaw \
             -f artifact_url='https://registry.npmjs.org/{formula}/-/{formula}-{version}.tgz' \
             -f request_id="$REQUEST_ID"
 
@@ -62,10 +60,10 @@ jobs:
         run: |
           set -euo pipefail
           for _ in {1..20}; do
-            run_id="$(gh run list --repo steipete/homebrew-tap --workflow update-formula.yml --json databaseId,displayTitle --jq '.[] | select(.displayTitle | contains(env.REQUEST_ID)) | .databaseId' | head -n1)"
+            run_id="$(gh run list --repo Gatsby1s/homebrew-tap --workflow update-formula.yml --json databaseId,displayTitle --jq '.[] | select(.displayTitle | contains(env.REQUEST_ID)) | .databaseId' | head -n1)"
             if [[ -n "$run_id" ]]; then
               for _ in {1..270}; do
-                state="$(gh run view "$run_id" --repo steipete/homebrew-tap --json status,conclusion --jq '[.status, (.conclusion // "")] | @tsv' 2>/dev/null || true)"
+                state="$(gh run view "$run_id" --repo Gatsby1s/homebrew-tap --json status,conclusion --jq '[.status, (.conclusion // "")] | @tsv' 2>/dev/null || true)"
                 if [[ "$state" == completed$'\t'success ]]; then
                   exit 0
                 fi

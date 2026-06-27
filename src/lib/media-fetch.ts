@@ -750,7 +750,7 @@ export function fetchTweetMediaEffect(options: MediaFetchOptions = {}) {
 		);
 		const userAgent =
 			options.userAgent ??
-			`birdclaw/${packageVersion ?? "0.0.0"} (https://github.com/steipete/birdclaw)`;
+			`birdclaw/${packageVersion ?? "0.0.0"} (https://github.com/Gatsby1s/birdclaw)`;
 		const { mediaOriginalsDir } = getBirdclawPaths();
 		yield* tryMediaSync(() =>
 			mkdirSync(mediaOriginalsDir, { recursive: true }),

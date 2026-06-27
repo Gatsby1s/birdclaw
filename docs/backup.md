@@ -70,7 +70,7 @@ The recommended round-trip workflow:
 ```bash
 birdclaw backup sync \
   --repo ~/Projects/backup-birdclaw \
-  --remote https://github.com/steipete/backup-birdclaw.git \
+  --remote https://github.com/Gatsby1s/backup-birdclaw.git \
   --json
 ```
 
@@ -118,8 +118,8 @@ Exits non-zero on validation failure. Run it in CI before publishing a backup, o
 ```json
 {
   "backup": {
-    "repoPath": "/Users/steipete/Projects/backup-birdclaw",
-    "remote": "https://github.com/steipete/backup-birdclaw.git",
+    "repoPath": "/Users/bijiben/Projects/backup-birdclaw",
+    "remote": "https://github.com/Gatsby1s/backup-birdclaw.git",
     "autoSync": true,
     "staleAfterSeconds": 900
   }
