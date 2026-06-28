@@ -255,6 +255,43 @@ describe("today route", () => {
 		expect(document.title).toBe("birdclaw");
 	});
 
+	it("renders generated citations as source links without coloring the prose", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return new Response(JSON.stringify({ ok: true, results: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				const markdown =
+					"# Today\n\n## What people are talking about\n\n- Alice says memory pricing should stay firm (tweet_1).";
+				return ndjsonResponse([
+					{ type: "delta", delta: markdown },
+					{ type: "done", result: digestResult("Today", markdown) },
+				]);
+			}),
+		);
+
+		render(<TodayRoute />);
+
+		await screen.findByRole("heading", { name: "Today", level: 1 });
+		expect(
+			screen.queryByRole("link", {
+				name: "Alice says memory pricing should stay firm",
+			}),
+		).toBeNull();
+		expect(
+			screen.getByText(/Alice says memory pricing should stay firm/),
+		).toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "source" })).toHaveAttribute(
+			"href",
+			"https://x.com/alice/status/tweet_1",
+		);
+		expect(screen.queryByText(/tweet_1/)).toBeNull();
+	});
+
 	it("shows request errors", async () => {
 		vi.stubGlobal(
 			"fetch",

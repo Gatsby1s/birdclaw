@@ -357,6 +357,38 @@ describe("MarkdownViewer", () => {
 		expect(screen.queryByRole("link", { name: "source 2" })).toBeNull();
 	});
 
+	it("renders source-only citations without linking nearby prose", () => {
+		render(
+			<MarkdownViewer
+				context={context}
+				markdown={
+					"@kilocode says StepFun is widely used, with BYOK access to Opus, GPT-5.5, Gemini 3, and 500+ models at provider cost (tweet_2057574939775938900, tweet_2057578665408434460)."
+				}
+				sourceOnlyCitations
+			/>,
+		);
+
+		expect(
+			screen.queryByRole("link", {
+				name: "says StepFun is widely used, with BYOK access to Opus, GPT-5.5, Gemini 3",
+			}),
+		).toBeNull();
+		expect(
+			screen.queryByRole("link", {
+				name: "500+ models at provider cost",
+			}),
+		).toBeNull();
+		expect(screen.getByText(/says StepFun is widely used/)).toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "source 1" })).toHaveAttribute(
+			"href",
+			"https://x.com/kilocode/status/2057574939775938900",
+		);
+		expect(screen.getByRole("link", { name: "source 2" })).toHaveAttribute(
+			"href",
+			"https://x.com/kilocode/status/2057578665408434460",
+		);
+	});
+
 	it("keeps mixed unresolved grouped tweet citations visible", () => {
 		render(
 			<MarkdownViewer
