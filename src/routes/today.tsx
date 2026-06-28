@@ -494,6 +494,7 @@ export function TodayRouteView({
 				<MarkdownViewer
 					context={result?.context ?? context}
 					markdown={markdown}
+					sourceOnlyCitations
 				/>
 			) : (
 				<div className="px-4 py-5 text-[14px] text-[var(--ink-soft)]">

@@ -36,6 +36,7 @@ export type CitationContext =
 type InlineLookup = {
 	tweetsById: Map<string, CitationTweet>;
 	profilesByHandle: Map<string, ProfileRecord>;
+	linkReadableCitationText: boolean;
 };
 
 function normalizeTweetReference(value: string) {
@@ -615,7 +616,10 @@ export function renderInline(text: string, lookup: InlineLookup) {
 		) {
 			if (references.every(isNumericTweetReference)) {
 				const cursorAfterSourceWords = skipRedundantSourceWords(text, cursor);
-				if (linkTrailingDirectCitationText(nodes, references, tokenKey)) {
+				if (
+					lookup.linkReadableCitationText &&
+					linkTrailingDirectCitationText(nodes, references, tokenKey)
+				) {
 					cursor = cursorAfterSourceWords;
 					continue;
 				}
@@ -640,6 +644,7 @@ export function renderInline(text: string, lookup: InlineLookup) {
 			tweet &&
 			isParenthesizedTweetRef &&
 			allReferencesResolved &&
+			lookup.linkReadableCitationText &&
 			linkTrailingCitationText(nodes, tweets, tokenKey)
 		) {
 			cursor = skipRedundantSourceWords(text, cursor);
@@ -662,7 +667,10 @@ export function renderInline(text: string, lookup: InlineLookup) {
 			isNumericTweetReference(references[0] ?? "")
 		) {
 			const cursorAfterSourceWords = skipRedundantSourceWords(text, cursor);
-			if (linkTrailingDirectCitationText(nodes, references, tokenKey)) {
+			if (
+				lookup.linkReadableCitationText &&
+				linkTrailingDirectCitationText(nodes, references, tokenKey)
+			) {
 				cursor = cursorAfterSourceWords;
 				continue;
 			}
@@ -770,11 +778,19 @@ function conversationTweetToCitation(
 	};
 }
 
-export function buildLookup(context?: CitationContext | null): InlineLookup {
+export function buildLookup(
+	context?: CitationContext | null,
+	options: { linkReadableCitationText?: boolean } = {},
+): InlineLookup {
 	const tweetsById = new Map<string, CitationTweet>();
 	const profilesByHandle = new Map<string, ProfileRecord>();
+	const lookup = {
+		tweetsById,
+		profilesByHandle,
+		linkReadableCitationText: options.linkReadableCitationText ?? true,
+	};
 	if (!context) {
-		return { tweetsById, profilesByHandle };
+		return lookup;
 	}
 	if (isProfileAnalysisContext(context)) {
 		profilesByHandle.set(context.profile.handle.toLowerCase(), context.profile);
@@ -795,10 +811,10 @@ export function buildLookup(context?: CitationContext | null): InlineLookup {
 				conversationTweetToCitation(tweet),
 			);
 		}
-		return { tweetsById, profilesByHandle };
+		return lookup;
 	}
 	for (const tweet of context.tweets) {
 		addLookupTweet(tweetsById, profilesByHandle, tweet);
 	}
-	return { tweetsById, profilesByHandle };
+	return lookup;
 }
