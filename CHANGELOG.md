@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.15 - 2026-06-29
+
+### Fixed
+
+- Keep Today digest citation links scoped to `source` labels so cited body text no longer turns blue.
+
 ## 0.8.14 - 2026-06-28
 
 ### Changed
