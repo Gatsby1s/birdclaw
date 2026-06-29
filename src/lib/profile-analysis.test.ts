@@ -50,6 +50,7 @@ beforeEach(() => {
 	process.env.BIRDCLAW_PROFILE_ANALYSIS_CONVERSATION_DELAY_MS = "0";
 	process.env.BIRDCLAW_PROFILE_ANALYSIS_RATE_LIMIT_RETRY_MS = "0";
 	process.env.BIRDCLAW_PROFILE_ANALYSIS_RATE_LIMIT_MAX_RETRIES = "0";
+	process.env.BIRDCLAW_PROFILE_ANALYSIS_SOURCE = "xurl";
 	mocks.lookupUsersByHandlesEffect.mockReset();
 	mocks.listUserTweetsEffect.mockReset();
 	mocks.searchRecentByConversationIdEffect.mockReset();
@@ -125,6 +126,7 @@ afterEach(() => {
 	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_RATE_LIMIT_RETRY_MS;
 	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_RATE_LIMIT_MAX_RETRIES;
 	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_ACCOUNT;
+	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_SOURCE;
 	vi.unstubAllGlobals();
 	for (const tempRoot of tempRoots.splice(0)) {
 		rmSync(tempRoot, { recursive: true, force: true });
@@ -132,6 +134,185 @@ afterEach(() => {
 });
 
 describe("profile analysis", () => {
+	it("builds profile context from local tweets without xurl", async () => {
+		const db = getNativeDb();
+		const now = "2026-06-01T00:00:00.000Z";
+		db.prepare(
+			`
+      insert into profiles (
+        id, handle, display_name, bio, followers_count, following_count,
+        avatar_hue, avatar_url, created_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+		).run(
+			"profile_local_alice",
+			"localalice",
+			"Local Alice",
+			"Archives local-first tooling.",
+			900,
+			12,
+			42,
+			null,
+			now,
+		);
+		db.prepare(
+			`
+      insert into profiles (
+        id, handle, display_name, bio, followers_count, following_count,
+        avatar_hue, avatar_url, created_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+		).run(
+			"profile_local_bob",
+			"localbob",
+			"Local Bob",
+			"Replies from the archive.",
+			80,
+			3,
+			84,
+			null,
+			now,
+		);
+		db.prepare(
+			`
+      insert into tweets (
+        id, author_profile_id, text, created_at, is_replied, reply_to_id,
+        like_count, media_count, entities_json, media_json, quoted_tweet_id
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+		).run(
+			"local_root",
+			"profile_local_alice",
+			"Local archives should power analysis first.",
+			"2026-05-31T10:00:00.000Z",
+			0,
+			null,
+			15,
+			0,
+			"{}",
+			"[]",
+			null,
+		);
+		db.prepare(
+			`
+      insert into tweets (
+        id, author_profile_id, text, created_at, is_replied, reply_to_id,
+        like_count, media_count, entities_json, media_json, quoted_tweet_id
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+		).run(
+			"local_reply",
+			"profile_local_bob",
+			"That local reply context is already here.",
+			"2026-05-31T10:02:00.000Z",
+			0,
+			"local_root",
+			4,
+			0,
+			"{}",
+			"[]",
+			null,
+		);
+		db.prepare(
+			`
+      insert into tweets (
+        id, author_profile_id, text, created_at, is_replied, reply_to_id,
+        like_count, media_count, entities_json, media_json, quoted_tweet_id
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+		).run(
+			"local_nested_reply",
+			"profile_local_bob",
+			"Nested local replies should stay in the conversation context.",
+			"2026-05-31T10:03:00.000Z",
+			0,
+			"local_reply",
+			2,
+			0,
+			"{}",
+			"[]",
+			null,
+		);
+		const insertEdge = db.prepare(
+			`
+      insert into tweet_account_edges (
+        account_id, tweet_id, kind, first_seen_at, last_seen_at, seen_count,
+        source, raw_json, updated_at
+      ) values (?, ?, ?, ?, ?, 1, ?, ?, ?)
+      `,
+		);
+		insertEdge.run(
+			"acct_primary",
+			"local_root",
+			"authored",
+			now,
+			now,
+			"archive",
+			JSON.stringify({
+				conversation_id: "local_root",
+				public_metrics: { like_count: 15, reply_count: 1 },
+			}),
+			now,
+		);
+		insertEdge.run(
+			"acct_primary",
+			"local_reply",
+			"thread_context",
+			now,
+			now,
+			"archive",
+			JSON.stringify({
+				conversation_id: "local_root",
+				referenced_tweets: [{ type: "replied_to", id: "local_root" }],
+				public_metrics: { like_count: 4 },
+			}),
+			now,
+		);
+		insertEdge.run(
+			"acct_primary",
+			"local_nested_reply",
+			"thread_context",
+			now,
+			now,
+			"archive",
+			JSON.stringify({
+				conversation_id: "local_root",
+				referenced_tweets: [{ type: "replied_to", id: "local_reply" }],
+				public_metrics: { like_count: 2 },
+			}),
+			now,
+		);
+
+		const events: string[] = [];
+		const result = await streamProfileAnalysis(
+			{
+				handle: "localalice",
+				source: "local",
+				maxTweets: 10,
+				maxConversations: 1,
+			},
+			{
+				onEvent: (event) => {
+					if (event.type === "status") events.push(event.label);
+				},
+			},
+		);
+
+		expect(result.context.source).toBe("local");
+		expect(result.context.tweets.map((tweet) => tweet.id)).toEqual([
+			"local_root",
+		]);
+		expect(result.context.conversations.map((tweet) => tweet.id)).toEqual([
+			"local_nested_reply",
+			"local_reply",
+			"local_root",
+		]);
+		expect(events).toContain("Reading local profile archive");
+		expect(mocks.lookupUsersByHandlesEffect).not.toHaveBeenCalled();
+		expect(mocks.listUserTweetsEffect).not.toHaveBeenCalled();
+		expect(mocks.searchRecentByConversationIdEffect).not.toHaveBeenCalled();
+	});
+
 	it("backfills profile tweets and conversation context before caching the AI result", async () => {
 		const events: string[] = [];
 		const result = await streamProfileAnalysis(

@@ -381,7 +381,7 @@ export interface TransportStatus {
 	rawStatus?: string;
 }
 
-export type LiveDataSourceKind = "birdclaw" | "bird" | "xurl";
+export type LiveDataSourceKind = "birdclaw" | "bird" | "xurl" | "twitter6551";
 
 export interface LiveDataSourceAccount {
 	id?: string;

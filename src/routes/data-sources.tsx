@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
 	AlertTriangle,
 	CheckCircle2,
+	Cloud,
 	Database,
 	RefreshCw,
 	Route as RouteIcon,
@@ -46,6 +47,7 @@ async function fetchDataSources() {
 function sourceIcon(source: LiveDataSourceKind) {
 	if (source === "birdclaw") return Database;
 	if (source === "bird") return TerminalSquare;
+	if (source === "twitter6551") return Cloud;
 	return RouteIcon;
 }
 
@@ -67,6 +69,7 @@ function statusIcon(status: LiveDataSourceStatus["status"]) {
 
 function sourceLabel(source: LiveDataSourceKind) {
 	if (source === "birdclaw") return "local";
+	if (source === "twitter6551") return "6551";
 	return source;
 }
 

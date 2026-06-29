@@ -442,7 +442,42 @@ export const linkInsightResponseSchema = z.object({
 });
 export type LinkInsightResponse = z.infer<typeof linkInsightResponseSchema>;
 
-const liveDataSourceKindSchema = z.enum(["birdclaw", "bird", "xurl"]);
+export const profileAnalysisSourceSchema = z.enum(["local", "xurl", "6551"]);
+export type ProfileAnalysisSourceSetting = z.infer<
+	typeof profileAnalysisSourceSchema
+>;
+
+export const birdclawSettingsSchema = z.object({
+	analysis: z.object({
+		profileSource: profileAnalysisSourceSchema,
+	}),
+	providers: z.object({
+		twitter6551: z.object({
+			baseUrl: z.string(),
+			tokenEnv: z.string(),
+			tokenDetected: z.boolean(),
+		}),
+	}),
+});
+export type BirdclawSettings = z.infer<typeof birdclawSettingsSchema>;
+
+export const updateBirdclawSettingsSchema = z.object({
+	analysis: z
+		.object({
+			profileSource: profileAnalysisSourceSchema.optional(),
+		})
+		.optional(),
+});
+export type UpdateBirdclawSettings = z.infer<
+	typeof updateBirdclawSettingsSchema
+>;
+
+const liveDataSourceKindSchema = z.enum([
+	"birdclaw",
+	"bird",
+	"xurl",
+	"twitter6551",
+]);
 const liveDataSourceAccountSchema = z.object({
 	id: z.string().optional(),
 	username: z.string().optional(),

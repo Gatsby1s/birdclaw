@@ -104,6 +104,7 @@ const context = {
 } satisfies PeriodDigestContext;
 
 const profileAnalysisContext = {
+	source: "xurl",
 	handle: "steipete",
 	accountId: "account_steipete",
 	accountHandle: "steipete",

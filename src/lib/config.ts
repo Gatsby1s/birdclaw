@@ -19,6 +19,7 @@ export interface BirdclawPaths {
 
 export type MentionsDataSource = "birdclaw" | "auto" | "xurl" | "bird";
 export type ActionsTransport = "auto" | "bird" | "xurl";
+export type ProfileAnalysisSource = "local" | "xurl" | "6551";
 
 export interface BirdclawConfig {
 	mentions?: {
@@ -27,6 +28,15 @@ export interface BirdclawConfig {
 	};
 	actions?: {
 		transport?: ActionsTransport;
+	};
+	analysis?: {
+		profileSource?: ProfileAnalysisSource;
+	};
+	providers?: {
+		twitter6551?: {
+			baseUrl?: string;
+			tokenEnv?: string;
+		};
 	};
 	backup?: {
 		repoPath?: string;
@@ -106,6 +116,56 @@ export function setActionsTransport(transport: ActionsTransport) {
 	};
 	const configPath = writeBirdclawConfig(nextConfig);
 	return { configPath, transport };
+}
+
+function isProfileAnalysisSource(
+	value: string | undefined,
+): value is ProfileAnalysisSource {
+	return value === "local" || value === "xurl" || value === "6551";
+}
+
+export function resolveProfileAnalysisSource(
+	requestedMode?: string,
+): ProfileAnalysisSource {
+	if (isProfileAnalysisSource(requestedMode)) {
+		return requestedMode;
+	}
+
+	const envMode = process.env.BIRDCLAW_PROFILE_ANALYSIS_SOURCE?.trim();
+	if (isProfileAnalysisSource(envMode)) {
+		return envMode;
+	}
+
+	const configMode = getBirdclawConfig().analysis?.profileSource;
+	if (isProfileAnalysisSource(configMode)) {
+		return configMode;
+	}
+
+	return "local";
+}
+
+export function setProfileAnalysisSource(source: ProfileAnalysisSource) {
+	const config = parseConfigFile(getConfigPath());
+	const nextConfig: BirdclawConfig = {
+		...config,
+		analysis: {
+			...config.analysis,
+			profileSource: source,
+		},
+	};
+	const configPath = writeBirdclawConfig(nextConfig);
+	return { configPath, source };
+}
+
+export function getTwitter6551Config() {
+	const configured = getBirdclawConfig().providers?.twitter6551;
+	const tokenEnv = configured?.tokenEnv?.trim() || "TWITTER_TOKEN";
+	const baseUrl = configured?.baseUrl?.trim() || "https://ai.6551.io";
+	return {
+		baseUrl,
+		tokenEnv,
+		tokenDetected: Boolean(process.env[tokenEnv]?.trim()),
+	};
 }
 
 export function resolveMentionsDataSource(

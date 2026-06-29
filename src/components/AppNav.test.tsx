@@ -61,6 +61,10 @@ describe("AppNav", () => {
 		expect(
 			screen.getByRole("link", { name: "Rate Limits" }),
 		).toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
+			"href",
+			"/settings",
+		);
 		expect(
 			screen.getByText("Fast search for your archive."),
 		).toBeInTheDocument();

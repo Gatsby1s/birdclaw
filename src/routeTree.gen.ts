@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TodayRouteImport } from './routes/today'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RateLimitsRouteImport } from './routes/rate-limits'
 import { Route as ProfileAnalyzeRouteImport } from './routes/profile-analyze'
 import { Route as NetworkMapRouteImport } from './routes/network-map'
@@ -27,6 +28,7 @@ import { Route as ProfilesHandleRouteImport } from './routes/profiles.$handle'
 import { Route as ApiXurlRateLimitsRouteImport } from './routes/api/xurl-rate-limits'
 import { Route as ApiSyncRouteImport } from './routes/api/sync'
 import { Route as ApiStatusRouteImport } from './routes/api/status'
+import { Route as ApiSettingsRouteImport } from './routes/api/settings'
 import { Route as ApiSearchDiscussionRouteImport } from './routes/api/search-discussion'
 import { Route as ApiQueryRouteImport } from './routes/api/query'
 import { Route as ApiProfileHydrateRouteImport } from './routes/api/profile-hydrate'
@@ -45,6 +47,11 @@ import { Route as ApiActionRouteImport } from './routes/api/action'
 const TodayRoute = TodayRouteImport.update({
   id: '/today',
   path: '/today',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RateLimitsRoute = RateLimitsRouteImport.update({
@@ -132,6 +139,11 @@ const ApiStatusRoute = ApiStatusRouteImport.update({
   path: '/api/status',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSettingsRoute = ApiSettingsRouteImport.update({
+  id: '/api/settings',
+  path: '/api/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSearchDiscussionRoute = ApiSearchDiscussionRouteImport.update({
   id: '/api/search-discussion',
   path: '/api/search-discussion',
@@ -217,6 +229,7 @@ export interface FileRoutesByFullPath {
   '/network-map': typeof NetworkMapRoute
   '/profile-analyze': typeof ProfileAnalyzeRoute
   '/rate-limits': typeof RateLimitsRoute
+  '/settings': typeof SettingsRoute
   '/today': typeof TodayRoute
   '/api/action': typeof ApiActionRoute
   '/api/avatar': typeof ApiAvatarRoute
@@ -232,6 +245,7 @@ export interface FileRoutesByFullPath {
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
   '/api/query': typeof ApiQueryRoute
   '/api/search-discussion': typeof ApiSearchDiscussionRoute
+  '/api/settings': typeof ApiSettingsRoute
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
@@ -251,6 +265,7 @@ export interface FileRoutesByTo {
   '/network-map': typeof NetworkMapRoute
   '/profile-analyze': typeof ProfileAnalyzeRoute
   '/rate-limits': typeof RateLimitsRoute
+  '/settings': typeof SettingsRoute
   '/today': typeof TodayRoute
   '/api/action': typeof ApiActionRoute
   '/api/avatar': typeof ApiAvatarRoute
@@ -266,6 +281,7 @@ export interface FileRoutesByTo {
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
   '/api/query': typeof ApiQueryRoute
   '/api/search-discussion': typeof ApiSearchDiscussionRoute
+  '/api/settings': typeof ApiSettingsRoute
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
@@ -286,6 +302,7 @@ export interface FileRoutesById {
   '/network-map': typeof NetworkMapRoute
   '/profile-analyze': typeof ProfileAnalyzeRoute
   '/rate-limits': typeof RateLimitsRoute
+  '/settings': typeof SettingsRoute
   '/today': typeof TodayRoute
   '/api/action': typeof ApiActionRoute
   '/api/avatar': typeof ApiAvatarRoute
@@ -301,6 +318,7 @@ export interface FileRoutesById {
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
   '/api/query': typeof ApiQueryRoute
   '/api/search-discussion': typeof ApiSearchDiscussionRoute
+  '/api/settings': typeof ApiSettingsRoute
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
@@ -322,6 +340,7 @@ export interface FileRouteTypes {
     | '/network-map'
     | '/profile-analyze'
     | '/rate-limits'
+    | '/settings'
     | '/today'
     | '/api/action'
     | '/api/avatar'
@@ -337,6 +356,7 @@ export interface FileRouteTypes {
     | '/api/profile-hydrate'
     | '/api/query'
     | '/api/search-discussion'
+    | '/api/settings'
     | '/api/status'
     | '/api/sync'
     | '/api/xurl-rate-limits'
@@ -356,6 +376,7 @@ export interface FileRouteTypes {
     | '/network-map'
     | '/profile-analyze'
     | '/rate-limits'
+    | '/settings'
     | '/today'
     | '/api/action'
     | '/api/avatar'
@@ -371,6 +392,7 @@ export interface FileRouteTypes {
     | '/api/profile-hydrate'
     | '/api/query'
     | '/api/search-discussion'
+    | '/api/settings'
     | '/api/status'
     | '/api/sync'
     | '/api/xurl-rate-limits'
@@ -390,6 +412,7 @@ export interface FileRouteTypes {
     | '/network-map'
     | '/profile-analyze'
     | '/rate-limits'
+    | '/settings'
     | '/today'
     | '/api/action'
     | '/api/avatar'
@@ -405,6 +428,7 @@ export interface FileRouteTypes {
     | '/api/profile-hydrate'
     | '/api/query'
     | '/api/search-discussion'
+    | '/api/settings'
     | '/api/status'
     | '/api/sync'
     | '/api/xurl-rate-limits'
@@ -425,6 +449,7 @@ export interface RootRouteChildren {
   NetworkMapRoute: typeof NetworkMapRoute
   ProfileAnalyzeRoute: typeof ProfileAnalyzeRoute
   RateLimitsRoute: typeof RateLimitsRoute
+  SettingsRoute: typeof SettingsRoute
   TodayRoute: typeof TodayRoute
   ApiActionRoute: typeof ApiActionRoute
   ApiAvatarRoute: typeof ApiAvatarRoute
@@ -440,6 +465,7 @@ export interface RootRouteChildren {
   ApiProfileHydrateRoute: typeof ApiProfileHydrateRoute
   ApiQueryRoute: typeof ApiQueryRoute
   ApiSearchDiscussionRoute: typeof ApiSearchDiscussionRoute
+  ApiSettingsRoute: typeof ApiSettingsRoute
   ApiStatusRoute: typeof ApiStatusRoute
   ApiSyncRoute: typeof ApiSyncRoute
   ApiXurlRateLimitsRoute: typeof ApiXurlRateLimitsRoute
@@ -453,6 +479,13 @@ declare module '@tanstack/react-router' {
       path: '/today'
       fullPath: '/today'
       preLoaderRoute: typeof TodayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/rate-limits': {
@@ -574,6 +607,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/settings': {
+      id: '/api/settings'
+      path: '/api/settings'
+      fullPath: '/api/settings'
+      preLoaderRoute: typeof ApiSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/search-discussion': {
       id: '/api/search-discussion'
       path: '/api/search-discussion'
@@ -689,6 +729,7 @@ const rootRouteChildren: RootRouteChildren = {
   NetworkMapRoute: NetworkMapRoute,
   ProfileAnalyzeRoute: ProfileAnalyzeRoute,
   RateLimitsRoute: RateLimitsRoute,
+  SettingsRoute: SettingsRoute,
   TodayRoute: TodayRoute,
   ApiActionRoute: ApiActionRoute,
   ApiAvatarRoute: ApiAvatarRoute,
@@ -704,6 +745,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiProfileHydrateRoute: ApiProfileHydrateRoute,
   ApiQueryRoute: ApiQueryRoute,
   ApiSearchDiscussionRoute: ApiSearchDiscussionRoute,
+  ApiSettingsRoute: ApiSettingsRoute,
   ApiStatusRoute: ApiStatusRoute,
   ApiSyncRoute: ApiSyncRoute,
   ApiXurlRateLimitsRoute: ApiXurlRateLimitsRoute,

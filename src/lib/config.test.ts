@@ -1,5 +1,11 @@
 // @vitest-environment node
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,10 +14,13 @@ import {
 	getBirdCommand,
 	getBirdclawConfig,
 	getBirdclawPaths,
+	getTwitter6551Config,
 	resetBirdclawPathsForTests,
 	resolveActionsTransport,
 	resolveMentionsDataSource,
+	resolveProfileAnalysisSource,
 	setActionsTransport,
+	setProfileAnalysisSource,
 } from "./config";
 
 const tempRoots: string[] = [];
@@ -25,6 +34,9 @@ afterEach(() => {
 	delete process.env.BIRDCLAW_ACTIONS_TRANSPORT;
 	delete process.env.BIRDCLAW_BIRD_COMMAND;
 	delete process.env.BIRDCLAW_MENTIONS_DATA_SOURCE;
+	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_SOURCE;
+	delete process.env.BIRDCLAW_6551_TOKEN;
+	delete process.env.TWITTER_TOKEN;
 
 	for (const tempRoot of tempRoots.splice(0)) {
 		rmSync(tempRoot, { recursive: true, force: true });
@@ -134,6 +146,119 @@ describe("config", () => {
 			},
 		});
 		expect(resolveActionsTransport()).toBe("xurl");
+	});
+
+	it("resolves profile analysis source from config and env", () => {
+		const tempRoot = mkdtempSync(path.join(os.tmpdir(), "birdclaw-config-"));
+		tempRoots.push(tempRoot);
+		process.env.BIRDCLAW_HOME = tempRoot;
+		writeFileSync(
+			path.join(tempRoot, "config.json"),
+			JSON.stringify({
+				analysis: {
+					profileSource: "xurl",
+				},
+			}),
+		);
+
+		expect(resolveProfileAnalysisSource()).toBe("xurl");
+		process.env.BIRDCLAW_PROFILE_ANALYSIS_SOURCE = "6551";
+		expect(resolveProfileAnalysisSource()).toBe("6551");
+		expect(resolveProfileAnalysisSource("local")).toBe("local");
+	});
+
+	it("sets profile analysis source in the active config file", () => {
+		const tempRoot = mkdtempSync(path.join(os.tmpdir(), "birdclaw-config-"));
+		tempRoots.push(tempRoot);
+		process.env.BIRDCLAW_HOME = tempRoot;
+
+		expect(setProfileAnalysisSource("local")).toEqual({
+			configPath: path.join(tempRoot, "config.json"),
+			source: "local",
+		});
+		expect(getBirdclawConfig()).toEqual({
+			analysis: {
+				profileSource: "local",
+			},
+		});
+		expect(resolveProfileAnalysisSource()).toBe("local");
+	});
+
+	it("preserves config fields written after the in-process cache was loaded", () => {
+		const tempRoot = mkdtempSync(path.join(os.tmpdir(), "birdclaw-config-"));
+		tempRoots.push(tempRoot);
+		process.env.BIRDCLAW_HOME = tempRoot;
+		const configPath = path.join(tempRoot, "config.json");
+		writeFileSync(
+			configPath,
+			JSON.stringify({
+				actions: {
+					transport: "xurl",
+				},
+			}),
+		);
+		expect(getBirdclawConfig()).toEqual({
+			actions: {
+				transport: "xurl",
+			},
+		});
+		writeFileSync(
+			configPath,
+			JSON.stringify({
+				actions: {
+					transport: "xurl",
+				},
+				providers: {
+					twitter6551: {
+						baseUrl: "https://example.test",
+						tokenEnv: "BIRDCLAW_6551_TOKEN",
+					},
+				},
+			}),
+		);
+
+		setProfileAnalysisSource("local");
+
+		expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
+			actions: {
+				transport: "xurl",
+			},
+			analysis: {
+				profileSource: "local",
+			},
+			providers: {
+				twitter6551: {
+					baseUrl: "https://example.test",
+					tokenEnv: "BIRDCLAW_6551_TOKEN",
+				},
+			},
+		});
+	});
+
+	it("detects the configured 6551 token env without storing token values", () => {
+		const tempRoot = mkdtempSync(path.join(os.tmpdir(), "birdclaw-config-"));
+		tempRoots.push(tempRoot);
+		process.env.BIRDCLAW_HOME = tempRoot;
+		process.env.BIRDCLAW_CONFIG = path.join(tempRoot, "custom-config.json");
+		process.env.BIRDCLAW_6551_TOKEN = "secret";
+		writeFileSync(
+			process.env.BIRDCLAW_CONFIG,
+			JSON.stringify({
+				providers: {
+					twitter6551: {
+						baseUrl: "https://example.test",
+						tokenEnv: "BIRDCLAW_6551_TOKEN",
+					},
+				},
+			}),
+		);
+
+		expect(getTwitter6551Config()).toEqual({
+			baseUrl: "https://example.test",
+			tokenEnv: "BIRDCLAW_6551_TOKEN",
+			tokenDetected: true,
+		});
+		delete process.env.BIRDCLAW_6551_TOKEN;
 	});
 
 	it("defaults bird command to PATH lookup", () => {
