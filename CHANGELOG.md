@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.18 - 2026-06-30
+
+### Fixed
+
+- Hydrate Home timeline author profiles from bird profile/following data so newly followed accounts render real avatars instead of blank initials-only placeholders.
+
 ## 0.8.17 - 2026-06-29
 
 ### Added
