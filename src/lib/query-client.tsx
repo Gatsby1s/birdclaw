@@ -14,6 +14,7 @@ export const queryKeys = {
 	blockSync: ["block-sync"] as const,
 	inbox: ["inbox"] as const,
 	dataSources: ["data-sources"] as const,
+	settings: ["settings"] as const,
 	rateLimits: ["rate-limits"] as const,
 };
 

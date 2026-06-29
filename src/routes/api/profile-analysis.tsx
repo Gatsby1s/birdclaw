@@ -13,6 +13,7 @@ import {
 	type ProfileAnalysisOptions,
 	type ProfileAnalysisStreamEvent,
 } from "#/lib/profile-analysis";
+import { resolveProfileAnalysisSource } from "#/lib/config";
 
 function parseBoolean(value: string | null) {
 	return value === "true" || value === "1" || value === "yes";
@@ -34,6 +35,9 @@ function parseOptions(url: URL): ProfileAnalysisOptions {
 	return {
 		handle: url.searchParams.get("handle") ?? "",
 		account: url.searchParams.get("account") ?? undefined,
+		source: resolveProfileAnalysisSource(
+			url.searchParams.get("source") ?? undefined,
+		),
 		refresh: parseBoolean(url.searchParams.get("refresh")),
 		model: url.searchParams.get("model") === "gpt-5.5" ? "gpt-5.5" : undefined,
 		maxTweets: parseBoundedInteger(url.searchParams.get("maxTweets"), {

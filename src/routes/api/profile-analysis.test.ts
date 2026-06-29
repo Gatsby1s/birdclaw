@@ -80,6 +80,7 @@ describe("api profile analysis route", () => {
 				maxConversations: 3,
 				maxConversationPages: 2,
 				account: undefined,
+				source: "local",
 				signal: expect.any(AbortSignal),
 			},
 			expect.objectContaining({ onEvent: expect.any(Function) }),

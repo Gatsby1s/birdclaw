@@ -8,9 +8,16 @@ import {
 	requestHybridAnalysisEffect,
 	resolveAnalysisModelSettings,
 } from "./analysis-runtime";
+import {
+	getTwitter6551Config,
+	resolveProfileAnalysisSource,
+	type ProfileAnalysisSource,
+} from "./config";
 import { getNativeDb } from "./db";
 import { runEffectPromise, tryPromise } from "./effect-runtime";
 import { buildMediaJsonFromIncludes, countTweetMedia } from "./media-includes";
+import { profileFromDbRow } from "./profile-row";
+import { parseJsonField } from "./query-read-model-shared";
 import type { Database } from "./sqlite";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
 import { tweetEntitiesFromXurl } from "./tweet-render";
@@ -19,6 +26,7 @@ import type {
 	TweetEntities,
 	XurlMediaItem,
 	XurlMentionUser,
+	XurlPublicMetrics,
 	XurlTweetData,
 	XurlTweetsResponse,
 	XurlUserTweet,
@@ -40,6 +48,7 @@ import {
 export interface ProfileAnalysisOptions {
 	handle: string;
 	account?: string;
+	source?: ProfileAnalysisSource;
 	refresh?: boolean;
 	maxTweets?: number;
 	maxPages?: number;
@@ -86,6 +95,7 @@ export interface CompactConversationTweet extends CompactProfileTweet {
 }
 
 export interface ProfileAnalysisContext {
+	source: ProfileAnalysisSource;
 	handle: string;
 	accountId: string;
 	accountHandle: string;
@@ -506,7 +516,440 @@ function compactConversationTweet(
 	};
 }
 
+type LocalTweetRow = {
+	id: string;
+	text: string;
+	created_at: string;
+	reply_to_id: string | null;
+	like_count: number | null;
+	entities_json: string | null;
+	edge_raw_json: string | null;
+	profile_id: string;
+	profile_handle: string;
+	profile_display_name: string;
+	profile_bio: string;
+	profile_followers_count: number;
+	profile_following_count: number;
+	profile_avatar_hue: number;
+	profile_avatar_url: string | null;
+	profile_location: string | null;
+	profile_url: string | null;
+	profile_verified_type: string | null;
+	profile_entities_json: string | null;
+	profile_created_at: string;
+};
+
+function nonEmptyStringValue(value: unknown) {
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function rawStringField(record: Record<string, unknown>, keys: string[]) {
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string" && value.length > 0) {
+			return value;
+		}
+	}
+	return undefined;
+}
+
+function rawNumberField(record: Record<string, unknown>, keys: string[]) {
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return value;
+		}
+		if (typeof value === "string") {
+			const parsed = Number(value);
+			if (Number.isFinite(parsed)) return parsed;
+		}
+	}
+	return undefined;
+}
+
+function publicMetricsFromRaw(raw: Record<string, unknown>): XurlPublicMetrics {
+	const metrics = raw.public_metrics ?? raw.publicMetrics;
+	return metrics && typeof metrics === "object" && !Array.isArray(metrics)
+		? (metrics as XurlPublicMetrics)
+		: {};
+}
+
+function metricNumber(
+	raw: Record<string, unknown>,
+	metrics: XurlPublicMetrics,
+	metricKeys: string[],
+	fallback = 0,
+) {
+	const metricValue = rawNumberField(
+		metrics as Record<string, unknown>,
+		metricKeys,
+	);
+	if (metricValue !== undefined) return metricValue;
+	return rawNumberField(raw, metricKeys) ?? fallback;
+}
+
+function referencedTweetIdFromRaw(
+	raw: Record<string, unknown>,
+	type: "replied_to" | "quoted",
+) {
+	const references = raw.referenced_tweets ?? raw.referencedTweets;
+	if (!Array.isArray(references)) return undefined;
+	for (const reference of references) {
+		if (!reference || typeof reference !== "object") continue;
+		const record = reference as Record<string, unknown>;
+		if (record.type === type && typeof record.id === "string") {
+			return record.id;
+		}
+	}
+	return undefined;
+}
+
+function localExternalUserId(profile: ProfileRecord) {
+	return profile.id.replace(/^profile_user_/, "") || profile.id;
+}
+
+function compactLocalTweetRow(
+	row: LocalTweetRow,
+	authorHandle: string,
+): CompactProfileTweet {
+	const raw = parseJsonField<Record<string, unknown>>(row.edge_raw_json, {});
+	const metrics = publicMetricsFromRaw(raw);
+	const replyToId =
+		referencedTweetIdFromRaw(raw, "replied_to") ??
+		nonEmptyStringValue(row.reply_to_id);
+	const conversationId =
+		rawStringField(raw, ["conversation_id", "conversationId"]) ??
+		replyToId ??
+		row.id;
+	return {
+		id: row.id,
+		url: tweetUrl(authorHandle, row.id),
+		author: authorHandle,
+		createdAt: row.created_at,
+		text: row.text,
+		entities: parseJsonField<TweetEntities>(row.entities_json, {}),
+		...(conversationId ? { conversationId } : {}),
+		...(replyToId ? { replyToId } : {}),
+		likeCount: metricNumber(
+			raw,
+			metrics,
+			["like_count", "likeCount"],
+			Number(row.like_count ?? 0),
+		),
+		replyCount: metricNumber(raw, metrics, ["reply_count", "replyCount"], 0),
+		retweetCount: metricNumber(
+			raw,
+			metrics,
+			["retweet_count", "retweetCount"],
+			0,
+		),
+		quoteCount: metricNumber(raw, metrics, ["quote_count", "quoteCount"], 0),
+		bookmarkedCount: metricNumber(
+			raw,
+			metrics,
+			["bookmark_count", "bookmarked_count", "bookmarkCount"],
+			0,
+		),
+	};
+}
+
+function compactLocalConversationTweet(
+	row: LocalTweetRow,
+	conversationRootId: string,
+): CompactConversationTweet {
+	const profile = profileFromDbRow(row, "profile_");
+	return {
+		...compactLocalTweetRow(row, profile.handle),
+		conversationRootId,
+		profileId: profile.id,
+		name: profile.displayName,
+		bio: profile.bio,
+		followersCount: profile.followersCount,
+		...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}),
+	};
+}
+
+function readLocalProfile(db: Database, handle: string) {
+	const row = db
+		.prepare(
+			`
+      select *
+      from profiles
+      where lower(trim(handle, '@')) = lower(trim(?, '@'))
+      limit 1
+      `,
+		)
+		.get(handle) as Record<string, unknown> | undefined;
+	return row ? profileFromDbRow(row) : null;
+}
+
+function readLocalProfileTweets(
+	db: Database,
+	accountId: string,
+	profileId: string,
+	maxTweets: number,
+) {
+	return db
+		.prepare(`
+    select
+      t.id,
+      t.text,
+      t.created_at,
+      t.reply_to_id,
+      t.like_count,
+      t.entities_json,
+      coalesce((
+        select edge.raw_json
+        from tweet_account_edges edge
+        where edge.tweet_id = t.id
+          and edge.account_id = ?
+        order by
+          case edge.kind
+            when 'profile' then 0
+            when 'authored' then 1
+            when 'thread_context' then 2
+            else 3
+          end,
+          edge.last_seen_at desc
+        limit 1
+      ), '{}') as edge_raw_json,
+      p.id as profile_id,
+      p.handle as profile_handle,
+      p.display_name as profile_display_name,
+      p.bio as profile_bio,
+      p.followers_count as profile_followers_count,
+      p.following_count as profile_following_count,
+      p.avatar_hue as profile_avatar_hue,
+      p.avatar_url as profile_avatar_url,
+      p.location as profile_location,
+      p.url as profile_url,
+      p.verified_type as profile_verified_type,
+      p.entities_json as profile_entities_json,
+      p.created_at as profile_created_at
+    from tweets t
+    join profiles p on p.id = t.author_profile_id
+    where t.author_profile_id = ?
+    order by t.created_at desc, t.id desc
+    limit ?
+  `)
+		.all(accountId, profileId, maxTweets) as LocalTweetRow[];
+}
+
+function topLocalConversationIds(
+	tweets: CompactProfileTweet[],
+	maxConversations: number,
+) {
+	const candidates = new Map<
+		string,
+		{ id: string; score: number; createdAt: string }
+	>();
+	for (const tweet of tweets) {
+		const id = tweet.conversationId ?? tweet.replyToId ?? tweet.id;
+		const score = tweet.replyCount * 8 + tweet.quoteCount * 4 + tweet.likeCount;
+		const existing = candidates.get(id);
+		if (!existing || score > existing.score) {
+			candidates.set(id, { id, score, createdAt: tweet.createdAt });
+		}
+	}
+	return [...candidates.values()]
+		.sort(
+			(left, right) =>
+				right.score - left.score ||
+				right.createdAt.localeCompare(left.createdAt),
+		)
+		.slice(0, maxConversations)
+		.map((item) => item.id);
+}
+
+function placeholders(values: readonly unknown[]) {
+	return values.map(() => "?").join(", ");
+}
+
+function readLocalConversationRows(
+	db: Database,
+	accountId: string,
+	conversationRoots: string[],
+	profileTweets: CompactProfileTweet[],
+	maxConversationPages: number,
+) {
+	const roots = [...new Set(conversationRoots)].filter(Boolean);
+	if (roots.length === 0) return [];
+	const limit = Math.max(
+		roots.length,
+		roots.length * maxConversationPages * XURL_PAGE_SIZE,
+	);
+	const tweetIds = profileTweets.map((tweet) => tweet.id);
+	const replyToIds = profileTweets
+		.map((tweet) => tweet.replyToId)
+		.filter((id): id is string => Boolean(id));
+	const idMatches = [...new Set([...roots, ...replyToIds])];
+	const parentMatches = [...new Set([...roots, ...tweetIds])];
+	const clauses: string[] = [];
+	const params: string[] = [];
+	if (idMatches.length > 0) {
+		clauses.push(`t.id in (${placeholders(idMatches)})`);
+		params.push(...idMatches);
+	}
+	if (parentMatches.length > 0) {
+		clauses.push(`t.reply_to_id in (${placeholders(parentMatches)})`);
+		params.push(...parentMatches);
+	}
+	if (roots.length > 0) {
+		clauses.push(`
+      exists (
+        select 1
+        from tweet_account_edges conversation_edge
+        where conversation_edge.tweet_id = t.id
+          and conversation_edge.account_id = ?
+          and (${roots.map(() => "conversation_edge.raw_json like ?").join(" or ")})
+      )
+    `);
+		params.push(accountId, ...roots.map((root) => `%${root}%`));
+	}
+	const whereSql = `
+    where ${clauses.map((clause) => `(${clause})`).join(" or ")}
+    order by t.created_at desc, t.id desc
+  `;
+	return db
+		.prepare(`
+    select
+      t.id,
+      t.text,
+      t.created_at,
+      t.reply_to_id,
+      t.like_count,
+      t.entities_json,
+      coalesce((
+        select edge.raw_json
+        from tweet_account_edges edge
+        where edge.tweet_id = t.id
+          and edge.account_id = ?
+        order by
+          case edge.kind
+            when 'thread_context' then 0
+            when 'profile' then 1
+            when 'authored' then 2
+            else 3
+          end,
+          edge.last_seen_at desc
+        limit 1
+      ), '{}') as edge_raw_json,
+      p.id as profile_id,
+      p.handle as profile_handle,
+      p.display_name as profile_display_name,
+      p.bio as profile_bio,
+      p.followers_count as profile_followers_count,
+      p.following_count as profile_following_count,
+      p.avatar_hue as profile_avatar_hue,
+      p.avatar_url as profile_avatar_url,
+      p.location as profile_location,
+      p.url as profile_url,
+      p.verified_type as profile_verified_type,
+      p.entities_json as profile_entities_json,
+      p.created_at as profile_created_at
+    from tweets t
+    join profiles p on p.id = t.author_profile_id
+    ${whereSql}
+    limit ?
+  `)
+		.all(accountId, ...params, limit) as LocalTweetRow[];
+}
+
+function localConversationRootId(row: LocalTweetRow, roots: Set<string>) {
+	const raw = parseJsonField<Record<string, unknown>>(row.edge_raw_json, {});
+	const rawConversationId = rawStringField(raw, [
+		"conversation_id",
+		"conversationId",
+	]);
+	if (rawConversationId && roots.has(rawConversationId)) {
+		return rawConversationId;
+	}
+	if (roots.has(row.id)) return row.id;
+	if (row.reply_to_id && roots.has(row.reply_to_id)) return row.reply_to_id;
+	return rawConversationId ?? row.reply_to_id ?? row.id;
+}
+
+function buildContextFromLocalStore({
+	account,
+	handle,
+	maxTweets,
+	maxConversations,
+	maxConversationPages,
+	db,
+}: {
+	account: { id: string; handle: string };
+	handle: string;
+	maxTweets: number;
+	maxConversations: number;
+	maxConversationPages: number;
+	db: Database;
+}): ProfileAnalysisContext {
+	const profile = readLocalProfile(db, handle);
+	if (!profile) {
+		throw new Error(
+			`No local profile found for @${handle}. Choose XURL refresh in Settings to backfill it.`,
+		);
+	}
+	const tweetRows = readLocalProfileTweets(
+		db,
+		account.id,
+		profile.id,
+		maxTweets,
+	);
+	if (tweetRows.length === 0) {
+		throw new Error(
+			`No local tweets found for @${profile.handle}. Choose XURL refresh in Settings to backfill it.`,
+		);
+	}
+	const tweets = tweetRows
+		.map((row) => compactLocalTweetRow(row, profile.handle))
+		.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+	const conversationRoots = topLocalConversationIds(tweets, maxConversations);
+	const rootSet = new Set(conversationRoots);
+	const conversationRows = readLocalConversationRows(
+		db,
+		account.id,
+		conversationRoots,
+		tweets,
+		maxConversationPages,
+	);
+	const seenConversationTweets = new Set<string>();
+	const conversations = conversationRows
+		.map((row) =>
+			compactLocalConversationTweet(row, localConversationRootId(row, rootSet)),
+		)
+		.filter((tweet) => {
+			if (seenConversationTweets.has(tweet.id)) return false;
+			seenConversationTweets.add(tweet.id);
+			return true;
+		})
+		.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+	const withoutHash = {
+		source: "local",
+		handle: profile.handle,
+		accountId: account.id,
+		accountHandle: account.handle,
+		profile,
+		externalUserId: localExternalUserId(profile),
+		tweets,
+		conversations,
+		counts: {
+			tweets: tweets.length,
+			tweetPages: tweets.length > 0 ? 1 : 0,
+			conversationsScanned: conversationRoots.length,
+			conversationTweets: conversations.length,
+			conversationPages: conversations.length > 0 ? 1 : 0,
+		},
+		fetchCached: false,
+	} satisfies Omit<ProfileAnalysisContext, "hash">;
+	return {
+		...withoutHash,
+		hash: contextHash(withoutHash),
+	};
+}
+
 function contextCacheKey(options: {
+	source: ProfileAnalysisSource;
 	accountId: string;
 	handle: string;
 	maxTweets: number;
@@ -516,6 +959,7 @@ function contextCacheKey(options: {
 }) {
 	return [
 		"profile-analysis:context",
+		options.source,
 		options.accountId,
 		options.handle.toLowerCase(),
 		String(options.maxTweets),
@@ -534,6 +978,7 @@ function contextHash(context: Omit<ProfileAnalysisContext, "hash">) {
 	return createHash("sha1")
 		.update(
 			JSON.stringify({
+				source: context.source,
 				handle: context.handle,
 				accountId: context.accountId,
 				accountHandle: context.accountHandle,
@@ -588,6 +1033,7 @@ function topConversationIds(tweets: XurlTweetData[], maxConversations: number) {
 }
 
 function buildContextFromPayloads({
+	source,
 	account,
 	handle,
 	profile,
@@ -599,6 +1045,7 @@ function buildContextFromPayloads({
 	conversationPages,
 	fetchCached,
 }: {
+	source: ProfileAnalysisSource;
 	account: { id: string; handle: string };
 	handle: string;
 	profile: ProfileRecord;
@@ -630,6 +1077,7 @@ function buildContextFromPayloads({
 		.filter((tweet): tweet is CompactConversationTweet => tweet !== null)
 		.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 	const withoutHash = {
+		source,
 		handle,
 		accountId: account.id,
 		accountHandle: account.handle,
@@ -704,6 +1152,9 @@ export function collectProfileAnalysisContextEffect(
 		const account = yield* tryProfileSync(() =>
 			resolveAccount(db, options.account),
 		);
+		const source = yield* tryProfileSync(() =>
+			resolveProfileAnalysisSource(options.source),
+		);
 		const maxTweets = yield* tryProfileSync(() =>
 			normalizePositiveInteger(
 				options.maxTweets,
@@ -736,7 +1187,33 @@ export function collectProfileAnalysisContextEffect(
 		const rateLimitRetryMs = rateLimitRetryMsFromOptions(options);
 		const rateLimitMaxRetries = rateLimitMaxRetriesFromOptions(options);
 		const cacheTtlMs = normalizeCacheTtlMs(options.cacheTtlMs);
+		if (source === "local") {
+			emitStatus(handlers, "Reading local profile archive", `@${handle}`);
+			yield* abortIfRequestedEffect(options.signal);
+			return yield* tryProfileSync(() =>
+				buildContextFromLocalStore({
+					account,
+					handle,
+					maxTweets,
+					maxConversations,
+					maxConversationPages,
+					db,
+				}),
+			);
+		}
+		if (source === "6551") {
+			const config = getTwitter6551Config();
+			const tokenState = config.tokenDetected
+				? `${config.tokenEnv} is detected`
+				: `${config.tokenEnv} is not detected`;
+			return yield* Effect.fail(
+				new Error(
+					`6551 refresh is selected, but the Profile Analyse 6551 adapter is not wired yet (${tokenState}). Choose Local or XURL refresh in Settings.`,
+				),
+			);
+		}
 		const contextKey = contextCacheKey({
+			source,
 			accountId: account.id,
 			handle,
 			maxTweets,
@@ -752,7 +1229,7 @@ export function collectProfileAnalysisContextEffect(
 			: Number.POSITIVE_INFINITY;
 		if (!options.refresh && cached && ageMs <= cacheTtlMs) {
 			emitStatus(handlers, "Using cached profile backfill", `@${handle}`);
-			return { ...cached.value, fetchCached: true };
+			return { ...cached.value, source, fetchCached: true };
 		}
 
 		const recordTimelineAttempt = (attempt: XurlJsonCommandAttempt) =>
@@ -956,6 +1433,7 @@ export function collectProfileAnalysisContextEffect(
 		);
 
 		const context = buildContextFromPayloads({
+			source,
 			account,
 			handle: resolved.profile.handle,
 			profile: resolved.profile,
@@ -1030,12 +1508,13 @@ function buildPrompt(context: ProfileAnalysisContext) {
 	const { dataset, tweetCount, conversationCount } = fitPromptDataset(context);
 	return `Profile: @${context.handle}
 Account cache: ${context.accountId} (${context.accountHandle})
-Fetched profile tweets: ${String(context.counts.tweets)} across ${String(context.counts.tweetPages)} pages
-Fetched conversation tweets: ${String(context.counts.conversationTweets)} across ${String(context.counts.conversationPages)} pages
+Source: ${context.source}
+Profile tweets: ${String(context.counts.tweets)} across ${String(context.counts.tweetPages)} pages
+Conversation tweets: ${String(context.counts.conversationTweets)} across ${String(context.counts.conversationPages)} pages
 Prompt tweets: ${String(tweetCount)} of ${String(context.tweets.length)}
 Prompt conversation tweets: ${String(conversationCount)} of ${String(context.conversations.length)}
 
-Write a high-signal Markdown profile analysis from X/Twitter API data.
+Write a high-signal Markdown profile analysis from the supplied X/Twitter data.
 
 Requirements:
 - Summarize who this person appears to be, what they care about, and what kind of attention they attract.

@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { getAuthenticatedBirdAccountEffect } from "./bird";
+import { getTwitter6551Config, resolveProfileAnalysisSource } from "./config";
 import { getNativeDb } from "./db";
 import type { LiveDataSourcesResponse } from "./api-contracts";
 import type {
@@ -160,41 +161,82 @@ function getXurlStatusEffect(): Effect.Effect<LiveDataSourceStatus, never> {
 	);
 }
 
-const capabilities: LiveDataSourceCapability[] = [
-	{
-		key: "timeline",
-		label: "Home timeline",
-		primary: "xurl",
-		fallbacks: ["bird"],
-	},
-	{
-		key: "mentions",
-		label: "Mentions",
-		primary: "xurl",
-		fallbacks: ["bird", "birdclaw"],
-		notes: "bird fallback is skipped when a since/start cursor requires xurl.",
-	},
-	{
-		key: "search",
-		label: "Fresh search",
-		primary: "bird",
-		fallbacks: ["xurl", "birdclaw"],
-		notes: "dated searches require xurl.",
-	},
-	{
-		key: "dms",
-		label: "DMs",
-		primary: "xurl",
-		fallbacks: ["bird", "birdclaw"],
-		notes: "message requests require bird.",
-	},
-	{
-		key: "follow-graph",
-		label: "Followers / following",
-		primary: "bird",
-		fallbacks: ["xurl", "birdclaw"],
-	},
-];
+function getTwitter6551StatusEffect(): Effect.Effect<
+	LiveDataSourceStatus,
+	never
+> {
+	return Effect.sync(() => {
+		const config = getTwitter6551Config();
+		return {
+			source: "twitter6551" as const,
+			label: "6551 Twitter API",
+			works: false,
+			installed: true,
+			status: "warning" as const,
+			detail: config.tokenDetected
+				? `${config.tokenEnv} detected; Profile Analyse adapter pending`
+				: `${config.tokenEnv} not detected`,
+			accounts: [],
+		};
+	});
+}
+
+function profileAnalysisSourceKind(): LiveDataSourceCapability["primary"] {
+	const source = resolveProfileAnalysisSource();
+	if (source === "xurl") return "xurl";
+	if (source === "6551") return "twitter6551";
+	return "birdclaw";
+}
+
+function buildCapabilities(): LiveDataSourceCapability[] {
+	const profilePrimary = profileAnalysisSourceKind();
+	const profileFallbacks = (
+		["birdclaw", "xurl", "twitter6551"] as const
+	).filter((source) => source !== profilePrimary);
+	return [
+		{
+			key: "timeline",
+			label: "Home timeline",
+			primary: "xurl",
+			fallbacks: ["bird"],
+		},
+		{
+			key: "mentions",
+			label: "Mentions",
+			primary: "xurl",
+			fallbacks: ["bird", "birdclaw"],
+			notes:
+				"bird fallback is skipped when a since/start cursor requires xurl.",
+		},
+		{
+			key: "profile-analysis",
+			label: "Profile Analyse",
+			primary: profilePrimary,
+			fallbacks: profileFallbacks,
+			notes: "Controlled by Settings; refresh sources are explicit.",
+		},
+		{
+			key: "search",
+			label: "Fresh search",
+			primary: "bird",
+			fallbacks: ["xurl", "birdclaw"],
+			notes: "dated searches require xurl.",
+		},
+		{
+			key: "dms",
+			label: "DMs",
+			primary: "xurl",
+			fallbacks: ["bird", "birdclaw"],
+			notes: "message requests require bird.",
+		},
+		{
+			key: "follow-graph",
+			label: "Followers / following",
+			primary: "bird",
+			fallbacks: ["xurl", "birdclaw"],
+		},
+	];
+}
 
 export function getLiveDataSourcesEffect(): Effect.Effect<
 	LiveDataSourcesResponse,
@@ -202,13 +244,18 @@ export function getLiveDataSourcesEffect(): Effect.Effect<
 > {
 	return Effect.gen(function* () {
 		const sources = yield* Effect.all(
-			[getBirdclawStatusEffect(), getBirdStatusEffect(), getXurlStatusEffect()],
+			[
+				getBirdclawStatusEffect(),
+				getBirdStatusEffect(),
+				getXurlStatusEffect(),
+				getTwitter6551StatusEffect(),
+			],
 			{ concurrency: "unbounded" },
 		);
 		return {
 			generatedAt: new Date().toISOString(),
 			sources,
-			capabilities,
+			capabilities: buildCapabilities(),
 		};
 	});
 }

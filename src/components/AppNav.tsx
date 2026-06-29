@@ -12,6 +12,7 @@ import {
 	Link as LinkIcon,
 	Mail,
 	MessagesSquare,
+	Settings,
 	ShieldOff,
 	UserSearch,
 } from "lucide-react";
@@ -45,6 +46,7 @@ const links = [
 	{ to: "/profile-analyze", label: "Analyse", icon: UserSearch },
 	{ to: "/network-map", label: "Map", icon: Globe2 },
 	{ to: "/data-sources", label: "Sources", icon: Database },
+	{ to: "/settings", label: "Settings", icon: Settings },
 	{ to: "/", label: "Home", icon: Home },
 	{ to: "/mentions", label: "Mentions", icon: Bell },
 	{ to: "/likes", label: "Likes", icon: Heart },

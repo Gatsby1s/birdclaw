@@ -147,9 +147,15 @@ export async function profileAnalysisRequestError(response: Response) {
 export function formatProfileAnalysisCounts(
 	context: ProfileAnalysisContext | null,
 ) {
-	if (!context) return "xurl profile backfill with cached AI analysis.";
+	if (!context) return "profile context with cached AI analysis.";
+	const sourceLabel =
+		context.source === "xurl"
+			? "XURL refresh"
+			: context.source === "6551"
+				? "6551 refresh"
+				: "local archive";
 	return [
-		context.fetchCached ? "cached backfill" : "fresh xurl backfill",
+		context.fetchCached ? `cached ${sourceLabel}` : sourceLabel,
 		`${String(context.counts.tweets)} tweets`,
 		`${String(context.counts.conversationTweets)} conversation tweets`,
 		`${String(context.counts.conversationsScanned)} conversations`,

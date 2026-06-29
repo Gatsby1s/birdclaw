@@ -238,6 +238,7 @@ export function registerAnalysisCommands({
 		handle: string,
 		options: {
 			account?: string;
+			source?: string;
 			model?: string;
 			refresh?: boolean;
 			maxTweets?: string;
@@ -313,9 +314,24 @@ export function registerAnalysisCommands({
 		) {
 			return null;
 		}
+		const source = (() => {
+			if (options.source === undefined) return undefined;
+			const normalized = options.source.trim().toLowerCase();
+			if (
+				normalized === "local" ||
+				normalized === "xurl" ||
+				normalized === "6551"
+			) {
+				return normalized;
+			}
+			printError("--source must be local, xurl, or 6551");
+			return null;
+		})();
+		if (source === null) return null;
 		return {
 			handle,
 			account: options.account,
+			...(source ? { source } : {}),
 			model: options.model,
 			refresh: Boolean(options.refresh),
 			maxTweets,
@@ -412,8 +428,9 @@ export function registerAnalysisCommands({
 	program
 		.command("profile-analyze <handle>")
 		.alias("profile-analyse")
-		.description("Backfill a profile with xurl and summarize it with AI")
+		.description("Analyze a profile from the configured source")
 		.option("--account <accountId>", "Account id")
+		.option("--source <source>", "Override source: local, xurl, or 6551")
 		.option("--model <model>", "OpenAI model id")
 		.option("--refresh", "Bypass profile fetch and analysis caches")
 		.option("--max-tweets <n>", "Maximum profile tweets", "10000")
