@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.16 - 2026-06-29
+
+### Fixed
+
+- Keep ordinary Markdown title links in the Today digest body at the normal text color instead of the blue accent link color.
+
 ## 0.8.15 - 2026-06-29
 
 ### Fixed
