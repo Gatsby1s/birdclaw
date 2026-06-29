@@ -56,6 +56,8 @@ const DIGEST_STATUS_MESSAGES = {
 } as const;
 const todayPeriodSegmentActiveClass =
 	"!bg-[var(--accent)] !text-[var(--accent-text)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent)_35%,transparent)]";
+const todayMarkdownLinkClass =
+	"text-[var(--ink)] underline-offset-2 hover:underline";
 
 const periods: Array<{ value: PeriodOption; label: string }> = [
 	{ value: "today", label: "Today" },
@@ -493,6 +495,7 @@ export function TodayRouteView({
 			{markdown ? (
 				<MarkdownViewer
 					context={result?.context ?? context}
+					markdownLinkClassName={todayMarkdownLinkClass}
 					markdown={markdown}
 					sourceOnlyCitations
 				/>

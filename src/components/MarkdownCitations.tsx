@@ -37,6 +37,7 @@ type InlineLookup = {
 	tweetsById: Map<string, CitationTweet>;
 	profilesByHandle: Map<string, ProfileRecord>;
 	linkReadableCitationText: boolean;
+	markdownLinkClassName: string;
 };
 
 function normalizeTweetReference(value: string) {
@@ -551,7 +552,7 @@ export function renderInline(text: string, lookup: InlineLookup) {
 				href ? (
 					<a
 						key={tokenKey}
-						className={tweetLinkClass}
+						className={lookup.markdownLinkClassName}
 						href={href}
 						rel="noreferrer"
 						target="_blank"
@@ -780,7 +781,10 @@ function conversationTweetToCitation(
 
 export function buildLookup(
 	context?: CitationContext | null,
-	options: { linkReadableCitationText?: boolean } = {},
+	options: {
+		linkReadableCitationText?: boolean;
+		markdownLinkClassName?: string;
+	} = {},
 ): InlineLookup {
 	const tweetsById = new Map<string, CitationTweet>();
 	const profilesByHandle = new Map<string, ProfileRecord>();
@@ -788,6 +792,7 @@ export function buildLookup(
 		tweetsById,
 		profilesByHandle,
 		linkReadableCitationText: options.linkReadableCitationText ?? true,
+		markdownLinkClassName: options.markdownLinkClassName ?? tweetLinkClass,
 	};
 	if (!context) {
 		return lookup;
