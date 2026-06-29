@@ -28,6 +28,8 @@ interface BirdTweetMedia {
 interface BirdTweetAuthor {
 	username?: string;
 	name?: string;
+	profileImageUrl?: string;
+	profile_image_url?: string;
 }
 
 interface BirdTweetArticle {
@@ -263,6 +265,18 @@ function isUnsupportedBirdOptionError(error: unknown, option: string) {
 	return text.includes(option) && /unknown option|error:/i.test(text);
 }
 
+function isUnsupportedBirdCommandError(error: unknown, command: string) {
+	if (!error || typeof error !== "object") {
+		return false;
+	}
+	const text = [
+		error instanceof Error ? error.message : "",
+		"stderr" in error && typeof error.stderr === "string" ? error.stderr : "",
+		"stdout" in error && typeof error.stdout === "string" ? error.stdout : "",
+	].join("\n");
+	return text.includes(command) && /unknown command|error:/i.test(text);
+}
+
 function makeBirdStdoutTempEffect() {
 	return Effect.acquireRelease(
 		Effect.sync(() => {
@@ -471,10 +485,17 @@ function addBirdUser(users: Map<string, XurlMentionUser>, item: BirdTweetItem) {
 	if (users.has(authorId)) {
 		return;
 	}
+	const profileImageUrl =
+		typeof item.author?.profileImageUrl === "string"
+			? item.author.profileImageUrl
+			: typeof item.author?.profile_image_url === "string"
+				? item.author.profile_image_url
+				: undefined;
 	users.set(authorId, {
 		id: authorId,
 		username: item.author?.username ?? `user_${authorId}`,
 		name: item.author?.name ?? item.author?.username ?? `user_${authorId}`,
+		...(profileImageUrl ? { profile_image_url: profileImageUrl } : {}),
 	});
 }
 
@@ -536,6 +557,88 @@ function normalizeBirdTweetsPayloadEffect(payload: unknown, command: string) {
 		try: () => normalizeBirdTweets(getBirdTweetItems(payload, command)),
 		catch: (error) => error,
 	});
+}
+
+function birdProfileLookupTargets(payload: XurlMentionsResponse) {
+	const targets = new Set<string>();
+	for (const user of payload.includes?.users ?? []) {
+		if (user.profile_image_url) {
+			continue;
+		}
+		const username = user.username?.trim().replace(/^@/, "");
+		if (username && username !== "unknown") {
+			targets.add(username);
+			continue;
+		}
+		const id = user.id?.trim();
+		if (id && id !== "unknown") {
+			targets.add(id);
+		}
+	}
+	return [...targets];
+}
+
+function hydrateBirdTimelineProfilesEffect(payload: XurlMentionsResponse) {
+	const users = payload.includes?.users ?? [];
+	if (users.length === 0) {
+		return Effect.succeed(payload);
+	}
+
+	const targets = birdProfileLookupTargets(payload);
+	if (targets.length === 0) {
+		return Effect.succeed(payload);
+	}
+
+	return lookupProfilesViaBirdEffect(targets).pipe(
+		Effect.map((results) => {
+			const hydratedById = new Map<string, XurlMentionUser>();
+			const hydratedByHandle = new Map<string, XurlMentionUser>();
+			for (const result of results) {
+				if (!result.user) {
+					continue;
+				}
+				hydratedById.set(result.user.id, result.user);
+				hydratedByHandle.set(result.user.username.toLowerCase(), result.user);
+			}
+
+			const authorIdReplacements = new Map<string, string>();
+			const nextUsers = users.map((user) => {
+				const hydrated =
+					hydratedById.get(user.id) ??
+					hydratedByHandle.get(user.username.toLowerCase());
+				if (!hydrated) {
+					return user;
+				}
+				if (hydrated.id !== user.id) {
+					authorIdReplacements.set(user.id, hydrated.id);
+				}
+				return { ...user, ...hydrated };
+			});
+
+			const rewriteTweetAuthor = <T extends XurlMentionData | XurlTweetData>(
+				tweet: T,
+			): T => {
+				const authorId = authorIdReplacements.get(tweet.author_id);
+				if (!authorId) {
+					return tweet;
+				}
+				return { ...tweet, author_id: authorId };
+			};
+
+			return {
+				...payload,
+				data: payload.data.map(rewriteTweetAuthor),
+				includes: {
+					...payload.includes,
+					users: nextUsers,
+					...(payload.includes?.tweets
+						? { tweets: payload.includes.tweets.map(rewriteTweetAuthor) }
+						: {}),
+				},
+			};
+		}),
+		Effect.catchAll(() => Effect.succeed(payload)),
+	);
 }
 
 function normalizeBirdTweetItemEffect(payload: unknown, command: string) {
@@ -710,7 +813,8 @@ export function listHomeTimelineViaBirdEffect({
 		}
 		const stdout = yield* runBirdJsonCommandEffect(args);
 		const payload = yield* parseBirdJsonEffect(stdout);
-		return yield* normalizeBirdTweetsPayloadEffect(payload, "home");
+		const normalized = yield* normalizeBirdTweetsPayloadEffect(payload, "home");
+		return yield* hydrateBirdTimelineProfilesEffect(normalized);
 	});
 }
 
@@ -995,47 +1099,6 @@ export function runDirectMessageRequestMutationViaBird(options: {
 	);
 }
 
-export function lookupProfileViaBirdEffect(
-	usernameOrId: string,
-): Effect.Effect<XurlMentionUser | null, unknown> {
-	return Effect.gen(function* () {
-		const target = usernameOrId.trim().replace(/^@/, "");
-		if (!target) {
-			return null;
-		}
-
-		const stdout = yield* runBirdJsonCommandEffect([
-			"user",
-			target,
-			"--json",
-			"--profile-only",
-		]).pipe(
-			Effect.catchAll((error) => {
-				if (!isUnsupportedBirdOptionError(error, "--profile-only")) {
-					return Effect.fail(error);
-				}
-				return runBirdJsonCommandEffect([
-					"user",
-					target,
-					"--json",
-					"--count",
-					"1",
-				]);
-			}),
-		);
-		const payload = (yield* parseBirdJsonEffect(
-			stdout,
-		)) as BirdUserOverviewPayload;
-		return toXurlMentionUser(payload.user);
-	});
-}
-
-export function lookupProfileViaBird(
-	usernameOrId: string,
-): Promise<XurlMentionUser | null> {
-	return runEffectPromise(lookupProfileViaBirdEffect(usernameOrId));
-}
-
 function toXurlMentionUser(
 	user: BirdUserOverviewPayload["user"],
 ): XurlMentionUser | null {
@@ -1078,6 +1141,94 @@ function toXurlMentionUser(
 	};
 }
 
+function profileLookupResultsFromUsers(
+	targets: string[],
+	users: XurlMentionUser[],
+	errors: Map<string, string> = new Map(),
+) {
+	const byTarget = new Map<string, XurlMentionUser>();
+	for (const user of users) {
+		byTarget.set(String(user.id).toLowerCase(), user);
+		byTarget.set(user.username.toLowerCase(), user);
+	}
+	return targets.map((target) => {
+		const normalizedTarget = target.toLowerCase();
+		return {
+			target,
+			user: byTarget.get(normalizedTarget) ?? null,
+			...(errors.has(normalizedTarget)
+				? { error: errors.get(normalizedTarget) }
+				: {}),
+		};
+	});
+}
+
+function lookupProfilesFromBirdFollowingEffect(
+	targets: string[],
+): Effect.Effect<
+	Array<{ target: string; user: XurlMentionUser | null; error?: string }>,
+	unknown
+> {
+	return Effect.gen(function* () {
+		const payload = yield* listFollowUsersViaBirdEffect({
+			direction: "following",
+			maxResults: 1000,
+		});
+		return profileLookupResultsFromUsers(targets, payload.data);
+	});
+}
+
+function lookupProfileViaBirdUserCommandEffect(
+	target: string,
+): Effect.Effect<XurlMentionUser | null, unknown> {
+	return Effect.gen(function* () {
+		const stdout = yield* runBirdJsonCommandEffect([
+			"user",
+			target,
+			"--json",
+			"--profile-only",
+		]).pipe(
+			Effect.catchAll((error) => {
+				if (!isUnsupportedBirdOptionError(error, "--profile-only")) {
+					return Effect.fail(error);
+				}
+				return runBirdJsonCommandEffect([
+					"user",
+					target,
+					"--json",
+					"--count",
+					"1",
+				]);
+			}),
+		);
+		const payload = (yield* parseBirdJsonEffect(
+			stdout,
+		)) as BirdUserOverviewPayload;
+		return toXurlMentionUser(payload.user);
+	});
+}
+
+function lookupProfilesViaBirdUserCommandsEffect(targets: string[]) {
+	return Effect.forEach(
+		targets,
+		(target) =>
+			lookupProfileViaBirdUserCommandEffect(target).pipe(
+				Effect.map((user) => ({ target, user })),
+				Effect.catchAll((lookupError) =>
+					Effect.succeed({
+						target,
+						user: null,
+						error:
+							lookupError instanceof Error
+								? lookupError.message
+								: String(lookupError),
+					}),
+				),
+			),
+		{ concurrency: "unbounded" },
+	);
+}
+
 export function lookupProfilesViaBirdEffect(
 	usernameOrIds: string[],
 ): Effect.Effect<
@@ -1104,11 +1255,6 @@ export function lookupProfilesViaBirdEffect(
 				const users = (payload.users ?? [])
 					.map(toXurlMentionUser)
 					.filter((user): user is XurlMentionUser => Boolean(user));
-				const byTarget = new Map<string, XurlMentionUser>();
-				for (const user of users) {
-					byTarget.set(String(user.id), user);
-					byTarget.set(user.username.toLowerCase(), user);
-				}
 				const errors = new Map(
 					(payload.errors ?? []).map((item) => [
 						String(item.target ?? "")
@@ -1117,39 +1263,67 @@ export function lookupProfilesViaBirdEffect(
 						item.error ?? "Unknown error",
 					]),
 				);
-				return targets.map((target) => ({
-					target,
-					user: byTarget.get(target.toLowerCase()) ?? null,
-					...(errors.has(target.toLowerCase())
-						? { error: errors.get(target.toLowerCase()) }
-						: {}),
-				}));
+				return profileLookupResultsFromUsers(targets, users, errors);
 			}),
 		),
 		Effect.catchAll((error) => {
-			if (!isUnsupportedBirdOptionError(error, "profiles")) {
+			if (
+				!isUnsupportedBirdCommandError(error, "profiles") &&
+				!isUnsupportedBirdOptionError(error, "profiles")
+			) {
 				return Effect.fail(error);
 			}
-			return Effect.forEach(
-				targets,
-				(target) =>
-					lookupProfileViaBirdEffect(target).pipe(
-						Effect.map((user) => ({ target, user })),
-						Effect.catchAll((lookupError) =>
-							Effect.succeed({
-								target,
-								user: null,
-								error:
-									lookupError instanceof Error
-										? lookupError.message
-										: String(lookupError),
-							}),
-						),
-					),
-				{ concurrency: "unbounded" },
+			return lookupProfilesFromBirdFollowingEffect(targets).pipe(
+				Effect.flatMap((followingResults) => {
+					const missingTargets = followingResults
+						.filter((result) => !result.user)
+						.map((result) => result.target);
+					if (missingTargets.length === 0) {
+						return Effect.succeed(followingResults);
+					}
+					return lookupProfilesViaBirdUserCommandsEffect(missingTargets).pipe(
+						Effect.map((userResults) => {
+							const byTarget = new Map(
+								userResults.map((result) => [result.target, result]),
+							);
+							return followingResults.map(
+								(result) => byTarget.get(result.target) ?? result,
+							);
+						}),
+					);
+				}),
+				Effect.catchAll(() => lookupProfilesViaBirdUserCommandsEffect(targets)),
 			);
 		}),
 	);
+}
+
+export function lookupProfileViaBirdEffect(
+	usernameOrId: string,
+): Effect.Effect<XurlMentionUser | null, unknown> {
+	return Effect.gen(function* () {
+		const target = usernameOrId.trim().replace(/^@/, "");
+		if (!target) {
+			return null;
+		}
+
+		return yield* lookupProfileViaBirdUserCommandEffect(target).pipe(
+			Effect.catchAll((error) => {
+				if (!isUnsupportedBirdCommandError(error, "user")) {
+					return Effect.fail(error);
+				}
+				return lookupProfilesFromBirdFollowingEffect([target]).pipe(
+					Effect.map((results) => results[0]?.user ?? null),
+				);
+			}),
+		);
+	});
+}
+
+export function lookupProfileViaBird(
+	usernameOrId: string,
+): Promise<XurlMentionUser | null> {
+	return runEffectPromise(lookupProfileViaBirdEffect(usernameOrId));
 }
 
 export function lookupProfilesViaBird(

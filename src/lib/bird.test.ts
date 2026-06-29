@@ -533,16 +533,46 @@ describe("bird transport wrapper", () => {
 				},
 			]),
 		);
+		mockBirdStdoutOnce(
+			JSON.stringify({
+				users: [
+					{
+						id: "45",
+						username: "riley",
+						name: "Riley",
+						profileImageUrl:
+							"https://pbs.twimg.com/profile_images/45/riley_normal.jpg",
+						followersCount: 123,
+						followingCount: 17,
+					},
+				],
+			}),
+		);
 		const { listHomeTimelineViaBird } = await import("./bird");
 
 		await expect(
 			listHomeTimelineViaBird({ maxResults: 9, following: true }),
 		).resolves.toEqual({
 			data: [expect.objectContaining({ id: "home_1", author_id: "45" })],
-			includes: { users: [{ id: "45", username: "riley", name: "Riley" }] },
+			includes: {
+				users: [
+					expect.objectContaining({
+						id: "45",
+						username: "riley",
+						name: "Riley",
+						profile_image_url:
+							"https://pbs.twimg.com/profile_images/45/riley_normal.jpg",
+						public_metrics: {
+							followers_count: 123,
+							following_count: 17,
+						},
+					}),
+				],
+			},
 			meta: expect.objectContaining({ result_count: 1 }),
 		});
 		expectBirdCommandCall(1, ["home", "-n", "9", "--json", "--following"]);
+		expectBirdCommandCall(2, ["profiles", "riley", "--json"]);
 	});
 
 	it("keeps nested bird quoted and retweeted tweets as included tweets", async () => {
@@ -883,6 +913,38 @@ describe("bird transport wrapper", () => {
 		expectBirdCommandCall(2, ["user", "42", "--json", "--count", "1"]);
 	});
 
+	it("falls back to the bird following list when bird user is unavailable", async () => {
+		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
+		mockBirdRejectOnce(
+			Object.assign(new Error("unknown command user"), {
+				stderr: "error: unknown command user",
+			}),
+		);
+		mockBirdStdoutOnce(
+			JSON.stringify([
+				{
+					id: "42",
+					username: "sam",
+					name: "Sam",
+					profileImageUrl:
+						"https://pbs.twimg.com/profile_images/42/avatar_normal.jpg",
+				},
+			]),
+		);
+		const { lookupProfileViaBird } = await import("./bird");
+
+		await expect(lookupProfileViaBird("sam")).resolves.toEqual(
+			expect.objectContaining({
+				id: "42",
+				username: "sam",
+				profile_image_url:
+					"https://pbs.twimg.com/profile_images/42/avatar_normal.jpg",
+			}),
+		);
+		expectBirdCommandCall(1, ["user", "sam", "--json", "--profile-only"]);
+		expectBirdCommandCall(2, ["following", "-n", "1000", "--json"]);
+	});
+
 	it("rejects unexpected direct messages json", async () => {
 		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
 		mockBirdStdoutOnce(
@@ -947,7 +1009,7 @@ describe("bird transport wrapper", () => {
 		]);
 	});
 
-	it("falls back to individual bird user lookups when profiles is unavailable", async () => {
+	it("falls back to bird following profiles when profiles is unavailable", async () => {
 		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
 		mockBirdRejectOnce(
 			Object.assign(new Error("unknown command profiles"), {
@@ -955,21 +1017,26 @@ describe("bird transport wrapper", () => {
 			}),
 		);
 		mockBirdStdoutOnce(
-			JSON.stringify({
-				user: {
+			JSON.stringify([
+				{
 					id: "13334762",
 					username: "github",
 					name: "GitHub",
+					profileImageUrl:
+						"https://pbs.twimg.com/profile_images/13334762/github_normal.jpg",
 				},
-			}),
+			]),
 		);
 
 		const { lookupProfilesViaBird } = await import("./bird");
 		const results = await lookupProfilesViaBird(["github"]);
 
 		expectBirdCommandCall(1, ["profiles", "github", "--json"]);
-		expectBirdCommandCall(2, ["user", "github", "--json", "--profile-only"]);
+		expectBirdCommandCall(2, ["following", "-n", "1000", "--json"]);
 		expect(results[0]?.user?.username).toBe("github");
+		expect(results[0]?.user?.profile_image_url).toBe(
+			"https://pbs.twimg.com/profile_images/13334762/github_normal.jpg",
+		);
 	});
 
 	it("normalizes bird helper edge cases", async () => {
