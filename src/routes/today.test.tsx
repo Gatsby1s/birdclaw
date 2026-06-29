@@ -292,6 +292,39 @@ describe("today route", () => {
 		expect(screen.queryByText(/tweet_1/)).toBeNull();
 	});
 
+	it("renders generated markdown title links without the accent color", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return new Response(JSON.stringify({ ok: true, results: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				const markdown =
+					"# Today\n\n## Important links shared\n\n- [bboczeng 的存储周期长文](https://x.com/bboczeng/status/2071506694723736039)：围绕美光财报、苹果涨价、存储上涨可持续性展开。";
+				return ndjsonResponse([
+					{ type: "delta", delta: markdown },
+					{ type: "done", result: digestResult("Today", markdown) },
+				]);
+			}),
+		);
+
+		render(<TodayRoute />);
+
+		await screen.findByRole("heading", { name: "Today", level: 1 });
+		const titleLink = screen.getByRole("link", {
+			name: "bboczeng 的存储周期长文",
+		});
+		expect(titleLink).toHaveAttribute(
+			"href",
+			"https://x.com/bboczeng/status/2071506694723736039",
+		);
+		expect(titleLink).toHaveClass("text-[var(--ink)]");
+		expect(titleLink).not.toHaveClass("text-[var(--accent)]");
+	});
+
 	it("shows request errors", async () => {
 		vi.stubGlobal(
 			"fetch",

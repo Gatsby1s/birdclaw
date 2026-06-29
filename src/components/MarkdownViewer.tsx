@@ -11,15 +11,18 @@ export function MarkdownViewer({
 	markdown,
 	context,
 	className,
+	markdownLinkClassName,
 	sourceOnlyCitations = false,
 }: {
 	markdown: string;
 	context?: CitationContext | null;
 	className?: string;
+	markdownLinkClassName?: string;
 	sourceOnlyCitations?: boolean;
 }) {
 	const lookup = buildLookup(context, {
 		linkReadableCitationText: !sourceOnlyCitations,
+		markdownLinkClassName,
 	});
 	const normalizedMarkdown = markdown.replace(
 		/\]\s*\r?\n\s*\((https?:\/\/[^\s)]+)\)/g,
