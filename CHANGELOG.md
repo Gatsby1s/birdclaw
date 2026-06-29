@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.17 - 2026-06-29
+
+### Added
+
+- Add a global Settings page control for Profile Analyse sources: Local, XURL refresh, and 6551 refresh.
+- Make Profile Analyse default to local archived tweets and replies for both the Analyse page and profile routes, with xurl kept as an explicit refresh source.
+
 ## 0.8.16 - 2026-06-29
 
 ### Fixed
