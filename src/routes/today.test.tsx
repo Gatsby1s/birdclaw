@@ -176,6 +176,14 @@ describe("today route", () => {
 		expect(
 			screen.getByText("3 home · 2 mentions · 4 links"),
 		).toBeInTheDocument();
+		const todayButton = screen.getByRole("button", { name: "Today" });
+		const weekButton = screen.getByRole("button", { name: "Week" });
+		expect(todayButton).toHaveAttribute("aria-pressed", "true");
+		expect(todayButton).toHaveClass(
+			"bg-[var(--accent-soft)]!",
+			"text-[var(--accent)]!",
+		);
+		expect(weekButton).toHaveAttribute("aria-pressed", "false");
 		await waitFor(() =>
 			expect(urls.some((url) => url.pathname === "/api/profile-hydrate")).toBe(
 				true,
@@ -192,6 +200,12 @@ describe("today route", () => {
 		expect(
 			await screen.findByRole("heading", { name: "Last 7 days", level: 1 }),
 		).toBeInTheDocument();
+		expect(todayButton).toHaveAttribute("aria-pressed", "false");
+		expect(weekButton).toHaveAttribute("aria-pressed", "true");
+		expect(weekButton).toHaveClass(
+			"bg-[var(--accent-soft)]!",
+			"text-[var(--accent)]!",
+		);
 
 		fireEvent.click(screen.getByLabelText("DMs"));
 		expect(

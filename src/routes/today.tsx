@@ -39,7 +39,7 @@ import {
 	pageSubtitleClass,
 	pageTitleClass,
 	secondaryButtonClass,
-	segmentActiveClass,
+	segmentAccentActiveClass,
 	segmentClass,
 	segmentedClass,
 } from "#/lib/ui";
@@ -429,9 +429,10 @@ export function TodayRouteView({
 							<button
 								key={item.value}
 								type="button"
+								aria-pressed={period === item.value}
 								className={cx(
 									segmentClass,
-									period === item.value && segmentActiveClass,
+									period === item.value && segmentAccentActiveClass,
 								)}
 								onClick={() =>
 									updateSearch({ ...searchState, period: item.value })
