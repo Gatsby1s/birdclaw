@@ -180,8 +180,8 @@ describe("today route", () => {
 		const weekButton = screen.getByRole("button", { name: "Week" });
 		expect(todayButton).toHaveAttribute("aria-pressed", "true");
 		expect(todayButton).toHaveClass(
-			"bg-[var(--accent-soft)]",
-			"text-[var(--accent)]",
+			"bg-[var(--accent-soft)]!",
+			"text-[var(--accent)]!",
 		);
 		expect(weekButton).toHaveAttribute("aria-pressed", "false");
 		await waitFor(() =>
@@ -203,8 +203,8 @@ describe("today route", () => {
 		expect(todayButton).toHaveAttribute("aria-pressed", "false");
 		expect(weekButton).toHaveAttribute("aria-pressed", "true");
 		expect(weekButton).toHaveClass(
-			"bg-[var(--accent-soft)]",
-			"text-[var(--accent)]",
+			"bg-[var(--accent-soft)]!",
+			"text-[var(--accent)]!",
 		);
 
 		fireEvent.click(screen.getByLabelText("DMs"));

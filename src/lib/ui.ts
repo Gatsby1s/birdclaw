@@ -160,7 +160,7 @@ export const segmentClass =
 export const segmentActiveClass = "bg-[var(--bg-active)] text-[var(--ink)]";
 
 export const segmentAccentActiveClass =
-	"bg-[var(--accent-soft)] text-[var(--accent)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_36%,transparent)]";
+	"bg-[var(--accent-soft)]! text-[var(--accent)]! shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_36%,transparent)]";
 
 /* Composer (reply textarea). */
 export const composerShellClass =
