@@ -142,8 +142,8 @@ describe("today route", () => {
 			const includeDms = url.searchParams.get("includeDms") === "true";
 			const label = period === "week" ? "Last 7 days" : "Today";
 			const markdown = includeDms
-				? "# With DMs\n\n## What people are talking about\n\n- **Reply:** ask @alice about tweet_1"
-				: `# ${label}\n\n## What people are talking about\n\n- **Reply:** ask @alice about tweet_1`;
+				? "# With DMs\n\n## What people are talking about\n\n- Ask @alice about tweet_1"
+				: `# ${label}\n\n## What people are talking about\n\n- Ask @alice about tweet_1`;
 			return ndjsonResponse([
 				{ type: "delta", delta: `${markdown}\n` },
 				{ type: "done", result: digestResult(label, markdown, includeDms) },
@@ -163,19 +163,22 @@ describe("today route", () => {
 			}),
 		).toBeInTheDocument();
 		expect(screen.queryByText("Today summary")).toBeNull();
+		expect(screen.queryByRole("heading", { name: "Key topics" })).toBeNull();
+		const topicHeading = screen.getByRole("heading", {
+			name: "Useful signal",
+			level: 3,
+		});
+		expect(topicHeading).toBeInTheDocument();
 		expect(
-			screen.getByRole("heading", { name: "Key topics", level: 2 }),
-		).toBeInTheDocument();
-		expect(
-			screen.getByRole("heading", { name: "Useful signal", level: 3 }),
-		).toBeInTheDocument();
-		expect(
-			screen.getByText("Alice shared something worth a reply."),
-		).toBeInTheDocument();
+			screen.queryByText("Alice shared something worth a reply."),
+		).toBeNull();
 		expect(screen.queryByText(/Action items/i)).toBeNull();
 		expect(screen.queryByText("# Today")).not.toBeInTheDocument();
-		expect(screen.getByText("Reply:")).toBeInTheDocument();
 		const aliceLink = screen.getByRole("link", { name: "@alice" });
+		expect(
+			topicHeading.compareDocumentPosition(aliceLink) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 		expect(aliceLink).toHaveAttribute("href", "/profiles/alice");
 		expect(screen.getByRole("link", { name: "tweet_1" })).toHaveAttribute(
 			"href",
@@ -238,7 +241,8 @@ describe("today route", () => {
 						headers: { "content-type": "application/json" },
 					});
 				}
-				const markdown = "A readable report without Markdown headings.";
+				const markdown =
+					"**What people are talking about**\n\n- Alice shared a useful signal (tweet_1).";
 				return ndjsonResponse([
 					{ type: "delta", delta: markdown },
 					{ type: "done", result: digestResult("Today", markdown) },
@@ -255,11 +259,11 @@ describe("today route", () => {
 			}),
 		).toBeInTheDocument();
 		expect(
-			screen.getByText("Alice shared something worth a reply."),
-		).toBeInTheDocument();
+			screen.queryByText("Alice shared something worth a reply."),
+		).toBeNull();
 	});
 
-	it("renders every structured topic instead of truncating the outline", async () => {
+	it("places every structured topic before its matching discussion bullet", async () => {
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async (input: RequestInfo | URL) => {
@@ -269,12 +273,20 @@ describe("today route", () => {
 						headers: { "content-type": "application/json" },
 					});
 				}
-				const markdown = "A readable report without Markdown headings.";
+				const markdown = [
+					"## What people are talking about",
+					"",
+					...Array.from(
+						{ length: 6 },
+						(_, index) =>
+							`- Discussion ${String(index + 1)} (tweet_${String(index + 1)}).`,
+					),
+				].join("\n\n");
 				const result = digestResult("Today", markdown);
 				result.digest.keyTopics = Array.from({ length: 6 }, (_, index) => ({
 					title: `Topic ${String(index + 1)}`,
 					summary: `Summary ${String(index + 1)}`,
-					tweetIds: ["tweet_1"],
+					tweetIds: [`tweet_${String(index + 1)}`],
 					handles: ["@alice"],
 				}));
 				return ndjsonResponse([
@@ -292,6 +304,36 @@ describe("today route", () => {
 		expect(
 			screen.getByRole("heading", { name: "Topic 6", level: 3 }),
 		).toBeInTheDocument();
+		expect(screen.queryByRole("heading", { name: "Key topics" })).toBeNull();
+	});
+
+	it("does not duplicate a topic heading already present in the report", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return new Response(JSON.stringify({ ok: true, results: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				const markdown =
+					"## What people are talking about\n\n### Useful signal\n\n- Alice shared a useful signal (tweet_1).";
+				return ndjsonResponse([
+					{ type: "delta", delta: markdown },
+					{ type: "done", result: digestResult("Today", markdown) },
+				]);
+			}),
+		);
+
+		render(<TodayRoute />);
+
+		expect(
+			await screen.findAllByRole("heading", {
+				name: "Useful signal",
+				level: 3,
+			}),
+		).toHaveLength(1);
 	});
 
 	it("exports a completed digest through the browser PDF flow", async () => {
