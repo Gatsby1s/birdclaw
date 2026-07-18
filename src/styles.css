@@ -254,6 +254,10 @@ html.theme-transition::view-transition-new(theme) {
 	z-index: 2;
 }
 
+.today-reference-pdf {
+	display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
 	/* View transition pseudo-element. */
 	html.theme-transition::view-transition-old(theme) {
@@ -347,6 +351,144 @@ html.theme-transition::view-transition-new(theme) {
 		font-size: 12pt !important;
 		line-height: 1.55 !important;
 		color: #0f1419 !important;
+	}
+
+	body[data-today-print-mode="reference"] .today-digest-pdf,
+	body:not([data-today-print-mode="reference"]) .today-reference-pdf {
+		display: none !important;
+	}
+
+	body[data-today-print-mode="reference"] .today-pdf-header {
+		display: none !important;
+	}
+
+	body[data-today-print-mode="reference"] .today-reference-pdf {
+		display: block !important;
+	}
+
+	.today-reference-cover {
+		break-inside: avoid;
+		border-bottom: 1px solid #d8dee5;
+		margin-bottom: 1rem;
+		padding-bottom: 0.85rem;
+	}
+
+	.today-reference-eyebrow,
+	.today-reference-source-list,
+	.today-reference-links,
+	.today-reference-index small {
+		color: #536471;
+		font-size: 10pt;
+	}
+
+	.today-reference-eyebrow {
+		font-weight: 700;
+		letter-spacing: 0;
+		margin: 0 0 0.25rem;
+	}
+
+	.today-reference-cover h1,
+	.today-reference-section h2,
+	.today-reference-group h3 {
+		color: #0f1419 !important;
+		break-after: avoid;
+	}
+
+	.today-reference-cover h1 {
+		font-size: 22pt;
+		line-height: 1.15;
+		margin: 0 0 0.55rem;
+	}
+
+	.today-reference-cover dl {
+		display: grid;
+		gap: 0.35rem;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		margin: 0.85rem 0 0;
+	}
+
+	.today-reference-cover dt {
+		color: #536471;
+		font-size: 9pt;
+		font-weight: 700;
+	}
+
+	.today-reference-cover dd {
+		margin: 0.1rem 0 0;
+	}
+
+	.today-reference-section {
+		margin-top: 1rem;
+	}
+
+	.today-reference-section h2 {
+		border-bottom: 1px solid #d8dee5;
+		font-size: 15pt;
+		margin: 0 0 0.65rem;
+		padding-bottom: 0.25rem;
+	}
+
+	.today-reference-group {
+		break-inside: avoid;
+		margin: 0.8rem 0 1rem;
+	}
+
+	.today-reference-group h3 {
+		font-size: 12.5pt;
+		margin: 0 0 0.25rem;
+	}
+
+	.today-reference-nav,
+	.today-reference-index {
+		margin: 0;
+		padding-left: 1.2rem;
+	}
+
+	.today-reference-nav li,
+	.today-reference-index li {
+		break-inside: avoid;
+		margin-bottom: 0.35rem;
+	}
+
+	.today-reference-nav span,
+	.today-reference-index span {
+		color: #536471;
+		display: block;
+		font-size: 10pt;
+	}
+
+	.today-reference-source {
+		break-inside: avoid;
+		border: 1px solid #d8dee5;
+		margin-top: 0.45rem;
+		padding: 0.55rem 0.65rem;
+	}
+
+	.today-reference-source p {
+		margin: 0.35rem 0 0;
+		white-space: pre-wrap;
+	}
+
+	.today-reference-source blockquote {
+		border-left: 2px solid #d8dee5;
+		color: #536471;
+		margin: 0.5rem 0 0;
+		padding-left: 0.55rem;
+	}
+
+	.today-reference-source-head {
+		align-items: baseline;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+
+	.today-reference-badge {
+		border: 1px solid #8aa4b8;
+		color: #0f1419;
+		font-size: 9pt;
+		font-weight: 700;
+		padding: 0 0.25rem;
 	}
 
 	.today-pdf-root article p,

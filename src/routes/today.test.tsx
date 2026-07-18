@@ -4,6 +4,7 @@ import {
 	fireEvent,
 	screen,
 	waitFor,
+	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ndjsonResponse } from "#/test/ndjson";
@@ -55,6 +56,24 @@ function digestResult(label: string, markdown: string, includeDms = false) {
 					authorProfile,
 					createdAt: "2026-05-16T10:00:00.000Z",
 					text: "Peter should see this.",
+					entities: {
+						urls: [
+							{
+								url: "https://t.co/original",
+								expandedUrl: "https://x.com/alice/status/tweet_1",
+								displayUrl: "x.com/alice/status/tweet_1",
+								start: 0,
+								end: 0,
+							},
+							{
+								url: "https://t.co/reference",
+								expandedUrl: "https://example.com/reference",
+								displayUrl: "example.com/reference",
+								start: 0,
+								end: 0,
+							},
+						],
+					},
 					likeCount: 12,
 					liked: false,
 					bookmarked: false,
@@ -369,6 +388,115 @@ describe("today route", () => {
 
 		expect(printMock).toHaveBeenCalledTimes(1);
 		expect(document.title).toBe("birdclaw");
+	});
+
+	it("exports the cached digest context as a reference collection without rerunning the digest", async () => {
+		document.title = "birdclaw";
+		const digestRequests: URL[] = [];
+		const printMock = vi.spyOn(window, "print").mockImplementation(() => {
+			try {
+				expect(document.title).toBe("BirdClaw Today reference collection");
+				expect(document.body.dataset.todayPrintMode).toBe("reference");
+				const referencePdf = screen.getByTestId("today-reference-pdf");
+				const referenceText = referencePdf.textContent ?? "";
+				expect(
+					within(referencePdf).getByText("参考内容合集"),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getByText(
+						"Opening summary shown on the webpage.",
+					),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).queryByText(
+						"Structured summary must not replace the webpage.",
+					),
+				).toBeNull();
+				expect(
+					within(referencePdf).getAllByText("Useful signal"),
+				).not.toHaveLength(0);
+				expect(
+					within(referencePdf).getByText(
+						"Markdown summary starts here and continues exactly as shown.",
+					),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).queryByText(
+						"Alice shared something worth a reply.",
+					),
+				).toBeNull();
+				expect(within(referencePdf).getAllByText("S01")).not.toHaveLength(0);
+				expect(
+					within(referencePdf).getAllByText("Alice (@alice)"),
+				).not.toHaveLength(0);
+				expect(within(referencePdf).getByText("tweet_1")).toBeInTheDocument();
+				expect(within(referencePdf).queryByText(/12 likes|12 赞/)).toBeNull();
+				expect(
+					within(referencePdf).queryByText(
+						"https://x.com/alice/status/tweet_1",
+					),
+				).toBeNull();
+				expect(
+					within(referencePdf).queryByText("x.com/alice/status/tweet_1"),
+				).toBeNull();
+				expect(
+					within(referencePdf).getAllByText(/example\.com\/reference/),
+				).not.toHaveLength(0);
+				expect(referenceText).not.toMatch(
+					/\b(Home|Mention|Authored|Liked|Bookmark)\b/,
+				);
+				expect(referenceText).not.toContain("3 home · 2 mentions · 4 links");
+				expect(referenceText).not.toContain("8:00 PM");
+			} finally {
+				window.dispatchEvent(new Event("afterprint"));
+			}
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return new Response(JSON.stringify({ ok: true, results: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				digestRequests.push(url);
+				const markdown = [
+					"# Today",
+					"",
+					"Opening summary shown on the webpage.",
+					"",
+					"## What people are talking about",
+					"",
+					"- Markdown summary starts here",
+					"  and continues exactly as shown.",
+					"  (tweet_1)",
+				].join("\n");
+				const result = digestResult("Today", markdown);
+				result.digest.summary =
+					"Structured summary must not replace the webpage.";
+				return ndjsonResponse([
+					{ type: "delta", delta: markdown },
+					{ type: "done", result },
+				]);
+			}),
+		);
+
+		render(<TodayRoute />);
+
+		await screen.findByRole("heading", { name: "Today", level: 1 });
+		expect(digestRequests).toHaveLength(1);
+		const referenceButton = screen.getByRole("button", {
+			name: "导出完整 PDF",
+		});
+		expect(referenceButton).toBeEnabled();
+
+		fireEvent.click(referenceButton);
+
+		expect(printMock).toHaveBeenCalledTimes(1);
+		expect(digestRequests).toHaveLength(1);
+		expect(document.title).toBe("birdclaw");
+		expect(document.body.dataset.todayPrintMode).toBeUndefined();
 	});
 
 	it("renders generated citations as source links without coloring the prose", async () => {
