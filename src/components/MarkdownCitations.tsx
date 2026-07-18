@@ -63,7 +63,7 @@ function adjacentParenthesizedTweetReferences(value: string, cursor: number) {
 	let nextCursor = cursor;
 	while (nextCursor < value.length) {
 		const match =
-			/^\s+\((?:\s*(?:tweet_[A-Za-z0-9_:-]+|\d{12,25})\s*,?)+\)/.exec(
+			/^\s+[（(](?:\s*(?:tweet_[A-Za-z0-9_:-]+|\d{12,25})\s*[,，]?)+[）)]/.exec(
 				value.slice(nextCursor),
 			);
 		if (!match) break;
@@ -525,7 +525,7 @@ function linkTrailingDirectCitationText(
 
 export function renderInline(text: string, lookup: InlineLookup) {
 	const pattern =
-		/(\[[^\]\n]+\]\s*\(https?:\/\/[^\s)]+\)|\*\*[^*]+\*\*|@[A-Za-z0-9_]{1,20}|\((?:\s*(?:tweet_[A-Za-z0-9_:-]+|\d{12,25})\s*,?)+\)|\btweet_[A-Za-z0-9_:-]+\b|\b\d{12,25}\b)/g;
+		/(\[[^\]\n]+\]\s*\(https?:\/\/[^\s)]+\)|\*\*[^*]+\*\*|@[A-Za-z0-9_]{1,20}|[（(](?:\s*(?:tweet_[A-Za-z0-9_:-]+|\d{12,25})\s*[,，]?)+[）)]|\btweet_[A-Za-z0-9_:-]+\b|\b\d{12,25}\b)/g;
 	const nodes: ReactNode[] = [];
 	let cursor = 0;
 	let match: RegExpExecArray | null;
@@ -587,7 +587,8 @@ export function renderInline(text: string, lookup: InlineLookup) {
 		}
 
 		const isParenthesizedTweetRef =
-			token.startsWith("(") && token.endsWith(")");
+			(token.startsWith("(") && token.endsWith(")")) ||
+			(token.startsWith("（") && token.endsWith("）"));
 		let references = tweetReferencesFromToken(token);
 		if (isParenthesizedTweetRef) {
 			const adjacent = adjacentParenthesizedTweetReferences(text, cursor);
