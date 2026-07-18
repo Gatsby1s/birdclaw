@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.22 - 2026-07-18
+
+### Fixed
+
+- Place Today topic headings inline before their matching discussion groups instead of collecting every topic in a separate summary at the top.
+- Recover the same inline structure for cached flat-Markdown reports by matching cited tweet IDs, while requiring future reports to emit corresponding level-3 headings directly.
+
 ## 0.8.21 - 2026-07-18
 
 ### Fixed
