@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.28 - 2026-07-19
+
+### Fixed
+
+- Keep complete reference PDF pagination working in production builds by feeding Paged.js only the dedicated print rules instead of the minified site-wide stylesheets.
+
 ## 0.8.27 - 2026-07-19
 
 ### Fixed
