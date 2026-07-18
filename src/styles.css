@@ -258,6 +258,14 @@ html.theme-transition::view-transition-new(theme) {
 	display: none;
 }
 
+.today-reference-paged-preview {
+	left: -100000px;
+	position: fixed;
+	top: 0;
+	visibility: hidden;
+	width: 210mm;
+}
+
 @media (prefers-reduced-motion: reduce) {
 	/* View transition pseudo-element. */
 	html.theme-transition::view-transition-old(theme) {
@@ -296,6 +304,38 @@ html.theme-transition::view-transition-new(theme) {
 				"Helvetica Neue", Arial, sans-serif;
 			font-size: 10px;
 		}
+	}
+
+	@page reference {
+		size: A4;
+		margin: 16mm 16mm 17mm;
+
+		@top-left {
+			content: "";
+		}
+
+		@bottom-left {
+			border-top: 0.35pt solid #d7d3c9;
+			color: #5b6472;
+			content: "BirdClaw Reference Collection";
+			font-family: STHeiti, "PingFang SC", "Microsoft YaHei", sans-serif;
+			font-size: 7.5pt;
+			padding-top: 2mm;
+		}
+
+		@bottom-right {
+			border-top: 0.35pt solid #d7d3c9;
+			color: #5b6472;
+			content: counter(page);
+			font-family: STHeiti, "PingFang SC", "Microsoft YaHei", sans-serif;
+			font-size: 7.5pt;
+			padding-top: 2mm;
+		}
+	}
+
+	@page reference-output {
+		size: A4;
+		margin: 0;
 	}
 
 	html,
@@ -364,143 +404,408 @@ html.theme-transition::view-transition-new(theme) {
 
 	body[data-today-print-mode="reference"] .today-reference-pdf {
 		display: block !important;
+		page: reference;
+		padding: 0 !important;
+		font-family: STHeiti, "PingFang SC", "Microsoft YaHei", sans-serif;
+		font-size: 9.5pt !important;
+		font-weight: 300;
+		line-height: 1.5 !important;
+		color: #111827 !important;
+	}
+
+	body[data-today-print-stage="paged"] > *:not(.today-reference-paged-preview) {
+		display: none !important;
+	}
+
+	body[data-today-print-stage="paged"] .today-reference-paged-preview {
+		display: block !important;
+		position: static !important;
+		left: auto !important;
+		top: auto !important;
+		visibility: visible !important;
+		width: auto !important;
+	}
+
+	body[data-today-print-stage="paged"] .pagedjs_pages {
+		display: block !important;
+	}
+
+	body[data-today-print-stage="paged"] .pagedjs_page {
+		page: reference-output;
+		break-after: page;
+		margin: 0 !important;
+		box-shadow: none !important;
+	}
+
+	body[data-today-print-stage="paged"] .pagedjs_page:last-child {
+		break-after: auto;
+	}
+
+	.today-reference-sheet {
+		break-after: page;
 	}
 
 	.today-reference-cover {
 		break-inside: avoid;
-		border-bottom: 1px solid #d8dee5;
-		margin-bottom: 1rem;
-		padding-bottom: 0.85rem;
-	}
-
-	.today-reference-eyebrow,
-	.today-reference-source-list,
-	.today-reference-links,
-	.today-reference-index small {
-		color: #536471;
-		font-size: 10pt;
-	}
-
-	.today-reference-eyebrow {
-		font-weight: 700;
-		letter-spacing: 0;
-		margin: 0 0 0.25rem;
-	}
-
-	.today-reference-cover h1,
-	.today-reference-section h2,
-	.today-reference-group h3 {
-		color: #0f1419 !important;
-		break-after: avoid;
+		min-height: 245mm;
+		padding-top: 17mm;
 	}
 
 	.today-reference-cover h1 {
-		font-size: 22pt;
-		line-height: 1.15;
-		margin: 0 0 0.55rem;
+		color: #111827 !important;
+		font-size: 23pt;
+		font-weight: 600;
+		line-height: 1.25;
+		margin: 0 0 4mm;
 	}
 
-	.today-reference-cover dl {
-		display: grid;
-		gap: 0.35rem;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		margin: 0.85rem 0 0;
+	.today-reference-cover-subtitle {
+		color: #5b6472 !important;
+		font-size: 11pt;
+		line-height: 1.55;
+		margin: 0 0 2mm;
 	}
 
-	.today-reference-cover dt {
-		color: #536471;
+	.today-reference-cover-summary {
+		color: #5b6472 !important;
 		font-size: 9pt;
-		font-weight: 700;
+		line-height: 1.5;
+		margin: 0 0 5mm;
 	}
 
-	.today-reference-cover dd {
-		margin: 0.1rem 0 0;
+	.today-reference-cover-meta {
+		color: #5b6472 !important;
+		font-size: 10pt;
+		line-height: 1.6;
+		margin: 0 0 7mm;
+	}
+
+	.today-reference-pdf table {
+		border-collapse: collapse;
+		color: #4b5563;
+		font-size: 7.45pt;
+		line-height: 1.32;
+		table-layout: fixed;
+		width: 100%;
+	}
+
+	.today-reference-pdf th,
+	.today-reference-pdf td {
+		border: 0.35pt solid #d7d3c9;
+		padding: 1.25mm 1.5mm;
+		text-align: left;
+		vertical-align: top;
+	}
+
+	.today-reference-pdf thead th {
+		background: #d7f2ed !important;
+		color: #111827 !important;
+		font-weight: 600;
+	}
+
+	.today-reference-pdf tbody tr:nth-child(even) {
+		background: #fbfaf7 !important;
+	}
+
+	.today-reference-cover-table {
+		font-size: 8.2pt !important;
+		line-height: 1.45 !important;
+		margin-bottom: 4mm;
+	}
+
+	.today-reference-cover-table th {
+		background: #f3f1ea !important;
+		color: #0f766e !important;
+		font-weight: 600;
+		width: 32mm;
+	}
+
+	.today-reference-cover h2 {
+		color: #111827 !important;
+		font-size: 10.2pt;
+		font-weight: 600;
+		margin: 0 0 2mm;
+	}
+
+	.today-reference-navigation-table th:nth-child(1) {
+		width: 32mm;
+	}
+
+	.today-reference-navigation-table th:nth-child(2),
+	.today-reference-navigation-table th:nth-child(3) {
+		width: 21mm;
+	}
+
+	.today-reference-cover-topics-title {
+		margin-top: 4mm !important;
+	}
+
+	.today-reference-cover-topics {
+		column-gap: 8mm;
+		columns: 2;
+		font-size: 8.1pt;
+		line-height: 1.4;
+		margin: 0;
+		padding-left: 5mm;
+	}
+
+	.today-reference-cover-topics li {
+		break-inside: avoid;
+		margin: 0 0 1.5mm;
+		padding-left: 0.5mm;
+	}
+
+	.today-reference-guide,
+	.today-reference-matrix,
+	.today-reference-index {
+		padding-top: 1mm;
+	}
+
+	.today-reference-guide > h2,
+	.today-reference-matrix > h2,
+	.today-reference-index > h2,
+	.today-reference-section > h2 {
+		break-after: avoid;
+		color: #111827 !important;
+		font-size: 17pt;
+		font-weight: 600;
+		line-height: 1.35;
+		margin: 0 0 3mm;
+	}
+
+	.today-reference-guide > p,
+	.today-reference-matrix > p,
+	.today-reference-index > p {
+		font-size: 9.2pt;
+		line-height: 1.48;
+		margin: 0 0 3mm;
+	}
+
+	.today-reference-guide > h2:not(:first-child) {
+		margin-top: 8mm;
+	}
+
+	.today-reference-toc section {
+		margin: 0 0 2.5mm;
+	}
+
+	.today-reference-toc h3 {
+		color: #111827 !important;
+		font-size: 10.5pt;
+		font-weight: 400;
+		margin: 0 0 1mm;
+	}
+
+	.today-reference-toc ol {
+		list-style: none;
+		margin: 0;
+		padding: 0 0 0 4mm;
+	}
+
+	.today-reference-toc li {
+		break-inside: avoid;
+		margin: 0 0 0.75mm;
+	}
+
+	.today-reference-toc a {
+		align-items: baseline;
+		display: flex;
+		gap: 2mm;
+		text-decoration: none !important;
+	}
+
+	.today-reference-toc a span {
+		align-items: baseline;
+		display: flex;
+		flex: 1;
+		font-size: 8.6pt;
+		line-height: 1.3;
+		min-width: 0;
+	}
+
+	.today-reference-toc a span::after {
+		border-bottom: 0.5pt dotted #9ca3af;
+		content: "";
+		flex: 1;
+		margin: 0 1.5mm 0.8mm;
+		min-width: 5mm;
+	}
+
+	.today-reference-toc a small {
+		color: #5b6472;
+		font-size: 8.2pt;
+		min-width: 5mm;
+		text-align: right;
+	}
+
+	.today-reference-matrix th:first-child {
+		width: 26mm;
+	}
+
+	.today-reference-matrix th:last-child {
+		width: 73mm;
 	}
 
 	.today-reference-section {
-		margin-top: 1rem;
-	}
-
-	.today-reference-section h2 {
-		border-bottom: 1px solid #d8dee5;
-		font-size: 15pt;
-		margin: 0 0 0.65rem;
-		padding-bottom: 0.25rem;
+		break-before: page;
+		margin: 0;
+		padding-top: 1mm;
 	}
 
 	.today-reference-group {
-		break-inside: avoid;
-		margin: 0.8rem 0 1rem;
+		margin: 0 0 4mm;
 	}
 
 	.today-reference-group h3 {
-		font-size: 12.5pt;
-		margin: 0 0 0.25rem;
+		break-after: avoid;
+		color: #0f766e !important;
+		font-size: 13.5pt;
+		font-weight: 600;
+		line-height: 1.35;
+		margin: 0 0 1.5mm;
 	}
 
-	.today-reference-nav,
-	.today-reference-index {
-		margin: 0;
-		padding-left: 1.2rem;
+	.today-reference-group > p:not(.today-reference-source-list) {
+		font-size: 9.5pt;
+		line-height: 1.5;
+		margin: 0 0 1.25mm;
 	}
 
-	.today-reference-nav li,
-	.today-reference-index li {
-		break-inside: avoid;
-		margin-bottom: 0.35rem;
-	}
-
-	.today-reference-nav span,
-	.today-reference-index span {
-		color: #536471;
-		display: block;
-		font-size: 10pt;
+	.today-reference-source-list {
+		border-bottom: 0.35pt solid #d7d3c9;
+		color: #5b6472 !important;
+		font-size: 7.8pt;
+		line-height: 1.4;
+		margin: 0 0 2mm;
+		padding-bottom: 2mm;
 	}
 
 	.today-reference-source {
-		break-inside: avoid;
-		border: 1px solid #d8dee5;
-		margin-top: 0.45rem;
-		padding: 0.55rem 0.65rem;
-	}
-
-	.today-reference-source p {
-		margin: 0.35rem 0 0;
-		white-space: pre-wrap;
-	}
-
-	.today-reference-source blockquote {
-		border-left: 2px solid #d8dee5;
-		color: #536471;
-		margin: 0.5rem 0 0;
-		padding-left: 0.55rem;
+		break-inside: auto;
+		margin: 0 0 1.5mm;
 	}
 
 	.today-reference-source-head {
-		align-items: baseline;
+		align-items: stretch;
+		break-after: avoid;
+		break-inside: avoid;
+		display: grid;
+		grid-template-columns: 14.5mm minmax(0, 1fr) 30mm;
+		min-height: 9.5mm;
+	}
+
+	.today-reference-source-head > * {
+		align-items: center;
+		border-bottom: 0.35pt solid #d7d3c9;
+		border-top: 0.35pt solid #d7d3c9;
 		display: flex;
-		flex-wrap: wrap;
-		gap: 0.35rem;
+		padding: 1.25mm 2mm;
+	}
+
+	.today-reference-source-head > :last-child {
+		border-right: 0.35pt solid #d7d3c9;
 	}
 
 	.today-reference-badge {
-		border: 1px solid #8aa4b8;
-		color: #0f1419;
-		font-size: 9pt;
-		font-weight: 700;
-		padding: 0 0.25rem;
+		background: #0f766e !important;
+		border-color: #0f766e !important;
+		color: #fff !important;
+		font-size: 11.8pt;
+		font-weight: 600;
+		justify-content: center;
+		padding-left: 0 !important;
+		padding-right: 0 !important;
 	}
 
-	.today-pdf-root article p,
-	.today-pdf-root article li,
-	.today-pdf-root article h1,
-	.today-pdf-root article h2,
-	.today-pdf-root article h3 {
+	.today-reference-author {
+		background: #f7f6f1 !important;
+		color: #111827 !important;
+		font-size: 10.8pt;
+		font-weight: 600;
+		line-height: 1.35;
+	}
+
+	.today-reference-source-head time {
+		background: #f7f6f1 !important;
+		color: #5b6472 !important;
+		font-size: 8.2pt;
+		justify-content: flex-end;
+		white-space: nowrap;
+	}
+
+	.today-reference-source-body {
+		border: 0.35pt solid #d7d3c9;
+		border-top: 0;
+		font-size: 9.7pt;
+		line-height: 1.5;
+		margin: 0;
+		orphans: 3;
+		padding: 1.8mm 2.5mm;
+		white-space: pre-wrap;
+		widows: 3;
+	}
+
+	.today-reference-source blockquote {
+		background: #fff7e6 !important;
+		border: 0.35pt solid #e6d8a8;
+		font-size: 8.5pt;
+		line-height: 1.45;
+		margin: 0;
+		padding: 1.8mm 2.5mm;
+	}
+
+	.today-reference-source blockquote strong,
+	.today-reference-source blockquote span {
+		display: block;
+	}
+
+	.today-reference-source blockquote strong {
+		font-size: 7.8pt;
+		margin-bottom: 0.8mm;
+	}
+
+	.today-reference-index {
+		break-before: page;
+		break-after: auto;
+	}
+
+	.today-reference-index th,
+	.today-reference-index td {
+		padding: 1.05mm 1.35mm;
+	}
+
+	.today-reference-index th:first-child {
+		width: 12mm;
+	}
+
+	.today-reference-index th:nth-child(2) {
+		width: 38mm;
+	}
+
+	.today-reference-index th:nth-child(4) {
+		width: 27mm;
+	}
+
+	.today-reference-index th:last-child {
+		width: 12mm;
+	}
+
+	.today-reference-index a {
+		color: #0f766e !important;
+		font-weight: 600;
+		text-decoration: none !important;
+	}
+
+	body:not([data-today-print-mode="reference"]) .today-pdf-root article p,
+	body:not([data-today-print-mode="reference"]) .today-pdf-root article li,
+	body:not([data-today-print-mode="reference"]) .today-pdf-root article h1,
+	body:not([data-today-print-mode="reference"]) .today-pdf-root article h2,
+	body:not([data-today-print-mode="reference"]) .today-pdf-root article h3 {
 		break-inside: avoid;
 		color: #0f1419 !important;
 	}
 
-	.today-pdf-root a {
+	body:not([data-today-print-mode="reference"]) .today-pdf-root a {
 		color: #0f1419 !important;
 		text-decoration: underline;
 	}

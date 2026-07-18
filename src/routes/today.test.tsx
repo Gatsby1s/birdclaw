@@ -400,7 +400,10 @@ describe("today route", () => {
 				const referencePdf = screen.getByTestId("today-reference-pdf");
 				const referenceText = referencePdf.textContent ?? "";
 				expect(
-					within(referencePdf).getByText("参考内容合集"),
+					within(referencePdf).getByRole("heading", {
+						name: "BirdClaw Today 参考内容合集",
+						level: 1,
+					}),
 				).toBeInTheDocument();
 				expect(
 					within(referencePdf).getByText(
@@ -416,10 +419,27 @@ describe("today route", () => {
 					within(referencePdf).getAllByText("Useful signal"),
 				).not.toHaveLength(0);
 				expect(
+					within(referencePdf).getByRole("heading", {
+						name: "热议主题",
+						level: 2,
+					}),
+				).toBeInTheDocument();
+				expect(
 					within(referencePdf).getByText(
-						"Markdown summary starts here and continues exactly as shown.",
+						/Markdown summary starts here and continues exactly as shown\./,
 					),
 				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getByText(
+						/A second paragraph remains under the same webpage topic\./,
+					),
+				).toBeInTheDocument();
+				expect(referenceText).toContain(
+					"An uncited webpage paragraph remains in the collection.",
+				);
+				expect(referenceText).toContain(
+					"This deliberately long topic heading stays complete in the printed table of contents without being shortened",
+				);
 				expect(
 					within(referencePdf).queryByText(
 						"Alice shared something worth a reply.",
@@ -429,7 +449,35 @@ describe("today route", () => {
 				expect(
 					within(referencePdf).getAllByText("Alice (@alice)"),
 				).not.toHaveLength(0);
+				expect(
+					within(referencePdf).getByRole("heading", {
+						name: "来源矩阵",
+						level: 2,
+					}),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getByRole("heading", {
+						name: "来源索引",
+						level: 2,
+					}),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getAllByRole("columnheader", {
+						name: "来源编号",
+					}),
+				).not.toHaveLength(0);
+				expect(
+					within(referencePdf).getAllByRole("columnheader", {
+						name: "作者 / 账号 ID",
+					}),
+				).not.toHaveLength(0);
+				expect(
+					within(referencePdf).getByRole("link", { name: "S01 所在页" }),
+				).toHaveAttribute("href", "#reference-source-S01");
 				expect(within(referencePdf).getByText("tweet_1")).toBeInTheDocument();
+				expect(
+					within(referencePdf).getAllByText("2026-05-16"),
+				).not.toHaveLength(0);
 				expect(within(referencePdf).queryByText(/12 likes|12 赞/)).toBeNull();
 				expect(
 					within(referencePdf).queryByText(
@@ -440,8 +488,8 @@ describe("today route", () => {
 					within(referencePdf).queryByText("x.com/alice/status/tweet_1"),
 				).toBeNull();
 				expect(
-					within(referencePdf).getAllByText(/example\.com\/reference/),
-				).not.toHaveLength(0);
+					within(referencePdf).queryByText(/example\.com\/reference/),
+				).toBeNull();
 				expect(referenceText).not.toMatch(
 					/\b(Home|Mention|Authored|Liked|Bookmark)\b/,
 				);
@@ -466,11 +514,19 @@ describe("today route", () => {
 					"",
 					"Opening summary shown on the webpage.",
 					"",
-					"## What people are talking about",
+					"**大家在聊什么**",
 					"",
+					"### Useful signal",
+					"",
+					"- An uncited webpage paragraph remains in the collection.",
 					"- Markdown summary starts here",
 					"  and continues exactly as shown.",
 					"  (tweet_1)",
+					"- A second paragraph remains under the same webpage topic. (tweet_1)",
+					"",
+					"### This deliberately long topic heading stays complete in the printed table of contents without being shortened",
+					"",
+					"- The full heading is part of the webpage content. (tweet_1)",
 				].join("\n");
 				const result = digestResult("Today", markdown);
 				result.digest.summary =
