@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.24 - 2026-07-18
+
+### Fixed
+
+- Hydrate avatars for text-only `RT @handle:` reposts across Bird, Xurl, and cached Home timeline syncs, including recent historical rows that no longer appear in the latest payload.
+- Prefer hydrated and canonical profiles when legacy handle rows differ only by letter casing, preventing blank placeholders from winning timeline reads.
+
 ## 0.8.23 - 2026-07-18
 
 ### Added
