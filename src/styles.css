@@ -358,6 +358,20 @@ html.theme-transition::view-transition-new(theme) {
 		color: #0f1419 !important;
 	}
 
+	.today-topic-item {
+		break-inside: avoid;
+		border-color: #d8dee5 !important;
+		background: #fff !important;
+	}
+
+	.today-topic-item h3 {
+		color: #0f1419 !important;
+	}
+
+	.today-topic-item p {
+		color: #536471 !important;
+	}
+
 	.today-pdf-root a {
 		color: #0f1419 !important;
 		text-decoration: underline;

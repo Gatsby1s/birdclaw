@@ -122,6 +122,8 @@ describe("period digest", () => {
 		expect(prompt).toContain(
 			`Prompt tweets: ${String(context.tweets.length)} of ${String(context.tweets.length)}`,
 		);
+		expect(prompt).toContain("Markdown level-2 heading");
+		expect(prompt).toContain("concise bold topic label");
 		expect(prompt).toContain(context.tweets[0]?.text);
 	});
 

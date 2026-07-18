@@ -163,7 +163,15 @@ describe("today route", () => {
 			}),
 		).toBeInTheDocument();
 		expect(screen.queryByText("Today summary")).toBeNull();
-		expect(screen.queryByText("Useful signal")).toBeNull();
+		expect(
+			screen.getByRole("heading", { name: "Key topics", level: 2 }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Useful signal", level: 3 }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByText("Alice shared something worth a reply."),
+		).toBeInTheDocument();
 		expect(screen.queryByText(/Action items/i)).toBeNull();
 		expect(screen.queryByText("# Today")).not.toBeInTheDocument();
 		expect(screen.getByText("Reply:")).toBeInTheDocument();
@@ -218,6 +226,72 @@ describe("today route", () => {
 					url.searchParams.get("liveSync") === "false",
 			),
 		).toBe(true);
+	});
+
+	it("keeps structured topic headings when the model markdown is flat", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return new Response(JSON.stringify({ ok: true, results: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				const markdown = "A readable report without Markdown headings.";
+				return ndjsonResponse([
+					{ type: "delta", delta: markdown },
+					{ type: "done", result: digestResult("Today", markdown) },
+				]);
+			}),
+		);
+
+		render(<TodayRoute />);
+
+		expect(
+			await screen.findByRole("heading", {
+				name: "Useful signal",
+				level: 3,
+			}),
+		).toBeInTheDocument();
+		expect(
+			screen.getByText("Alice shared something worth a reply."),
+		).toBeInTheDocument();
+	});
+
+	it("renders every structured topic instead of truncating the outline", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return new Response(JSON.stringify({ ok: true, results: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				const markdown = "A readable report without Markdown headings.";
+				const result = digestResult("Today", markdown);
+				result.digest.keyTopics = Array.from({ length: 6 }, (_, index) => ({
+					title: `Topic ${String(index + 1)}`,
+					summary: `Summary ${String(index + 1)}`,
+					tweetIds: ["tweet_1"],
+					handles: ["@alice"],
+				}));
+				return ndjsonResponse([
+					{ type: "delta", delta: markdown },
+					{ type: "done", result },
+				]);
+			}),
+		);
+
+		render(<TodayRoute />);
+
+		expect(
+			await screen.findByRole("heading", { name: "Topic 1", level: 3 }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Topic 6", level: 3 }),
+		).toBeInTheDocument();
 	});
 
 	it("exports a completed digest through the browser PDF flow", async () => {

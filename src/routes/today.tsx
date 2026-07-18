@@ -131,6 +131,39 @@ function formatCounts(context: PeriodDigestContext | null) {
 		.join(" · ");
 }
 
+function DigestTopicOutline({ result }: { result: PeriodDigestRunResult }) {
+	if (result.digest.keyTopics.length === 0) return null;
+
+	return (
+		<section
+			aria-labelledby="today-key-topics-heading"
+			className="today-topic-outline border-b border-[var(--line)] px-4 py-4"
+		>
+			<h2
+				className="mb-3 text-[13px] font-bold uppercase tracking-wide text-[var(--ink-soft)]"
+				id="today-key-topics-heading"
+			>
+				Key topics
+			</h2>
+			<ul className="grid gap-2">
+				{result.digest.keyTopics.map((topic, index) => (
+					<li
+						className="today-topic-item rounded-lg border border-[var(--line)] bg-[var(--bg-elevated)] p-3"
+						key={`${topic.title}:${String(index)}`}
+					>
+						<h3 className="text-[15px] font-bold leading-5 text-[var(--ink)]">
+							{topic.title}
+						</h3>
+						<p className="mt-1 text-[14px] leading-5 text-[var(--ink-soft)]">
+							{topic.summary}
+						</p>
+					</li>
+				))}
+			</ul>
+		</section>
+	);
+}
+
 function collectProfilesForHydration(result: PeriodDigestRunResult) {
 	const handles = new Set<string>();
 	const tweetIds = new Set<string>();
@@ -491,6 +524,8 @@ export function TodayRouteView({
 								: "Ready"}
 				</span>
 			</div>
+
+			{result ? <DigestTopicOutline result={result} /> : null}
 
 			{markdown ? (
 				<MarkdownViewer
