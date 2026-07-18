@@ -649,6 +649,80 @@ describe("bird transport wrapper", () => {
 		expectBirdCommandCall(1, ["home", "-n", "9", "--json", "--following"]);
 	});
 
+	it("hydrates retweeted author avatars from bird raw user results", async () => {
+		const { __test__ } = await import("./bird");
+		const payload = __test__.normalizeBirdTweets([
+			{
+				id: "home_retweet",
+				text: "RT @enzo_gte: I've been using Kimi K3",
+				createdAt: "Sat Jul 18 09:29:03 +0000 2026",
+				authorId: "1577241403",
+				author: {
+					username: "levelsio",
+					name: "@levelsio",
+					profileImageUrl:
+						"https://pbs.twimg.com/profile_images/levelsio_normal.jpg",
+				},
+				retweetedTweet: {
+					id: "2078102070482153717",
+					text: "I've been using Kimi K3 for ~16 hours now.",
+					createdAt: "Fri Jul 17 12:58:37 +0000 2026",
+					authorId: "1207822149248962561",
+					author: { username: "enzo_gte", name: "enzo" },
+					_raw: {
+						core: {
+							user_results: {
+								result: {
+									__typename: "User",
+									rest_id: "1207822149248962561",
+									avatar: {
+										image_url:
+											"https://pbs.twimg.com/profile_images/1991573446875058176/y3pmE469_normal.jpg",
+									},
+									core: {
+										screen_name: "enzo_gte",
+										name: "enzo",
+										created_at: "Thu Dec 19 20:28:02 +0000 2019",
+									},
+									legacy: {
+										description: "founder @gte_xyz",
+										followers_count: 13260,
+										friends_count: 692,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		]);
+
+		expect(payload.includes?.tweets?.[0]).toMatchObject({
+			id: "2078102070482153717",
+			author_id: "1207822149248962561",
+		});
+		expect(payload.includes?.users).toEqual([
+			expect.objectContaining({
+				id: "1577241403",
+				username: "levelsio",
+				profile_image_url:
+					"https://pbs.twimg.com/profile_images/levelsio_normal.jpg",
+			}),
+			expect.objectContaining({
+				id: "1207822149248962561",
+				username: "enzo_gte",
+				name: "enzo",
+				description: "founder @gte_xyz",
+				profile_image_url:
+					"https://pbs.twimg.com/profile_images/1991573446875058176/y3pmE469_normal.jpg",
+				public_metrics: {
+					followers_count: 13260,
+					following_count: 692,
+				},
+			}),
+		]);
+	});
+
 	it("maps bird follower lists into xurl-compatible users", async () => {
 		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
 		mockBirdStdoutOnce(
@@ -945,6 +1019,70 @@ describe("bird transport wrapper", () => {
 		expectBirdCommandCall(2, ["following", "-n", "1000", "--json"]);
 	});
 
+	it("falls back to bird user-tweets when the following lookup fails", async () => {
+		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
+		mockBirdRejectOnce(
+			Object.assign(new Error("unknown command user"), {
+				stderr: "error: unknown command user",
+			}),
+		);
+		mockBirdRejectOnce(
+			Object.assign(new Error("following lookup failed"), {
+				stderr: "error: following lookup failed",
+			}),
+		);
+		mockBirdStdoutOnce(
+			JSON.stringify([
+				{
+					id: "2078102070482153717",
+					text: "I've been using Kimi K3 for ~16 hours now.",
+					createdAt: "Fri Jul 17 12:58:37 +0000 2026",
+					authorId: "1207822149248962561",
+					author: { username: "enzo_gte", name: "enzo" },
+					_raw: {
+						core: {
+							user_results: {
+								result: {
+									rest_id: "1207822149248962561",
+									avatar: {
+										image_url:
+											"https://pbs.twimg.com/profile_images/1991573446875058176/y3pmE469_normal.jpg",
+									},
+									core: {
+										screen_name: "enzo_gte",
+										name: "enzo",
+									},
+									legacy: {
+										followers_count: 13260,
+										friends_count: 692,
+									},
+								},
+							},
+						},
+					},
+				},
+			]),
+		);
+
+		const { lookupProfileViaBird } = await import("./bird");
+
+		await expect(lookupProfileViaBird("enzo_gte")).resolves.toMatchObject({
+			id: "1207822149248962561",
+			username: "enzo_gte",
+			profile_image_url:
+				"https://pbs.twimg.com/profile_images/1991573446875058176/y3pmE469_normal.jpg",
+		});
+		expectBirdCommandCall(1, ["user", "enzo_gte", "--json", "--profile-only"]);
+		expectBirdCommandCall(2, ["following", "-n", "1000", "--json"]);
+		expectBirdCommandCall(3, [
+			"user-tweets",
+			"enzo_gte",
+			"-n",
+			"1",
+			"--json-full",
+		]);
+	});
+
 	it("rejects unexpected direct messages json", async () => {
 		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
 		mockBirdStdoutOnce(
@@ -1037,6 +1175,77 @@ describe("bird transport wrapper", () => {
 		expect(results[0]?.user?.profile_image_url).toBe(
 			"https://pbs.twimg.com/profile_images/13334762/github_normal.jpg",
 		);
+	});
+
+	it("falls back to bird user-tweets raw profile data for non-followed profiles", async () => {
+		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
+		mockBirdRejectOnce(
+			Object.assign(new Error("unknown command profiles"), {
+				stderr: "error: unknown command profiles",
+			}),
+		);
+		mockBirdStdoutOnce(JSON.stringify([]));
+		mockBirdRejectOnce(
+			Object.assign(new Error("unknown command user"), {
+				stderr: "error: unknown command user",
+			}),
+		);
+		mockBirdStdoutOnce(
+			JSON.stringify([
+				{
+					id: "2078102070482153717",
+					text: "I've been using Kimi K3 for ~16 hours now.",
+					createdAt: "Fri Jul 17 12:58:37 +0000 2026",
+					authorId: "1207822149248962561",
+					author: { username: "enzo_gte", name: "enzo" },
+					_raw: {
+						core: {
+							user_results: {
+								result: {
+									rest_id: "1207822149248962561",
+									avatar: {
+										image_url:
+											"https://pbs.twimg.com/profile_images/1991573446875058176/y3pmE469_normal.jpg",
+									},
+									core: {
+										screen_name: "enzo_gte",
+										name: "enzo",
+									},
+									legacy: {
+										followers_count: 13260,
+										friends_count: 692,
+									},
+								},
+							},
+						},
+					},
+				},
+			]),
+		);
+
+		const { lookupProfilesViaBird } = await import("./bird");
+		const results = await lookupProfilesViaBird(["enzo_gte"]);
+
+		expectBirdCommandCall(1, ["profiles", "enzo_gte", "--json"]);
+		expectBirdCommandCall(2, ["following", "-n", "1000", "--json"]);
+		expectBirdCommandCall(3, ["user", "enzo_gte", "--json", "--profile-only"]);
+		expectBirdCommandCall(4, [
+			"user-tweets",
+			"enzo_gte",
+			"-n",
+			"1",
+			"--json-full",
+		]);
+		expect(results[0]?.user).toMatchObject({
+			id: "1207822149248962561",
+			username: "enzo_gte",
+			profile_image_url:
+				"https://pbs.twimg.com/profile_images/1991573446875058176/y3pmE469_normal.jpg",
+			public_metrics: {
+				followers_count: 13260,
+				following_count: 692,
+			},
+		});
 	});
 
 	it("normalizes bird helper edge cases", async () => {
