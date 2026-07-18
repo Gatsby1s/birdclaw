@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.20 - 2026-07-18
+
+### Fixed
+
+- Restore the Today digest's structured key-topic headings and summaries, including cached reports whose generated Markdown omits headings.
+- Require future Today reports to use Markdown section headings and concise bold topic labels.
+
 ## 0.8.19 - 2026-07-18
 
 ### Fixed
