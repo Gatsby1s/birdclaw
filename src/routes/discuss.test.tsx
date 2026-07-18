@@ -6,6 +6,7 @@ import {
 	waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { validateDiscussSearch } from "#/lib/route-search";
 import { ndjsonResponse } from "#/test/ndjson";
 import { DiscussRouteView as DiscussRoute } from "./discuss";
 
@@ -155,6 +156,45 @@ describe("discuss route", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
 		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
 		expect(urls[2]?.searchParams.has("refresh")).toBe(false);
+	});
+
+	it("preserves Chinese IME composition before syncing route search", () => {
+		const onSearchChange = vi.fn();
+		const searchState = validateDiscussSearch({});
+
+		render(
+			<DiscussRoute
+				searchState={searchState}
+				onSearchChange={onSearchChange}
+			/>,
+		);
+
+		const keywords = screen.getByPlaceholderText("Keywords");
+		fireEvent.compositionStart(keywords);
+		fireEvent.change(keywords, { target: { value: "zhong" } });
+		expect(keywords).toHaveValue("zhong");
+		expect(onSearchChange).not.toHaveBeenCalled();
+
+		fireEvent.change(keywords, { target: { value: "中文" } });
+		fireEvent.compositionEnd(keywords);
+		expect(keywords).toHaveValue("中文");
+		expect(onSearchChange).toHaveBeenLastCalledWith(
+			{ ...searchState, q: "中文" },
+			{ replace: true },
+		);
+
+		onSearchChange.mockClear();
+		const question = screen.getByPlaceholderText("Optional question");
+		fireEvent.compositionStart(question);
+		fireEvent.change(question, { target: { value: "这个话题怎么样" } });
+		expect(question).toHaveValue("这个话题怎么样");
+		expect(onSearchChange).not.toHaveBeenCalled();
+
+		fireEvent.compositionEnd(question);
+		expect(onSearchChange).toHaveBeenLastCalledWith(
+			{ ...searchState, question: "这个话题怎么样" },
+			{ replace: true },
+		);
 	});
 
 	it("renders request and stream errors", async () => {
