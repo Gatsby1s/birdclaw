@@ -1091,7 +1091,8 @@ Requirements:
 - Format every section title as a Markdown level-2 heading (\`## Section title\`), never as bold-only text.
 - When a tweet has replyToTweet, use that parent context to understand what the author was replying to and whether Peter already joined the conversation.
 - Use bullets under each section. Each bullet should be specific and explain why it matters.
-- Under "What people are talking about", begin every bullet with a concise bold topic label, for example \`- **Model releases:** ...\`.
+- Under "What people are talking about", group related bullets beneath concise Markdown level-3 topic headings (\`### Topic title\`).
+- Every level-3 topic heading must exactly match one corresponding keyTopics[].title in the JSON, and keyTopics must follow the same order. Do not replace these headings with bold-only bullet prefixes.
 - For tweets: cite every claim with inline tweet ids at the end of the relevant sentence or bullet, e.g. (tweet_123, tweet_456). These citations become hoverable source links.
 - For links: emit normal Markdown links with no space between the label and URL, e.g. [title](https://example.com), then cite the sharing tweet ids in the same bullet.
 - Prefer synthesis over chronology. Group repeated chatter into one bullet.

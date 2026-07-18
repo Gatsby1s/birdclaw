@@ -14,6 +14,7 @@ import {
 	isTerminalStreamEvent,
 	periodDigestStreamEventSchema,
 } from "#/lib/client-stream-contracts";
+import { injectTopicHeadings } from "#/lib/period-digest-markdown";
 import type {
 	PeriodDigestContext,
 	PeriodDigestRunResult,
@@ -129,39 +130,6 @@ function formatCounts(context: PeriodDigestContext | null) {
 	]
 		.filter(Boolean)
 		.join(" · ");
-}
-
-function DigestTopicOutline({ result }: { result: PeriodDigestRunResult }) {
-	if (result.digest.keyTopics.length === 0) return null;
-
-	return (
-		<section
-			aria-labelledby="today-key-topics-heading"
-			className="today-topic-outline border-b border-[var(--line)] px-4 py-4"
-		>
-			<h2
-				className="mb-3 text-[13px] font-bold uppercase tracking-wide text-[var(--ink-soft)]"
-				id="today-key-topics-heading"
-			>
-				Key topics
-			</h2>
-			<ul className="grid gap-2">
-				{result.digest.keyTopics.map((topic, index) => (
-					<li
-						className="today-topic-item rounded-lg border border-[var(--line)] bg-[var(--bg-elevated)] p-3"
-						key={`${topic.title}:${String(index)}`}
-					>
-						<h3 className="text-[15px] font-bold leading-5 text-[var(--ink)]">
-							{topic.title}
-						</h3>
-						<p className="mt-1 text-[14px] leading-5 text-[var(--ink-soft)]">
-							{topic.summary}
-						</p>
-					</li>
-				))}
-			</ul>
-		</section>
-	);
 }
 
 function collectProfilesForHydration(result: PeriodDigestRunResult) {
@@ -525,13 +493,15 @@ export function TodayRouteView({
 				</span>
 			</div>
 
-			{result ? <DigestTopicOutline result={result} /> : null}
-
 			{markdown ? (
 				<MarkdownViewer
 					context={result?.context ?? context}
 					markdownLinkClassName={todayMarkdownLinkClass}
-					markdown={markdown}
+					markdown={
+						result
+							? injectTopicHeadings(markdown, result.digest.keyTopics)
+							: markdown
+					}
 					sourceOnlyCitations
 				/>
 			) : (
