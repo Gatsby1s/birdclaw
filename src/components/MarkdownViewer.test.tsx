@@ -390,6 +390,31 @@ describe("MarkdownViewer", () => {
 		);
 	});
 
+	it("renders full-width parenthesized citations as source links", () => {
+		render(
+			<MarkdownViewer
+				context={context}
+				markdown={
+					"这段中文正文保持普通文本（tweet_2057574939775938900，tweet_2057578665408434460）。"
+				}
+				sourceOnlyCitations
+			/>,
+		);
+
+		expect(
+			screen.queryByRole("link", { name: "这段中文正文保持普通文本" }),
+		).toBeNull();
+		expect(screen.queryByText(/tweet_205757/)).not.toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "source 1" })).toHaveAttribute(
+			"href",
+			"https://x.com/kilocode/status/2057574939775938900",
+		);
+		expect(screen.getByRole("link", { name: "source 2" })).toHaveAttribute(
+			"href",
+			"https://x.com/kilocode/status/2057578665408434460",
+		);
+	});
+
 	it("keeps mixed unresolved grouped tweet citations visible", () => {
 		render(
 			<MarkdownViewer
