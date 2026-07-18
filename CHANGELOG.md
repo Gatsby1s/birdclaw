@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.21 - 2026-07-18
+
+### Fixed
+
+- Preserve Chinese and other IME composition text in both Discuss inputs, syncing the URL only after the candidate text is committed.
+
 ## 0.8.20 - 2026-07-18
 
 ### Fixed
