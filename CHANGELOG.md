@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.19 - 2026-07-18
+
+### Fixed
+
+- Hydrate original authors in reposts from bird raw user data, with a bounded `user-tweets` fallback for non-followed accounts and failed following-list lookups, so reposted posts render real avatars.
+
 ## 0.8.18 - 2026-06-30
 
 ### Fixed
