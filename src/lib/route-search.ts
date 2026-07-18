@@ -1,3 +1,4 @@
+import type { DiscussDateRange } from "./discuss-date-range";
 import type { NetworkMapKind } from "./network-map";
 import type { SearchDiscussionSource } from "./search-discussion";
 import type { TweetSearchMode } from "./tweet-search-live";
@@ -112,6 +113,7 @@ export interface DiscussRouteSearch {
 	question: string;
 	source: SearchDiscussionSource;
 	mode: TweetSearchMode;
+	range: DiscussDateRange;
 	includeDms: boolean;
 }
 
@@ -127,6 +129,11 @@ export function validateDiscussSearch(
 			"search",
 		),
 		mode: enumValue(search.mode, ["auto", "bird", "xurl", "local"], "xurl"),
+		range: enumValue(
+			search.range,
+			["all", "today", "24h", "yesterday", "week"],
+			"all",
+		),
 		includeDms: booleanValue(search.includeDms),
 	};
 }

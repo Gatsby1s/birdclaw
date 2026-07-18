@@ -721,8 +721,9 @@ export function streamSearchDiscussionEffect(
 ): Effect.Effect<SearchDiscussionRunResult, Error> {
 	return Effect.gen(function* () {
 		const mode = options.mode ?? "auto";
+		const source = options.source ?? "search";
 		const liveSearch =
-			mode === "local"
+			mode === "local" || source !== "search"
 				? undefined
 				: yield* syncTweetSearchEffect({
 						query: options.query,
@@ -745,7 +746,7 @@ export function streamSearchDiscussionEffect(
 		const context = yield* trySearchSync(() =>
 			collectSearchDiscussionContext({
 				...options,
-				source: options.source ?? "search",
+				source,
 				liveSearch,
 			}),
 		);

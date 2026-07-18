@@ -24,7 +24,10 @@ describe("route search schemas", () => {
 			kind: "videos",
 			range: "week",
 		});
-		expect(validateDiscussSearch({ mode: "bad" }).mode).toBe("xurl");
+		expect(validateDiscussSearch({ mode: "bad", range: "bad" })).toMatchObject({
+			mode: "xurl",
+			range: "all",
+		});
 		expect(validateTodaySearch({ period: "bad" }).period).toBe("today");
 		expect(validateNetworkMapSearch({ type: "bad" }).type).toBe("all");
 	});

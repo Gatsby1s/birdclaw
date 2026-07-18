@@ -27,6 +27,10 @@ import {
 	isTerminalStreamEvent,
 	searchDiscussionStreamEventSchema,
 } from "#/lib/client-stream-contracts";
+import {
+	type DiscussDateRange,
+	resolveDiscussDateRange,
+} from "#/lib/discuss-date-range";
 import type { TweetSearchMode } from "#/lib/tweet-search-live";
 import {
 	type DiscussRouteSearch,
@@ -46,6 +50,8 @@ import {
 	searchFieldInputClass,
 	searchFieldShellClass,
 	secondaryButtonClass,
+	segmentClass,
+	segmentedClass,
 	selectFieldClass,
 	textFieldClass,
 } from "#/lib/ui";
@@ -71,8 +77,19 @@ const modes: Array<{ value: TweetSearchMode; label: string }> = [
 	{ value: "xurl", label: "xurl" },
 	{ value: "local", label: "Local" },
 ];
+const ranges: Array<{ value: DiscussDateRange; label: string }> = [
+	{ value: "all", label: "All" },
+	{ value: "today", label: "Today" },
+	{ value: "24h", label: "24h" },
+	{ value: "yesterday", label: "Yesterday" },
+	{ value: "week", label: "Week" },
+];
 const DISCUSS_SEARCH_LIMIT = 20_000;
 const DISCUSS_MAX_PAGES = 200;
+const discussRangeSegmentActiveClass =
+	"!bg-[var(--accent)] !text-[var(--accent-text)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent)_35%,transparent)]";
+const discussMarkdownLinkClass =
+	"text-[var(--ink)] underline-offset-2 hover:underline";
 
 function discussionPrematureEofError() {
 	return new Error(
@@ -89,6 +106,7 @@ function discussionUrl(
 	options: {
 		source: SearchDiscussionSource;
 		mode: TweetSearchMode;
+		dateRange: ReturnType<typeof resolveDiscussDateRange>;
 		includeDms: boolean;
 		question: string;
 		refresh: boolean;
@@ -101,6 +119,12 @@ function discussionUrl(
 	url.searchParams.set("includeDms", String(options.includeDms));
 	url.searchParams.set("limit", String(DISCUSS_SEARCH_LIMIT));
 	url.searchParams.set("maxPages", String(DISCUSS_MAX_PAGES));
+	if (options.dateRange.since) {
+		url.searchParams.set("since", options.dateRange.since);
+	}
+	if (options.dateRange.until) {
+		url.searchParams.set("until", options.dateRange.until);
+	}
 	if (options.question.trim()) {
 		url.searchParams.set("question", options.question.trim());
 	}
@@ -173,6 +197,7 @@ function useDiscussionStream(
 	query: string,
 	source: SearchDiscussionSource,
 	mode: TweetSearchMode,
+	dateRange: ReturnType<typeof resolveDiscussDateRange>,
 	includeDms: boolean,
 	question: string,
 ) {
@@ -192,6 +217,7 @@ function useDiscussionStream(
 				discussionUrl(trimmed, {
 					source,
 					mode,
+					dateRange,
 					includeDms,
 					question,
 					refresh,
@@ -199,7 +225,7 @@ function useDiscussionStream(
 				{ signal },
 			);
 		},
-		[includeDms, mode, query, question, source],
+		[dateRange, includeDms, mode, query, question, source],
 	);
 	const onEvent = useCallback((event: SearchDiscussionStreamEvent) => {
 		if (event.type === "start") setContext(event.context);
@@ -262,18 +288,22 @@ export function DiscussRouteView({
 	const searchState = controlledSearch ?? localSearch;
 	const updateSearch: RouteSearchChange<DiscussRouteSearch> = (next, options) =>
 		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
-	const { q: query, question, source, mode, includeDms } = searchState;
+	const { q: query, question, source, mode, range, includeDms } = searchState;
 	const [queryDraft, setQueryDraft] = useState(query);
 	const [questionDraft, setQuestionDraft] = useState(question);
 	const queryComposingRef = useRef(false);
 	const questionComposingRef = useRef(false);
-	const [submittedQuery, setSubmittedQuery] = useState("");
+	const [submittedSearch, setSubmittedSearch] = useState(() => ({
+		query: "",
+		dateRange: resolveDiscussDateRange("all"),
+	}));
 	const pendingSubmitRef = useRef(false);
 	const { context, error, loading, markdown, result, run } =
 		useDiscussionStream(
-			submittedQuery,
+			submittedSearch.query,
 			source,
 			mode,
+			submittedSearch.dateRange,
 			includeDms,
 			questionDraft,
 		);
@@ -307,18 +337,17 @@ export function DiscussRouteView({
 		const trimmed = queryDraft.trim();
 		if (!trimmed) return;
 		pendingSubmitRef.current = true;
-		setSubmittedQuery(trimmed);
-		if (trimmed === submittedQuery) {
-			pendingSubmitRef.current = false;
-			run(false);
-		}
+		setSubmittedSearch({
+			query: trimmed,
+			dateRange: resolveDiscussDateRange(range),
+		});
 	}
 
 	useEffect(() => {
-		if (!submittedQuery || !pendingSubmitRef.current) return;
+		if (!submittedSearch.query || !pendingSubmitRef.current) return;
 		pendingSubmitRef.current = false;
 		run(false);
-	}, [run, submittedQuery]);
+	}, [run, submittedSearch]);
 
 	return (
 		<div className="flex min-h-screen flex-col">
@@ -333,7 +362,7 @@ export function DiscussRouteView({
 							type="button"
 							className={secondaryButtonClass}
 							onClick={() => run(true)}
-							disabled={loading || !submittedQuery}
+							disabled={loading || !submittedSearch.query}
 						>
 							<RefreshCw
 								className={cx("size-4", loading && "animate-spin")}
@@ -415,6 +444,31 @@ export function DiscussRouteView({
 							DMs
 						</label>
 					</div>
+					<div
+						aria-label="Date range"
+						className={cx(
+							segmentedClass,
+							"col-span-full w-fit max-w-full overflow-x-auto",
+						)}
+						role="group"
+					>
+						{ranges.map((item) => (
+							<button
+								key={item.value}
+								type="button"
+								className={cx(
+									segmentClass,
+									"shrink-0",
+									range === item.value && discussRangeSegmentActiveClass,
+								)}
+								onClick={() =>
+									updateSearch({ ...searchState, range: item.value })
+								}
+							>
+								{item.label}
+							</button>
+						))}
+					</div>
 				</form>
 			</header>
 
@@ -440,7 +494,9 @@ export function DiscussRouteView({
 			{markdown ? (
 				<MarkdownViewer
 					context={result?.context ?? context}
+					markdownLinkClassName={discussMarkdownLinkClass}
 					markdown={markdown}
+					sourceOnlyCitations
 				/>
 			) : (
 				<div className="px-4 py-5 text-[14px] text-[var(--ink-soft)]">

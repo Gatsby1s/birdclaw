@@ -373,6 +373,33 @@ describe("search discussion", () => {
 		);
 	});
 
+	it("skips live keyword sync for local collection sources", async () => {
+		const streamed = [
+			sseFrame({
+				type: "response.output_text.delta",
+				delta:
+					'# Home\n\nBounded local results.\n\n---\n{"title":"Home","summary":"Bounded local results","themes":[],"tensions":[],"followUps":[],"sourceTweetIds":[],"sourceDmConversationIds":[]}',
+			}),
+			"data: [DONE]\n\n",
+		].join("");
+		const fetchMock = vi.fn().mockResolvedValue(streamResponse(streamed));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const result = await streamSearchDiscussion({
+			query: "local-first",
+			source: "home",
+			mode: "auto",
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			refresh: true,
+			limit: 20,
+		});
+
+		expect(result.context.source).toBe("home");
+		expect(result.context.liveSearch).toBeUndefined();
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
 	it("exposes the discussion stream as an Effect program", async () => {
 		const streamed = [
 			sseFrame({

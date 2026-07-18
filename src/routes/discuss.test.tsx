@@ -96,7 +96,7 @@ describe("discuss route", () => {
 			const url = new URL(String(input));
 			urls.push(url);
 			const query = url.searchParams.get("query") ?? "";
-			const markdown = `# ${query}\n\n## Themes\n\n- Practical workflows`;
+			const markdown = `# ${query}\n\n## Themes\n\n- Practical workflows stay readable (tweet_1).\n\n[Related link](https://example.com)`;
 			return ndjsonResponse([
 				{
 					type: "start",
@@ -116,6 +116,9 @@ describe("discuss route", () => {
 		).toBeInTheDocument();
 		expect(screen.getByText("Search to begin.")).toBeInTheDocument();
 		expect(screen.getByLabelText("Mode")).toHaveValue("xurl");
+		expect(screen.getByRole("button", { name: "All" })).toHaveClass(
+			"!bg-[var(--accent)]",
+		);
 
 		fireEvent.change(screen.getByPlaceholderText("Keywords"), {
 			target: { value: "ChatGPT" },
@@ -129,13 +132,26 @@ describe("discuss route", () => {
 		fireEvent.change(screen.getByLabelText("Source"), {
 			target: { value: "all" },
 		});
+		fireEvent.click(screen.getByRole("button", { name: "Yesterday" }));
 		fireEvent.click(screen.getByLabelText("DMs"));
 		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
 
 		expect(
 			await screen.findByRole("heading", { name: "ChatGPT", level: 1 }),
 		).toBeInTheDocument();
-		expect(screen.getByText("Practical workflows")).toBeInTheDocument();
+		expect(
+			screen.getByText(/Practical workflows stay readable/),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("link", { name: /Practical workflows/ }),
+		).toBeNull();
+		expect(screen.getByRole("link", { name: "source" })).toHaveAttribute(
+			"href",
+			"https://x.com/alice/status/tweet_1",
+		);
+		expect(screen.getByRole("link", { name: "Related link" })).toHaveClass(
+			"text-[var(--ink)]",
+		);
 		expect(
 			screen.getByText(
 				"bird 3 fetched · 3 search · 2 timeline · 1 saved · 2 DMs",
@@ -145,6 +161,13 @@ describe("discuss route", () => {
 		expect(urls[0]?.searchParams.get("mode")).toBe("bird");
 		expect(urls[0]?.searchParams.get("includeDms")).toBe("true");
 		expect(urls[0]?.searchParams.get("question")).toBe("Useful takeaways");
+		expect(urls[0]?.searchParams.get("since")).toBeTruthy();
+		expect(urls[0]?.searchParams.get("until")).toBeTruthy();
+		expect(
+			new Date(urls[0]?.searchParams.get("since") ?? "").getTime(),
+		).toBeLessThan(
+			new Date(urls[0]?.searchParams.get("until") ?? "").getTime(),
+		);
 		expect(urls[0]?.searchParams.get("limit")).toBe("20000");
 		expect(urls[0]?.searchParams.get("maxPages")).toBe("200");
 		expect(urls[0]?.searchParams.has("refresh")).toBe(false);
@@ -152,10 +175,20 @@ describe("discuss route", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 		expect(urls[1]?.searchParams.get("refresh")).toBe("true");
+		expect(urls[1]?.searchParams.get("since")).toBe(
+			urls[0]?.searchParams.get("since"),
+		);
+		expect(urls[1]?.searchParams.get("until")).toBe(
+			urls[0]?.searchParams.get("until"),
+		);
 
+		fireEvent.click(screen.getByRole("button", { name: "All" }));
+		expect(fetchMock).toHaveBeenCalledTimes(2);
 		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
 		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
 		expect(urls[2]?.searchParams.has("refresh")).toBe(false);
+		expect(urls[2]?.searchParams.has("since")).toBe(false);
+		expect(urls[2]?.searchParams.has("until")).toBe(false);
 	});
 
 	it("preserves Chinese IME composition before syncing route search", () => {
