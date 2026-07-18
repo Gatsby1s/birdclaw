@@ -57,6 +57,7 @@ interface BirdTweetItem {
 	authorId?: string;
 	media?: BirdTweetMedia[];
 	article?: BirdTweetArticle | null;
+	_raw?: unknown;
 }
 
 export interface BirdDmUser {
@@ -462,7 +463,7 @@ function toReferencedTweets(item: BirdTweetItem) {
 }
 
 function toTweetData(item: BirdTweetItem): XurlTweetData {
-	const authorId = String(item.authorId ?? item.author?.username ?? "unknown");
+	const authorId = birdTweetAuthorId(item);
 	return {
 		id: item.id,
 		author_id: authorId,
@@ -480,9 +481,106 @@ function toTweetData(item: BirdTweetItem): XurlTweetData {
 	};
 }
 
+function asRecord(value: unknown) {
+	return value && typeof value === "object"
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+function stringField(record: Record<string, unknown> | undefined, key: string) {
+	const value = record?.[key];
+	return typeof value === "string" && value.trim().length > 0
+		? value.trim()
+		: undefined;
+}
+
+function numberField(record: Record<string, unknown> | undefined, key: string) {
+	const value = record?.[key];
+	return typeof value === "number" && Number.isFinite(value)
+		? value
+		: undefined;
+}
+
+function booleanField(
+	record: Record<string, unknown> | undefined,
+	key: string,
+) {
+	const value = record?.[key];
+	return typeof value === "boolean" ? value : undefined;
+}
+
+function rawUserFromBirdTweet(item: BirdTweetItem) {
+	const raw = asRecord(item._raw);
+	const rawCore = asRecord(raw?.core);
+	const userResults = asRecord(rawCore?.user_results);
+	return asRecord(userResults?.result);
+}
+
+function xUserFromBirdRawUser(rawUser: Record<string, unknown> | undefined) {
+	const id = stringField(rawUser, "rest_id");
+	const core = asRecord(rawUser?.core);
+	const legacy = asRecord(rawUser?.legacy);
+	const avatar = asRecord(rawUser?.avatar);
+	const location = asRecord(rawUser?.location);
+	const profileBio = asRecord(rawUser?.profile_bio);
+	const verification = asRecord(rawUser?.verification);
+	const username =
+		stringField(core, "screen_name") ?? stringField(legacy, "screen_name");
+	if (!id || !username) {
+		return null;
+	}
+
+	const followersCount =
+		numberField(legacy, "followers_count") ??
+		numberField(legacy, "normal_followers_count");
+	const followingCount = numberField(legacy, "friends_count");
+	return {
+		id,
+		username,
+		name: stringField(core, "name") ?? stringField(legacy, "name") ?? username,
+		description:
+			stringField(profileBio, "description") ??
+			stringField(legacy, "description"),
+		location:
+			stringField(location, "location") ?? stringField(legacy, "location"),
+		url: stringField(legacy, "url"),
+		verified: booleanField(verification, "verified"),
+		profile_image_url:
+			stringField(avatar, "image_url") ??
+			stringField(legacy, "profile_image_url_https") ??
+			stringField(legacy, "profile_image_url"),
+		created_at: stringField(core, "created_at"),
+		entities: asRecord(legacy?.entities),
+		public_metrics: {
+			followers_count: followersCount ?? 0,
+			following_count: followingCount ?? 0,
+		},
+	} satisfies XurlMentionUser;
+}
+
+function xUserFromBirdTweet(item: BirdTweetItem) {
+	return xUserFromBirdRawUser(rawUserFromBirdTweet(item));
+}
+
+function birdTweetAuthorId(item: BirdTweetItem) {
+	return String(
+		xUserFromBirdTweet(item)?.id ??
+			item.authorId ??
+			item.author?.username ??
+			"unknown",
+	);
+}
+
 function addBirdUser(users: Map<string, XurlMentionUser>, item: BirdTweetItem) {
-	const authorId = String(item.authorId ?? item.author?.username ?? "unknown");
+	const rawUser = xUserFromBirdTweet(item);
+	const authorId = String(
+		rawUser?.id ?? item.authorId ?? item.author?.username ?? "unknown",
+	);
 	if (users.has(authorId)) {
+		return;
+	}
+	if (rawUser) {
+		users.set(authorId, rawUser);
 		return;
 	}
 	const profileImageUrl =
@@ -1208,11 +1306,43 @@ function lookupProfileViaBirdUserCommandEffect(
 	});
 }
 
+function lookupProfileViaBirdUserTweetsEffect(
+	target: string,
+): Effect.Effect<XurlMentionUser | null, unknown> {
+	return Effect.gen(function* () {
+		const stdout = yield* runBirdJsonCommandEffect([
+			"user-tweets",
+			target,
+			"-n",
+			"1",
+			"--json-full",
+		]);
+		const payload = yield* parseBirdJsonEffect(stdout);
+		const tweets = yield* Effect.try({
+			try: () => getBirdTweetItems(payload, "user-tweets"),
+			catch: (error) => error,
+		});
+		for (const tweet of tweets) {
+			const user = xUserFromBirdTweet(tweet);
+			if (user) {
+				return user;
+			}
+		}
+		return null;
+	});
+}
+
+function lookupProfileViaBirdDirectEffect(target: string) {
+	return lookupProfileViaBirdUserCommandEffect(target).pipe(
+		Effect.catchAll(() => lookupProfileViaBirdUserTweetsEffect(target)),
+	);
+}
+
 function lookupProfilesViaBirdUserCommandsEffect(targets: string[]) {
 	return Effect.forEach(
 		targets,
 		(target) =>
-			lookupProfileViaBirdUserCommandEffect(target).pipe(
+			lookupProfileViaBirdDirectEffect(target).pipe(
 				Effect.map((user) => ({ target, user })),
 				Effect.catchAll((lookupError) =>
 					Effect.succeed({
@@ -1225,7 +1355,7 @@ function lookupProfilesViaBirdUserCommandsEffect(targets: string[]) {
 					}),
 				),
 			),
-		{ concurrency: "unbounded" },
+		{ concurrency: 4 },
 	);
 }
 
@@ -1313,7 +1443,12 @@ export function lookupProfileViaBirdEffect(
 					return Effect.fail(error);
 				}
 				return lookupProfilesFromBirdFollowingEffect([target]).pipe(
-					Effect.map((results) => results[0]?.user ?? null),
+					Effect.catchAll(() => Effect.succeed([])),
+					Effect.flatMap((results) =>
+						results[0]?.user
+							? Effect.succeed(results[0].user)
+							: lookupProfileViaBirdUserTweetsEffect(target),
+					),
 				);
 			}),
 		);
