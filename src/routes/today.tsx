@@ -141,7 +141,6 @@ function exportCurrentDigestPdf(
 }
 
 function collectReferencePrintStylesheets() {
-	const stylesheets: Array<string | Record<string, string>> = [];
 	const pagedPrintRules: string[] = [];
 	for (const stylesheet of document.styleSheets) {
 		try {
@@ -157,27 +156,12 @@ function collectReferencePrintStylesheets() {
 				}
 			}
 		} catch {
-			// Cross-origin stylesheets cannot be read; their URLs are still passed below.
+			// Reference print rules live in same-origin app stylesheets.
 		}
 	}
-	for (const link of document.querySelectorAll<HTMLLinkElement>(
-		'link[rel="stylesheet"]',
-	)) {
-		if (link.href) stylesheets.push(link.href);
-	}
-	for (const [index, style] of [
-		...document.querySelectorAll<HTMLStyleElement>(
-			"style:not([data-pagedjs-inserted-styles])",
-		),
-	].entries()) {
-		if (!style.textContent) continue;
-		stylesheets.push({
-			[`${window.location.href}#reference-print-${String(index)}`]:
-				style.textContent,
-		});
-	}
-	stylesheets.push({
-		[`${window.location.href}#reference-print-page-size`]: `
+	return [
+		{
+			[`${window.location.href}#reference-print-page-size`]: `
 			${pagedPrintRules.join("\n")}
 			@page {
 				size: A4;
@@ -192,8 +176,8 @@ function collectReferencePrintStylesheets() {
 				page: reference;
 			}
 		`,
-	});
-	return stylesheets;
+		},
+	];
 }
 
 async function exportReferenceCollectionPdf(
