@@ -9,6 +9,7 @@ import {
 	resolveLiveSyncAccount,
 	runCachedLiveSyncEffect,
 } from "./live-sync-engine";
+import { hydrateManualRetweetProfilesEffect } from "./manual-retweet-profile-hydration";
 import { runSyncPlanEffect } from "./sync-plan";
 import type {
 	XurlMediaItem,
@@ -269,6 +270,11 @@ export function syncHomeTimelineEffect({
 				),
 		});
 		const { source, payload } = syncResult;
+		yield* hydrateManualRetweetProfilesEffect(db, payload, accountId).pipe(
+			Effect.catchAll(() =>
+				Effect.succeed({ candidates: 0, requested: 0, hydrated: 0 }),
+			),
+		);
 		if (source === "cache") {
 			yield* Effect.sync(() =>
 				onProgress?.({

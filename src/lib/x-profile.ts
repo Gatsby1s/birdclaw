@@ -90,6 +90,17 @@ function updateExistingProfileFromUser(
 	user: XurlMentionUser,
 ): ResolvedXProfile {
 	const username = normalizeProfileHandle(String(user.username ?? ""));
+	const currentHandle = db
+		.prepare("select handle from profiles where id = ?")
+		.get(profileId) as { handle: string } | undefined;
+	const conflictingHandle = db
+		.prepare(
+			"select 1 as found from profiles where handle = ? and id <> ? limit 1",
+		)
+		.get(username, profileId);
+	const storedUsername = conflictingHandle
+		? (currentHandle?.handle ?? username)
+		: username;
 	const displayName = String(user.name ?? "").trim() || username;
 	const followersCount = Number(user.public_metrics?.followers_count ?? 0);
 	const hasFollowingCount =
@@ -123,7 +134,7 @@ function updateExistingProfileFromUser(
     where id = ?
     `,
 	).run(
-		username,
+		storedUsername,
 		displayName,
 		bio,
 		followersCount,
@@ -180,11 +191,23 @@ export function upsertProfileFromXUser(
 			`
       select id
       from profiles
-      where id = ? or handle = ?
+	      where id = ? or lower(handle) = lower(?)
+	      order by
+	        case
+	          when id = ? then 0
+	          when handle = ? then 1
+	          when lower(handle) = lower(?) then 2
+	          else 3
+	        end,
+	        case when nullif(trim(avatar_url), '') is not null then 0 else 1 end,
+	        created_at desc,
+	        id
       limit 1
       `,
 		)
-		.get(profileId, username) as { id: string } | undefined;
+		.get(profileId, username, profileId, username, username) as
+		| { id: string }
+		| undefined;
 
 	if (existingRow) {
 		return updateExistingProfileFromUser(db, existingRow.id, user);
