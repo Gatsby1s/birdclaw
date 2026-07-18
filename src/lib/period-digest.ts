@@ -1088,8 +1088,10 @@ Requirements:
 - Target 700-1100 words when there is enough data.
 - Start with a 2-3 sentence lead that immediately says what people are talking about.
 - Use sections named "What people are talking about", "Important links shared", and "Worth opening". Add "Worth replying to" only if there are clearly high-signal replies. Translate these section titles when a report language is requested.
+- Format every section title as a Markdown level-2 heading (\`## Section title\`), never as bold-only text.
 - When a tweet has replyToTweet, use that parent context to understand what the author was replying to and whether Peter already joined the conversation.
 - Use bullets under each section. Each bullet should be specific and explain why it matters.
+- Under "What people are talking about", begin every bullet with a concise bold topic label, for example \`- **Model releases:** ...\`.
 - For tweets: cite every claim with inline tweet ids at the end of the relevant sentence or bullet, e.g. (tweet_123, tweet_456). These citations become hoverable source links.
 - For links: emit normal Markdown links with no space between the label and URL, e.g. [title](https://example.com), then cite the sharing tweet ids in the same bullet.
 - Prefer synthesis over chronology. Group repeated chatter into one bullet.
