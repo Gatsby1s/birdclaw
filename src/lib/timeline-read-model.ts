@@ -1,5 +1,6 @@
 import type { Database } from "./sqlite";
 import { getReadDb } from "./db";
+import { parseManualRetweet } from "./manual-retweet";
 import { profileFromDbRow, profileHandleKey } from "./profile-row";
 import { displayUrlForLink, enrichFallbackUrlEntities } from "./tweet-render";
 import { parseJsonField, toFtsSearchQuery } from "./query-read-model-shared";
@@ -66,10 +67,17 @@ function getProfileByHandle(
       select *
       from profiles
       where lower(handle) = lower(?)
+	    order by
+	      case when nullif(trim(avatar_url), '') is not null then 0 else 1 end,
+	      case when handle = ? then 0 else 1 end,
+	      created_at desc,
+	      id
       limit 1
       `,
 		)
-		.get(normalized) as Record<string, unknown> | undefined;
+		.get(normalized, handle.replace(/^@/, "")) as
+		| Record<string, unknown>
+		| undefined;
 	const profile = row ? profileFromDbRow(row) : null;
 	cache.set(normalized, profile);
 	return profile ?? fallbackProfileForHandle(normalized);
@@ -329,17 +337,6 @@ function getRetweetedTweetIdFromRaw(rawJson: unknown) {
 	}
 
 	return null;
-}
-
-function parseManualRetweet(text: string) {
-	const match = text.match(/^RT\s+@([A-Za-z0-9_]{1,15}):\s*([\s\S]+)$/);
-	if (!match?.[1] || !match[2]) {
-		return null;
-	}
-	return {
-		handle: match[1],
-		text: match[2].trim(),
-	};
 }
 
 function buildRetweetedTweet(

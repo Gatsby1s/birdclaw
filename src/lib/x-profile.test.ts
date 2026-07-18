@@ -112,6 +112,32 @@ describe("x profile sync helpers", () => {
 		);
 	});
 
+	it("matches existing profile handles case-insensitively", () => {
+		const db = makeTempHome();
+		const first = upsertProfileFromXUser(db, {
+			id: "old",
+			username: "realmaalouf",
+			name: "@realmaalouf",
+		});
+		const second = upsertProfileFromXUser(db, {
+			id: "1316995857242378240",
+			username: "realMaalouf",
+			name: "Dr. Maalouf",
+			profile_image_url:
+				"https://pbs.twimg.com/profile_images/1771658176200318976/zppeMEGD_normal.jpg",
+		});
+
+		expect(second.profile.id).toBe(first.profile.id);
+		expect(second.profile.avatarUrl).toContain("zppeMEGD.jpg");
+		expect(
+			db
+				.prepare(
+					"select count(*) as count from profiles where lower(handle) = 'realmaalouf'",
+				)
+				.get(),
+		).toEqual({ count: 1 });
+	});
+
 	it("preserves existing following count when later x user payload omits metrics", () => {
 		const db = makeTempHome();
 

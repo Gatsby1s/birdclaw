@@ -7,9 +7,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetBirdclawPathsForTests } from "./config";
 import { getNativeDb, resetDatabaseForTests } from "./db";
 import { listTimelineItems } from "./queries";
+import type { XurlMentionUser } from "./types";
 
 const listHomeTimelineViaBirdMock = vi.fn();
 const listHomeTimelineViaXurlMock = vi.fn();
+const defaultProfileLookup = async (targets: string[]) =>
+	targets.map((target) => ({
+		target,
+		user: null as XurlMentionUser | null,
+	}));
+const lookupProfilesViaBirdMock = vi.fn(defaultProfileLookup);
 
 vi.mock("./bird", async () => {
 	const { Effect } = await import("effect");
@@ -19,6 +26,11 @@ vi.mock("./bird", async () => {
 		listHomeTimelineViaBirdEffect: (...args: unknown[]) =>
 			Effect.tryPromise({
 				try: () => listHomeTimelineViaBirdMock(...args),
+				catch: (error) => error,
+			}),
+		lookupProfilesViaBirdEffect: (targets: string[]) =>
+			Effect.tryPromise({
+				try: () => lookupProfilesViaBirdMock(targets),
 				catch: (error) => error,
 			}),
 	};
@@ -52,6 +64,8 @@ afterEach(() => {
 	delete process.env.BIRDCLAW_HOME;
 	listHomeTimelineViaBirdMock.mockReset();
 	listHomeTimelineViaXurlMock.mockReset();
+	lookupProfilesViaBirdMock.mockReset();
+	lookupProfilesViaBirdMock.mockImplementation(defaultProfileLookup);
 
 	for (const dir of tempDirs.splice(0)) {
 		rmSync(dir, { recursive: true, force: true });
@@ -59,6 +73,218 @@ afterEach(() => {
 });
 
 describe("live home timeline sync", () => {
+	it("hydrates text-only repost author avatars once and reuses the stored profile", async () => {
+		makeTempHome();
+		const db = getNativeDb();
+		const createdAt = "2026-07-18T12:00:00.000Z";
+		const insertDuplicateProfile = db.prepare(`
+			insert into profiles (
+				id, handle, display_name, bio, followers_count, following_count,
+				public_metrics_json, avatar_hue, avatar_url, entities_json, raw_json, created_at
+			) values (?, ?, ?, '', 0, 0, '{}', 0, null, '{}', '{}', ?)
+		`);
+		insertDuplicateProfile.run(
+			"profile_handle_realmaalouf",
+			"realMaalouf",
+			"@realMaalouf",
+			createdAt,
+		);
+		insertDuplicateProfile.run(
+			"profile_user_1316995857242378240",
+			"realmaalouf",
+			"@realmaalouf",
+			createdAt,
+		);
+		const payload = {
+			data: [
+				{
+					id: "manual_repost",
+					author_id: "880412538625810432",
+					text: "RT @realMaalouf: Popular far-left French politician Louis Boyard",
+					created_at: "2026-07-18T12:33:53.000Z",
+				},
+			],
+			includes: {
+				users: [
+					{
+						id: "880412538625810432",
+						username: "BillAckman",
+						name: "Bill Ackman",
+						profile_image_url:
+							"https://pbs.twimg.com/profile_images/1619837521059348481/9UeNLFmD.jpg",
+					},
+				],
+			},
+			meta: { result_count: 1 },
+		};
+		listHomeTimelineViaXurlMock.mockResolvedValueOnce(payload);
+		listHomeTimelineViaXurlMock.mockResolvedValueOnce(payload);
+		lookupProfilesViaBirdMock.mockResolvedValueOnce([
+			{
+				target: "realMaalouf",
+				user: {
+					id: "1316995857242378240",
+					username: "realMaalouf",
+					name: "Dr. Maalouf",
+					profile_image_url:
+						"https://pbs.twimg.com/profile_images/1771658176200318976/zppeMEGD_normal.jpg",
+				},
+			},
+		]);
+		const { syncHomeTimeline } = await import("./timeline-live");
+
+		await syncHomeTimeline({ mode: "auto", limit: 5, refresh: true });
+		await syncHomeTimeline({ mode: "auto", limit: 5, refresh: true });
+
+		expect(lookupProfilesViaBirdMock).toHaveBeenCalledTimes(1);
+		expect(lookupProfilesViaBirdMock).toHaveBeenCalledWith(["realMaalouf"]);
+		expect(
+			db
+				.prepare(
+					"select handle, avatar_url from profiles where lower(handle) = 'realmaalouf' and avatar_url is not null",
+				)
+				.get(),
+		).toEqual({
+			handle: "realmaalouf",
+			avatar_url:
+				"https://pbs.twimg.com/profile_images/1771658176200318976/zppeMEGD.jpg",
+		});
+		expect(
+			listTimelineItems({
+				resource: "home",
+				search: "Louis Boyard",
+				limit: 5,
+			})[0]?.retweetedTweet?.author,
+		).toEqual(
+			expect.objectContaining({
+				handle: "realmaalouf",
+				avatarUrl:
+					"https://pbs.twimg.com/profile_images/1771658176200318976/zppeMEGD.jpg",
+			}),
+		);
+	});
+
+	it("hydrates cached historical text-only reposts that are absent from the latest payload", async () => {
+		makeTempHome();
+		const db = getNativeDb();
+		listHomeTimelineViaXurlMock.mockResolvedValueOnce({
+			data: [],
+			meta: { result_count: 0 },
+		});
+		lookupProfilesViaBirdMock.mockResolvedValueOnce([
+			{
+				target: "realMaalouf",
+				user: {
+					id: "1316995857242378240",
+					username: "realMaalouf",
+					name: "Dr. Maalouf",
+					profile_image_url:
+						"https://pbs.twimg.com/profile_images/1771658176200318976/zppeMEGD_normal.jpg",
+				},
+			},
+		]);
+		const { syncHomeTimeline } = await import("./timeline-live");
+
+		await syncHomeTimeline({
+			mode: "xurl",
+			limit: 5,
+			refresh: true,
+			cacheTtlMs: 60_000,
+		});
+		db.prepare(
+			`
+			insert into tweets (
+				id, author_profile_id, text, created_at, is_replied, reply_to_id,
+				like_count, media_count, entities_json, media_json, quoted_tweet_id
+			) values (?, 'profile_bill', ?, ?, 0, null, 0, 0, '{}', '[]', null)
+			`,
+		).run(
+			"historical_manual_repost",
+			"RT @realMaalouf: Historical repost still needs its avatar",
+			"2026-07-18T11:00:00.000Z",
+		);
+		db.prepare(
+			`
+			insert into tweet_account_edges (
+				account_id, tweet_id, kind, first_seen_at, last_seen_at, seen_count,
+				source, raw_json, updated_at
+			) values ('acct_primary', ?, 'home', ?, ?, 1, 'xurl', '{}', ?)
+			`,
+		).run(
+			"historical_manual_repost",
+			"2026-07-18T11:00:00.000Z",
+			"2026-07-18T11:00:00.000Z",
+			"2026-07-18T11:00:00.000Z",
+		);
+
+		const cached = await syncHomeTimeline({
+			mode: "xurl",
+			limit: 5,
+			refresh: false,
+			cacheTtlMs: 60_000,
+		});
+
+		expect(cached.source).toBe("cache");
+		expect(lookupProfilesViaBirdMock).toHaveBeenCalledOnce();
+		expect(lookupProfilesViaBirdMock).toHaveBeenCalledWith(["realMaalouf"]);
+		expect(
+			db
+				.prepare(
+					"select avatar_url from profiles where lower(handle) = 'realmaalouf'",
+				)
+				.get(),
+		).toEqual({
+			avatar_url:
+				"https://pbs.twimg.com/profile_images/1771658176200318976/zppeMEGD.jpg",
+		});
+	});
+
+	it("stores an included manual repost profile without another Bird lookup", async () => {
+		makeTempHome();
+		const payload = {
+			data: [
+				{
+					id: "manual_repost_with_profile",
+					author_id: "880412538625810432",
+					text: "RT @realMaalouf: Included profile already has an avatar",
+					created_at: "2026-07-18T12:33:53.000Z",
+				},
+			],
+			includes: {
+				users: [
+					{
+						id: "880412538625810432",
+						username: "BillAckman",
+						name: "Bill Ackman",
+					},
+					{
+						id: "1316995857242378240",
+						username: "realMaalouf",
+						name: "Dr. Maalouf",
+						profile_image_url:
+							"https://pbs.twimg.com/profile_images/1771658176200318976/zppeMEGD_normal.jpg",
+					},
+				],
+			},
+			meta: { result_count: 1 },
+		};
+		listHomeTimelineViaXurlMock.mockResolvedValueOnce(payload);
+		const { syncHomeTimeline } = await import("./timeline-live");
+
+		await syncHomeTimeline({ mode: "auto", limit: 5, refresh: true });
+
+		expect(lookupProfilesViaBirdMock).not.toHaveBeenCalled();
+		expect(
+			listTimelineItems({
+				resource: "home",
+				search: "Included profile",
+				limit: 5,
+			})[0]?.retweetedTweet?.author.avatarUrl,
+		).toBe(
+			"https://pbs.twimg.com/profile_images/1771658176200318976/zppeMEGD.jpg",
+		);
+	});
+
 	it("keeps home timeline sync effects lazy", async () => {
 		makeTempHome();
 		listHomeTimelineViaBirdMock.mockResolvedValueOnce({
