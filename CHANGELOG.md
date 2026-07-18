@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.23 - 2026-07-18
+
+### Added
+
+- Add All, Today, 24h, Yesterday, and Week date-range filters to Discuss, with refreshes preserving the submitted time window.
+
+### Fixed
+
+- Scope Discuss citation links to trailing `source` labels so generated prose and ordinary Markdown links keep the normal text color, matching Today.
+- Keep local Discuss sources local instead of running an unused live keyword sync before reading Home, Mentions, Authored, Likes, or Bookmarks.
+
 ## 0.8.22 - 2026-07-18
 
 ### Fixed
