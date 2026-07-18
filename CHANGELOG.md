@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.26 - 2026-07-18
+
+### Added
+
+- Add a `导出完整 PDF` action to Today that turns the currently rendered digest and its cited posts into a print-ready reference collection with reading navigation, topic grouping, page numbers, author/date metadata, and a source index, while preserving the existing summary PDF export.
+- Keep the reference collection focused on reading by omitting like counts, original tweet links, and exact times while retaining shared external materials.
+
 ## 0.8.25 - 2026-07-18
 
 ### Fixed
