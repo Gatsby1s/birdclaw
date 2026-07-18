@@ -263,18 +263,48 @@ export function DiscussRouteView({
 	const updateSearch: RouteSearchChange<DiscussRouteSearch> = (next, options) =>
 		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
 	const { q: query, question, source, mode, includeDms } = searchState;
+	const [queryDraft, setQueryDraft] = useState(query);
+	const [questionDraft, setQuestionDraft] = useState(question);
+	const queryComposingRef = useRef(false);
+	const questionComposingRef = useRef(false);
 	const [submittedQuery, setSubmittedQuery] = useState("");
 	const pendingSubmitRef = useRef(false);
 	const { context, error, loading, markdown, result, run } =
-		useDiscussionStream(submittedQuery, source, mode, includeDms, question);
+		useDiscussionStream(
+			submittedQuery,
+			source,
+			mode,
+			includeDms,
+			questionDraft,
+		);
 	const sourceLabel = useMemo(
 		() => formatCounts(result?.context ?? context),
 		[context, result],
 	);
 
+	useEffect(() => {
+		if (!queryComposingRef.current) setQueryDraft(query);
+	}, [query]);
+
+	useEffect(() => {
+		if (!questionComposingRef.current) setQuestionDraft(question);
+	}, [question]);
+
+	function changeQuery(value: string) {
+		setQueryDraft(value);
+		if (queryComposingRef.current) return;
+		updateSearch({ ...searchState, q: value }, { replace: true });
+	}
+
+	function changeQuestion(value: string) {
+		setQuestionDraft(value);
+		if (questionComposingRef.current) return;
+		updateSearch({ ...searchState, question: value }, { replace: true });
+	}
+
 	function submit(event: FormEvent) {
 		event.preventDefault();
-		const trimmed = query.trim();
+		const trimmed = queryDraft.trim();
 		if (!trimmed) return;
 		pendingSubmitRef.current = true;
 		setSubmittedQuery(trimmed);
@@ -322,33 +352,34 @@ export function DiscussRouteView({
 						<input
 							className={searchFieldInputClass}
 							placeholder="Keywords"
-							value={query}
-							onChange={(event) =>
-								updateSearch(
-									{ ...searchState, q: event.currentTarget.value },
-									{ replace: true },
-								)
-							}
+							value={queryDraft}
+							onCompositionStart={() => {
+								queryComposingRef.current = true;
+							}}
+							onCompositionEnd={(event) => {
+								queryComposingRef.current = false;
+								changeQuery(event.currentTarget.value);
+							}}
+							onChange={(event) => changeQuery(event.currentTarget.value)}
 						/>
 					</label>
 					<input
 						className={textFieldClass}
 						placeholder="Optional question"
-						value={question}
-						onChange={(event) =>
-							updateSearch(
-								{
-									...searchState,
-									question: event.currentTarget.value,
-								},
-								{ replace: true },
-							)
-						}
+						value={questionDraft}
+						onCompositionStart={() => {
+							questionComposingRef.current = true;
+						}}
+						onCompositionEnd={(event) => {
+							questionComposingRef.current = false;
+							changeQuestion(event.currentTarget.value);
+						}}
+						onChange={(event) => changeQuestion(event.currentTarget.value)}
 					/>
 					<button
 						type="submit"
 						className={primaryButtonClass}
-						disabled={loading || !query.trim()}
+						disabled={loading || !queryDraft.trim()}
 					>
 						<Sparkles className="size-4" aria-hidden="true" />
 						Discuss
