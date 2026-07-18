@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.25 - 2026-07-18
+
+### Fixed
+
+- Render tweet citations wrapped in Chinese full-width punctuation as compact `source` links instead of exposing blue raw tweet IDs, while keeping the surrounding Discuss prose at the normal text color.
+
 ## 0.8.24 - 2026-07-18
 
 ### Fixed
