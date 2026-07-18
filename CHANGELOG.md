@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.27 - 2026-07-19
+
+### Fixed
+
+- Match Today's complete reference PDF to the approved print booklet: A4 cover, detailed contents, source matrix, topic summaries, prominent author identities, source cards, running footers, and a compact source index.
+- Print the already paginated booklet so every contents and source-index page number matches the final PDF, while preserving uncited webpage text and full topic titles.
+
 ## 0.8.26 - 2026-07-18
 
 ### Added
