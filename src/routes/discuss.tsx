@@ -15,6 +15,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { CustomDateRangePicker } from "#/components/CustomDateRangePicker";
 import { MarkdownViewer } from "#/components/MarkdownViewer";
 import { useNdjsonRun } from "#/components/useNdjsonRun";
 import type {
@@ -83,6 +84,7 @@ const ranges: Array<{ value: DiscussDateRange; label: string }> = [
 	{ value: "24h", label: "24h" },
 	{ value: "yesterday", label: "Yesterday" },
 	{ value: "week", label: "Week" },
+	{ value: "custom", label: "Custom" },
 ];
 const DISCUSS_SEARCH_LIMIT = 20_000;
 const DISCUSS_MAX_PAGES = 200;
@@ -288,9 +290,21 @@ export function DiscussRouteView({
 	const searchState = controlledSearch ?? localSearch;
 	const updateSearch: RouteSearchChange<DiscussRouteSearch> = (next, options) =>
 		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
-	const { q: query, question, source, mode, range, includeDms } = searchState;
+	const {
+		q: query,
+		question,
+		source,
+		mode,
+		range,
+		since,
+		until,
+		includeDms,
+	} = searchState;
 	const [queryDraft, setQueryDraft] = useState(query);
 	const [questionDraft, setQuestionDraft] = useState(question);
+	const [customRangeOpen, setCustomRangeOpen] = useState(
+		() => range === "custom",
+	);
 	const queryComposingRef = useRef(false);
 	const questionComposingRef = useRef(false);
 	const [submittedSearch, setSubmittedSearch] = useState(() => ({
@@ -320,6 +334,10 @@ export function DiscussRouteView({
 		if (!questionComposingRef.current) setQuestionDraft(question);
 	}, [question]);
 
+	useEffect(() => {
+		setCustomRangeOpen(range === "custom");
+	}, [range]);
+
 	function changeQuery(value: string) {
 		setQueryDraft(value);
 		if (queryComposingRef.current) return;
@@ -339,7 +357,7 @@ export function DiscussRouteView({
 		pendingSubmitRef.current = true;
 		setSubmittedSearch({
 			query: trimmed,
-			dateRange: resolveDiscussDateRange(range),
+			dateRange: resolveDiscussDateRange(range, new Date(), { since, until }),
 		});
 	}
 
@@ -448,7 +466,7 @@ export function DiscussRouteView({
 						aria-label="Date range"
 						className={cx(
 							segmentedClass,
-							"col-span-full w-fit max-w-full overflow-x-auto",
+							"col-span-full w-fit max-w-full overflow-x-auto max-sm:grid max-sm:w-full max-sm:grid-cols-3 max-sm:overflow-visible max-sm:rounded-2xl",
 						)}
 						role="group"
 					>
@@ -459,16 +477,41 @@ export function DiscussRouteView({
 								className={cx(
 									segmentClass,
 									"shrink-0",
-									range === item.value && discussRangeSegmentActiveClass,
+									(item.value === "custom"
+										? range === "custom" || customRangeOpen
+										: !customRangeOpen && range === item.value) &&
+										discussRangeSegmentActiveClass,
 								)}
-								onClick={() =>
-									updateSearch({ ...searchState, range: item.value })
-								}
+								onClick={() => {
+									if (item.value === "custom") {
+										setCustomRangeOpen((open) => !open);
+										return;
+									}
+									setCustomRangeOpen(false);
+									updateSearch({
+										...searchState,
+										range: item.value,
+										since: "",
+										until: "",
+									});
+								}}
 							>
 								{item.label}
 							</button>
 						))}
 					</div>
+					{customRangeOpen ? (
+						<CustomDateRangePicker
+							value={range === "custom" ? { since, until } : null}
+							onApply={(customRange) =>
+								updateSearch({
+									...searchState,
+									range: "custom",
+									...customRange,
+								})
+							}
+						/>
+					) : null}
 				</form>
 			</header>
 
