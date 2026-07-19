@@ -105,6 +105,10 @@ describe("ReferencePrintMedia", () => {
 
 		expect(screen.getByRole("img", { name: "推文图片 1" })).toHaveAttribute(
 			"src",
+			"https://example.com/image.jpg",
+		);
+		expect(screen.getByRole("img", { name: "推文图片 1" })).toHaveAttribute(
+			"data-reference-fallback-src",
 			"https://example.com/image-thumb.jpg",
 		);
 		expect(screen.getByRole("img", { name: "推文视频封面 2" })).toHaveAttribute(
@@ -143,7 +147,7 @@ describe("ReferencePrintMedia", () => {
 		);
 	});
 
-	it("uses eager synchronous images with dimensions, alt text, and an original-image fallback", () => {
+	it("uses full-resolution images with eager loading and a thumbnail fallback", () => {
 		render(
 			<ReferencePrintMedia
 				items={[
@@ -167,8 +171,12 @@ describe("ReferencePrintMedia", () => {
 		expect(renderedImage).toHaveAttribute("width", "1600");
 		expect(renderedImage).toHaveAttribute("height", "900");
 		expect(renderedImage).toHaveAttribute(
-			"data-reference-fallback-src",
+			"src",
 			"https://example.com/photo-original.jpg",
+		);
+		expect(renderedImage).toHaveAttribute(
+			"data-reference-fallback-src",
+			"https://example.com/photo-thumb.jpg",
 		);
 	});
 });

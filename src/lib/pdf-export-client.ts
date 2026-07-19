@@ -7,6 +7,18 @@ export interface ReferencePdfExportOptions {
 }
 
 const REFERENCE_IMAGE_ATTEMPT_TIMEOUT_MS = 4_000;
+const REFERENCE_ULTRA_TALL_RATIO = 0.35;
+const REFERENCE_PORTRAIT_RATIO = 0.85;
+const REFERENCE_SQUARE_RATIO = 1.2;
+const REFERENCE_TALL_SLICE_WIDTH_MM = 55;
+const REFERENCE_TALL_SLICE_MAX_HEIGHT_MM = 185;
+const REFERENCE_TALL_SLICE_MAX_COLUMNS = 3;
+
+type ResolvedReferenceImage = {
+	height: number;
+	loaded: boolean;
+	width: number;
+};
 
 export function exportCurrentPdf(
 	title: string,
@@ -124,15 +136,127 @@ function replaceFailedReferenceImage(image: HTMLImageElement) {
 	image.replaceWith(placeholder);
 }
 
+function referenceImageShape(width: number, height: number) {
+	const ratio = width / height;
+	if (ratio < REFERENCE_ULTRA_TALL_RATIO) return "ultra-tall";
+	if (ratio < REFERENCE_PORTRAIT_RATIO) return "portrait";
+	if (ratio <= REFERENCE_SQUARE_RATIO) return "square";
+	return "landscape";
+}
+
+function createTallImageSlice(
+	image: HTMLImageElement,
+	width: number,
+	height: number,
+	sliceIndex: number,
+	sliceCount: number,
+) {
+	const sliceStart = Math.floor((height * sliceIndex) / sliceCount);
+	const sliceEnd = Math.floor((height * (sliceIndex + 1)) / sliceCount);
+	const sliceHeight = Math.max(1, sliceEnd - sliceStart);
+	const slice = document.createElement("figure");
+	slice.className = "today-reference-media-slice";
+	slice.dataset.referenceSliceIndex = String(sliceIndex + 1);
+	slice.dataset.referenceSliceTotal = String(sliceCount);
+	slice.style.setProperty(
+		"--reference-slice-ratio",
+		`${String(width)} / ${String(sliceHeight)}`,
+	);
+
+	const sliceImage = image.cloneNode(true) as HTMLImageElement;
+	sliceImage.classList.add("today-reference-media-slice-image");
+	sliceImage.removeAttribute("height");
+	sliceImage.removeAttribute("width");
+	sliceImage.alt = image.alt
+		? `${image.alt}（第 ${String(sliceIndex + 1)}/${String(sliceCount)} 段）`
+		: `推文长图（第 ${String(sliceIndex + 1)}/${String(sliceCount)} 段）`;
+	sliceImage.style.setProperty(
+		"--reference-slice-offset",
+		`${String((-sliceStart / height) * 100)}%`,
+	);
+	slice.append(sliceImage);
+	return slice;
+}
+
+function sliceUltraTallReferenceImage(
+	image: HTMLImageElement,
+	width: number,
+	height: number,
+) {
+	const figure = image.closest("figure");
+	if (!figure) return;
+	const printedHeight = (REFERENCE_TALL_SLICE_WIDTH_MM * height) / width;
+	const sliceCount = Math.max(
+		2,
+		Math.ceil(printedHeight / REFERENCE_TALL_SLICE_MAX_HEIGHT_MM),
+	);
+	const rows: HTMLDivElement[] = [];
+
+	for (
+		let rowStart = 0;
+		rowStart < sliceCount;
+		rowStart += REFERENCE_TALL_SLICE_MAX_COLUMNS
+	) {
+		const rowEnd = Math.min(
+			rowStart + REFERENCE_TALL_SLICE_MAX_COLUMNS,
+			sliceCount,
+		);
+		const row = document.createElement("div");
+		row.className = "today-reference-media-sliced";
+		row.dataset.referenceImageHeight = String(height);
+		row.dataset.referenceImageShape = "ultra-tall";
+		row.dataset.referenceImageWidth = String(width);
+		row.dataset.referenceSliceCount = String(sliceCount);
+		row.style.setProperty(
+			"--reference-slice-columns",
+			String(rowEnd - rowStart),
+		);
+		for (let index = rowStart; index < rowEnd; index += 1) {
+			row.append(createTallImageSlice(image, width, height, index, sliceCount));
+		}
+		rows.push(row);
+	}
+
+	figure.replaceWith(...rows);
+}
+
+function prepareReadableReferenceImage(
+	image: HTMLImageElement,
+	resolved: ResolvedReferenceImage,
+) {
+	if (resolved.width <= 0 || resolved.height <= 0) return;
+	image.setAttribute("width", String(resolved.width));
+	image.setAttribute("height", String(resolved.height));
+	const shape = referenceImageShape(resolved.width, resolved.height);
+	if (shape === "ultra-tall") {
+		sliceUltraTallReferenceImage(image, resolved.width, resolved.height);
+		return;
+	}
+	const figure = image.closest("figure");
+	if (figure) {
+		figure.dataset.referenceImageHeight = String(resolved.height);
+		figure.dataset.referenceImageShape = shape;
+		figure.dataset.referenceImageWidth = String(resolved.width);
+	}
+}
+
 export async function prepareReferencePrintSource(
 	source: HTMLElement,
 	imageAttemptTimeoutMs = REFERENCE_IMAGE_ATTEMPT_TIMEOUT_MS,
 ) {
 	const images = [...source.querySelectorAll<HTMLImageElement>("img")];
-	const loaded = await Promise.all(
-		images.map((image) =>
-			resolveReferencePrintImage(image, imageAttemptTimeoutMs),
-		),
+	const resolved = await Promise.all(
+		images.map(async (image): Promise<ResolvedReferenceImage> => {
+			const loaded = await resolveReferencePrintImage(
+				image,
+				imageAttemptTimeoutMs,
+			);
+			return {
+				height: loaded ? image.naturalHeight : 0,
+				loaded,
+				width: loaded ? image.naturalWidth : 0,
+			};
+		}),
 	);
 	const previewSource = source.cloneNode(true) as HTMLElement;
 	previewSource.style.display = "block";
@@ -140,7 +264,12 @@ export async function prepareReferencePrintSource(
 		...previewSource.querySelectorAll<HTMLImageElement>("img"),
 	];
 	for (const [index, image] of previewImages.entries()) {
-		if (!loaded[index]) replaceFailedReferenceImage(image);
+		const imageResolution = resolved[index];
+		if (!imageResolution?.loaded) {
+			replaceFailedReferenceImage(image);
+			continue;
+		}
+		prepareReadableReferenceImage(image, imageResolution);
 	}
 	return previewSource;
 }
@@ -188,16 +317,17 @@ export async function exportReferenceCollectionPdf({
 			document.body.dataset.todayPrintStage = previousPrintStage;
 		}
 	};
+	let preparedSource: HTMLElement | null = null;
 
 	try {
-		const [previewSource] = await Promise.all([
+		[preparedSource] = await Promise.all([
 			prepareReferencePrintSource(source),
 			document.fonts?.ready ?? Promise.resolve(),
 		]);
 		const { Previewer } = await import("pagedjs");
 		const previewer = new Previewer();
 		await previewer.preview(
-			previewSource.outerHTML,
+			preparedSource.outerHTML,
 			collectReferencePrintStylesheets(),
 			previewHost,
 		);
@@ -224,11 +354,16 @@ export async function exportReferenceCollectionPdf({
 		document.body.dataset.todayPrintStage = "paged";
 	} catch (error) {
 		console.warn("Paged reference PDF rendering failed", error);
-		previewHost.remove();
 		removeNewPagedStyles();
-		restoreDocumentState();
-		exportCurrentPdf(title, "reference", onCleanup);
-		return;
+		if (preparedSource) {
+			previewHost.replaceChildren(preparedSource);
+			document.body.dataset.todayPrintStage = "paged";
+		} else {
+			previewHost.remove();
+			restoreDocumentState();
+			exportCurrentPdf(title, "reference", onCleanup);
+			return;
+		}
 	}
 
 	let cleanedUp = false;

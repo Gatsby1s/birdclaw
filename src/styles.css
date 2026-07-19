@@ -749,9 +749,11 @@ html.theme-transition::view-transition-new(theme) {
 		background: #f7f6f1 !important;
 		border: 0.35pt solid #d7d3c9;
 		border-top: 0;
-		break-inside: avoid;
+		break-inside: auto;
 		display: grid;
 		gap: 1.2mm;
+		grid-auto-flow: row;
+		align-items: start;
 		padding: 1.5mm;
 	}
 
@@ -759,6 +761,7 @@ html.theme-transition::view-transition-new(theme) {
 		align-items: center;
 		background: #fff !important;
 		border: 0.35pt solid #e4e0d7;
+		break-inside: avoid;
 		display: flex;
 		justify-content: center;
 		margin: 0;
@@ -767,10 +770,18 @@ html.theme-transition::view-transition-new(theme) {
 
 	.today-reference-media img {
 		display: block;
-		height: 100%;
+		height: auto;
 		max-width: 100%;
-		object-fit: contain;
 		width: 100%;
+	}
+
+	.today-reference-media
+		figure[data-reference-image-shape="portrait"]
+		img {
+		height: auto;
+		max-height: 185mm;
+		max-width: 100%;
+		width: auto;
 	}
 
 	.today-reference-media-unavailable {
@@ -787,34 +798,67 @@ html.theme-transition::view-transition-new(theme) {
 
 	.today-reference-media-single {
 		grid-template-columns: minmax(0, 1fr);
+		justify-items: center;
 	}
 
 	.today-reference-media-single figure {
-		height: 44mm;
+		width: 100%;
+	}
+
+	.today-reference-media-single
+		figure[data-reference-image-shape="landscape"] {
+		max-width: 150mm;
+	}
+
+	.today-reference-media-single
+		figure[data-reference-image-shape="square"] {
+		max-width: 120mm;
+	}
+
+	.today-reference-media-single
+		figure[data-reference-image-shape="portrait"] {
+		max-width: 92mm;
 	}
 
 	.today-reference-media-pair {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
-	.today-reference-media-pair figure {
-		height: 36mm;
-	}
-
 	.today-reference-media-grid {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
-	.today-reference-media-grid figure {
-		height: 25mm;
-	}
-
 	.today-reference-media-dense {
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
-	.today-reference-media-dense figure {
-		height: 20mm;
+	.today-reference-media-sliced {
+		break-inside: avoid;
+		display: grid;
+		gap: 1.2mm;
+		grid-column: 1 / -1;
+		grid-template-columns: repeat(
+			var(--reference-slice-columns),
+			minmax(0, 55mm)
+		);
+		justify-content: center;
+	}
+
+	.today-reference-media-slice {
+		aspect-ratio: var(--reference-slice-ratio);
+		display: block !important;
+		position: relative;
+		width: 100%;
+	}
+
+	.today-reference-media .today-reference-media-slice-image {
+		height: auto;
+		left: 0;
+		max-width: none;
+		position: absolute;
+		top: 0;
+		transform: translateY(var(--reference-slice-offset));
+		width: 100%;
 	}
 
 	.today-reference-source blockquote {
