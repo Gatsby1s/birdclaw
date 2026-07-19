@@ -1,7 +1,9 @@
 import {
+	Bookmark,
 	ChevronLeft,
 	ChevronRight,
 	ExternalLink,
+	Heart,
 	Minus,
 	Plus,
 	RotateCcw,
@@ -17,8 +19,11 @@ import {
 	useState,
 } from "react";
 import { createPortal } from "react-dom";
-import type { TweetMediaItem } from "#/lib/types";
+import { formatCompactNumber, formatExactTimestamp } from "#/lib/present";
+import type { EmbeddedTweet, TweetMediaItem } from "#/lib/types";
 import { cx } from "#/lib/ui";
+import { AvatarChip } from "./AvatarChip";
+import { TweetRichText } from "./TweetRichText";
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 5;
@@ -35,14 +40,31 @@ type DragState = {
 	moved: boolean;
 };
 
+export type TweetMediaViewerTweet = Pick<
+	EmbeddedTweet,
+	| "id"
+	| "text"
+	| "createdAt"
+	| "likeCount"
+	| "bookmarked"
+	| "liked"
+	| "author"
+	| "entities"
+> & {
+	hiddenUrlRanges?: Array<{ start: number; end: number }>;
+	permalink?: string | null;
+};
+
 export function TweetMediaViewer({
 	initialIndex,
 	items,
 	onClose,
+	tweet,
 }: {
 	initialIndex: number;
 	items: TweetMediaItem[];
 	onClose: () => void;
+	tweet?: TweetMediaViewerTweet;
 }) {
 	const [selectedIndex, setSelectedIndex] = useState(initialIndex);
 	const [zoom, setZoom] = useState(MIN_ZOOM);
@@ -231,7 +253,7 @@ export function TweetMediaViewer({
 			tabIndex={-1}
 		>
 			<div
-				className="absolute inset-0 flex items-center justify-center overflow-hidden px-2 py-12 sm:px-16 sm:py-14"
+				className="absolute inset-y-0 left-0 right-0 flex items-center justify-center overflow-hidden px-2 py-12 sm:px-16 sm:py-14 lg:right-[380px]"
 				onClick={(event) => {
 					event.stopPropagation();
 					if (event.currentTarget === event.target) onClose();
@@ -299,6 +321,7 @@ export function TweetMediaViewer({
 					</div>
 				)}
 			</div>
+			{tweet ? <TweetMediaViewerDetails tweet={tweet} /> : null}
 
 			<div className="absolute left-3 top-3 flex items-center gap-2 sm:left-4 sm:top-4">
 				<button
@@ -316,7 +339,7 @@ export function TweetMediaViewer({
 				) : null}
 			</div>
 
-			<div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-full bg-black/60 p-1 sm:bottom-auto sm:right-4 sm:top-4">
+			<div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-full bg-black/60 p-1 sm:bottom-auto sm:right-4 sm:top-4 lg:right-[396px]">
 				{isImage ? (
 					<>
 						<button
@@ -378,7 +401,7 @@ export function TweetMediaViewer({
 			{selectedIndex < items.length - 1 ? (
 				<button
 					aria-label="Next media"
-					className="absolute right-2 top-1/2 grid size-11 -translate-y-1/2 place-items-center rounded-full bg-black/60 hover:bg-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:right-4"
+					className="absolute right-2 top-1/2 grid size-11 -translate-y-1/2 place-items-center rounded-full bg-black/60 hover:bg-neutral-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:right-4 lg:right-[396px]"
 					onClick={() => selectMedia(selectedIndex + 1)}
 					type="button"
 				>
@@ -388,6 +411,126 @@ export function TweetMediaViewer({
 		</div>,
 		document.body,
 	);
+}
+
+function TweetMediaViewerDetails({ tweet }: { tweet: TweetMediaViewerTweet }) {
+	const originalTweetUrl = tweet.permalink ?? defaultTweetPermalink(tweet);
+	const likeCount = tweet.likeCount ?? 0;
+
+	return (
+		<aside
+			aria-label="Tweet details"
+			className="absolute inset-y-0 right-0 hidden w-[380px] flex-col border-l border-white/15 bg-[#16181c] text-white lg:flex"
+		>
+			<header className="flex h-14 shrink-0 items-center border-b border-white/12 px-5 text-[17px] font-bold">
+				Post
+			</header>
+			<div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+				<div className="flex items-center gap-3">
+					<AvatarChip
+						avatarUrl={tweet.author.avatarUrl}
+						hue={tweet.author.avatarHue}
+						name={tweet.author.displayName}
+						profileId={tweet.author.id}
+					/>
+					<div className="min-w-0">
+						<a
+							className="block truncate text-[15px] font-bold text-white hover:underline"
+							href={`/profiles/${encodeURIComponent(tweet.author.handle)}`}
+						>
+							{tweet.author.displayName}
+						</a>
+						<span className="block truncate text-[14px] text-neutral-400">
+							@{tweet.author.handle}
+						</span>
+					</div>
+				</div>
+				<TweetRichText
+					className="mt-4 whitespace-pre-wrap break-words text-[15px] leading-6 text-white [overflow-wrap:anywhere]"
+					entities={tweet.entities}
+					hiddenUrlRanges={tweet.hiddenUrlRanges}
+					text={tweet.text}
+				/>
+				<time
+					className="mt-4 block text-[14px] text-neutral-400"
+					dateTime={tweet.createdAt}
+					title={formatExactTimestamp(tweet.createdAt)}
+				>
+					{formatMediaViewerTimestamp(tweet.createdAt)}
+				</time>
+				{likeCount > 0 || tweet.bookmarked ? (
+					<div className="mt-4 flex items-center gap-4 border-y border-white/12 py-3 text-[14px]">
+						{likeCount > 0 ? (
+							<span
+								className={cx(
+									"inline-flex items-center gap-2",
+									tweet.liked && "text-pink-400",
+								)}
+							>
+								<Heart
+									className="size-4"
+									fill={tweet.liked ? "currentColor" : "none"}
+									strokeWidth={1.8}
+								/>
+								<span>{formatCompactNumber(likeCount)} Likes</span>
+							</span>
+						) : null}
+						{tweet.bookmarked ? (
+							<span className="inline-flex items-center gap-2 text-neutral-200">
+								<Bookmark
+									className="size-4"
+									fill="currentColor"
+									strokeWidth={1.8}
+								/>
+								<span>Saved</span>
+							</span>
+						) : null}
+					</div>
+				) : null}
+				<div className="mt-4 flex flex-wrap gap-2">
+					{originalTweetUrl ? (
+						<a
+							aria-label={`Open @${tweet.author.handle} on X`}
+							className="inline-flex items-center gap-2 rounded-full border border-white/20 px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-white/10"
+							href={originalTweetUrl}
+							rel="noreferrer"
+							target="_blank"
+						>
+							<ExternalLink className="size-3.5" strokeWidth={2} />
+							Open on X
+						</a>
+					) : null}
+					<a
+						className="inline-flex items-center rounded-full border border-white/20 px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-white/10"
+						href={`/profiles/${encodeURIComponent(tweet.author.handle)}`}
+					>
+						Analyse profile
+					</a>
+				</div>
+			</div>
+		</aside>
+	);
+}
+
+function defaultTweetPermalink(tweet: TweetMediaViewerTweet) {
+	const handle = tweet.author.handle.trim().replace(/^@/, "");
+	if (!handle || !tweet.id) return null;
+	return `https://x.com/${encodeURIComponent(handle)}/status/${encodeURIComponent(tweet.id)}`;
+}
+
+function formatMediaViewerTimestamp(value: string) {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return value;
+	const time = new Intl.DateTimeFormat("en", {
+		hour: "numeric",
+		minute: "2-digit",
+	}).format(date);
+	const calendarDate = new Intl.DateTimeFormat("en", {
+		month: "short",
+		day: "numeric",
+		year: "numeric",
+	}).format(date);
+	return `${time} · ${calendarDate}`;
 }
 
 function playableVideoUrl(url: string) {

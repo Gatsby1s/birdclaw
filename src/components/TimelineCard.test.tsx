@@ -251,7 +251,13 @@ describe("TimelineCard", () => {
 							createdAt: "2026-03-08T09:00:00.000Z",
 						},
 						entities: {},
-						media: [],
+						media: [
+							{
+								url: "https://example.com/manual-retweet.jpg",
+								type: "image",
+								altText: "Manual repost media",
+							},
+						],
 					},
 				}}
 				onReply={onReply}
@@ -263,6 +269,11 @@ describe("TimelineCard", () => {
 			"href",
 			"https://x.com/sam/status/tweet_manual",
 		);
+		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
+		expect(
+			screen.getByRole("link", { name: "Open @ava on X" }),
+		).toHaveAttribute("href", "https://x.com/sam/status/tweet_manual");
+		fireEvent.click(screen.getByRole("button", { name: "Close media viewer" }));
 		fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 		expect(onReply).toHaveBeenCalledWith("tweet_manual");
 
@@ -634,6 +645,12 @@ describe("TimelineCard", () => {
 		expect(
 			screen.queryByRole("link", { name: /pic\.twitter\.com/ }),
 		).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
+		expect(screen.queryByText("pic.twitter.com/demo")).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("link", { name: /pic\.twitter\.com/ }),
+		).toBeNull();
 	});
 
 	it("hides unresolved t.co text and preview cards when media is attached", () => {
@@ -963,6 +980,14 @@ describe("TimelineCard", () => {
 		);
 
 		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
+		const details = document.querySelector('aside[aria-label="Tweet details"]');
+		expect(details).toHaveTextContent("Sam Altman");
+		expect(details).toHaveTextContent("Ship with @sam");
+		expect(
+			screen.getByRole("link", { name: "Open @sam on X" }),
+		).toHaveAttribute("href", "https://x.com/sam/status/tweet_8");
+		fireEvent.click(details!);
+		expect(screen.getByRole("dialog")).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("dialog"));
 
 		expect(fetchMock).not.toHaveBeenCalled();

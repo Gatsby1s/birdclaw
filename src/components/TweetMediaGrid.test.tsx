@@ -2,6 +2,26 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { TweetMediaGrid } from "./TweetMediaGrid";
 
+const viewerTweet = {
+	id: "tweet_detail",
+	text: "Read the full post beside the image.",
+	createdAt: "2026-03-08T12:00:00.000Z",
+	likeCount: 42,
+	liked: true,
+	bookmarked: true,
+	permalink: "https://x.com/viewer/status/tweet_detail",
+	author: {
+		id: "profile_viewer",
+		handle: "viewer",
+		displayName: "Viewer Author",
+		bio: "bio",
+		followersCount: 42,
+		avatarHue: 210,
+		createdAt: "2026-03-08T12:00:00.000Z",
+	},
+	entities: {},
+};
+
 describe("TweetMediaGrid", () => {
 	afterEach(() => {
 		cleanup();
@@ -67,6 +87,7 @@ describe("TweetMediaGrid", () => {
 						height: 800,
 					},
 				]}
+				tweet={viewerTweet}
 			/>,
 		);
 
@@ -82,6 +103,28 @@ describe("TweetMediaGrid", () => {
 		expect(
 			screen.getByRole("link", { name: "Open original media" }),
 		).toHaveAttribute("href", "https://example.com/one.jpg");
+		const details = document.querySelector('aside[aria-label="Tweet details"]');
+		expect(details).toHaveTextContent("Viewer Author");
+		expect(details).toHaveTextContent("@viewer");
+		expect(details).toHaveTextContent("Read the full post beside the image.");
+		expect(details).toHaveTextContent("42 Likes");
+		expect(
+			screen.getByRole("link", { name: "Open @viewer on X" }),
+		).toHaveAttribute("href", "https://x.com/viewer/status/tweet_detail");
+	});
+
+	it("keeps the viewer media-only when no tweet context is supplied", () => {
+		render(
+			<TweetMediaGrid
+				items={[{ url: "https://example.com/one.jpg", type: "image" }]}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
+
+		expect(
+			document.querySelector('aside[aria-label="Tweet details"]'),
+		).toBeNull();
 	});
 
 	it("zooms images from controls and direct image clicks", () => {

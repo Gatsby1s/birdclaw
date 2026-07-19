@@ -1,9 +1,18 @@
 import { useState } from "react";
 import type { TweetMediaItem } from "#/lib/types";
 import { cx, tweetMediaGridClass, tweetMediaTileClass } from "#/lib/ui";
-import { TweetMediaViewer } from "./TweetMediaViewer";
+import {
+	TweetMediaViewer,
+	type TweetMediaViewerTweet,
+} from "./TweetMediaViewer";
 
-export function TweetMediaGrid({ items }: { items: TweetMediaItem[] }) {
+export function TweetMediaGrid({
+	items,
+	tweet,
+}: {
+	items: TweetMediaItem[];
+	tweet?: TweetMediaViewerTweet;
+}) {
 	const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 	if (items.length === 0) {
 		return null;
@@ -94,6 +103,7 @@ export function TweetMediaGrid({ items }: { items: TweetMediaItem[] }) {
 					initialIndex={selectedIndex}
 					items={visibleItems}
 					onClose={() => setSelectedIndex(null)}
+					tweet={tweet}
 				/>
 			) : null}
 		</>
