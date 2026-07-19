@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.35 - 2026-07-19
+
+### Fixed
+
+- Show the source post beside Home media in a desktop X-style detail rail, with author, body, timestamp, known like/save state, and original-post access while retaining the full-screen media stage.
+- Carry the same post context into quoted, reply-thread, native repost, and manual repost media; preserve the canonical original-post URL and keep media-only short links out of the detail body.
+
 ## 0.8.34 - 2026-07-19
 
 ### Fixed
