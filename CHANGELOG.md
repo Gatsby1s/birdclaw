@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.34 - 2026-07-19
+
+### Fixed
+
+- Open tweet media in a true full-viewport portal so Home timeline card containment can no longer clip the viewer or move it off-screen after scrolling.
+- Add an X-style black media stage with close and gallery navigation controls, keyboard shortcuts, original-media access, 100–500% image zoom, and drag-to-pan while restoring page scroll and focus on close.
+
 ## 0.8.33 - 2026-07-19
 
 ### Fixed
