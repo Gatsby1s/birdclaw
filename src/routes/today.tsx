@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { CustomDateRangePicker } from "#/components/CustomDateRangePicker";
 import { MarkdownViewer } from "#/components/MarkdownViewer";
+import { ReferencePrintMedia } from "#/components/ReferencePrintMedia";
 import { useNdjsonRun } from "#/components/useNdjsonRun";
 import {
 	isTerminalStreamEvent,
@@ -24,6 +25,10 @@ import type {
 	PeriodDigestStreamEvent,
 } from "#/lib/period-digest";
 import type { ProfileRecord } from "#/lib/types";
+import {
+	exportCurrentPdf,
+	exportReferenceCollectionPdf,
+} from "#/lib/pdf-export-client";
 import {
 	hydrateProfileHandles,
 	normalizeProfileHydrationHandle as normalizeHandle,
@@ -53,7 +58,6 @@ export const Route = createFileRoute("/today")({
 });
 
 type PeriodOption = PeriodRouteSearch;
-type TodayPrintMode = "summary" | "reference";
 type ReferenceTweet = PeriodDigestContext["tweets"][number];
 type ReferenceDm = PeriodDigestContext["dms"][number];
 type ReferenceGroup = {
@@ -112,176 +116,6 @@ const referenceSectionAliases: Record<string, string> = {
 
 function periodLabel(period: PeriodOption) {
 	return periods.find((item) => item.value === period)?.label ?? "Digest";
-}
-
-function exportCurrentDigestPdf(
-	title: string,
-	mode: TodayPrintMode = "summary",
-	onCleanup?: () => void,
-) {
-	const previousTitle = document.title;
-	const previousPrintMode = document.body.dataset.todayPrintMode;
-	let cleanedUp = false;
-	const cleanup = () => {
-		if (cleanedUp) return;
-		cleanedUp = true;
-		document.title = previousTitle;
-		if (previousPrintMode === undefined) {
-			delete document.body.dataset.todayPrintMode;
-		} else {
-			document.body.dataset.todayPrintMode = previousPrintMode;
-		}
-		window.removeEventListener("afterprint", cleanup);
-		onCleanup?.();
-	};
-
-	document.title = title;
-	document.body.dataset.todayPrintMode = mode;
-	window.addEventListener("afterprint", cleanup, { once: true });
-	window.setTimeout(cleanup, 3000);
-	window.print();
-}
-
-function collectReferencePrintStylesheets() {
-	const pagedPrintRules: string[] = [];
-	for (const stylesheet of document.styleSheets) {
-		try {
-			for (const rule of stylesheet.cssRules) {
-				if (
-					!(rule instanceof CSSMediaRule) ||
-					!rule.conditionText.split(",").some((item) => item.trim() === "print")
-				) {
-					continue;
-				}
-				for (const printRule of rule.cssRules) {
-					pagedPrintRules.push(printRule.cssText);
-				}
-			}
-		} catch {
-			// Reference print rules live in same-origin app stylesheets.
-		}
-	}
-	return [
-		{
-			[`${window.location.href}#reference-print-page-size`]: `
-			${pagedPrintRules.join("\n")}
-			@page {
-				size: A4;
-				margin: 16mm 16mm 17mm;
-			}
-			@page reference {
-				size: A4;
-				margin: 16mm 16mm 17mm;
-			}
-			.today-reference-pdf {
-				display: block !important;
-				page: reference;
-			}
-		`,
-		},
-	];
-}
-
-async function exportReferenceCollectionPdf(
-	title: string,
-	onCleanup: () => void,
-) {
-	const source = document.querySelector<HTMLElement>(
-		'[data-testid="today-reference-pdf"]',
-	);
-	if (!source) {
-		exportCurrentDigestPdf(title, "reference", onCleanup);
-		return;
-	}
-
-	const previousTitle = document.title;
-	const previousPrintMode = document.body.dataset.todayPrintMode;
-	const previousPrintStage = document.body.dataset.todayPrintStage;
-	const existingPagedStyles = new Set(
-		document.querySelectorAll("style[data-pagedjs-inserted-styles]"),
-	);
-	const previewHost = document.createElement("div");
-	previewHost.className = "today-reference-paged-preview";
-	previewHost.setAttribute("aria-hidden", "true");
-	document.body.append(previewHost);
-	document.title = title;
-	document.body.dataset.todayPrintMode = "reference";
-	const removeNewPagedStyles = () => {
-		for (const insertedStyle of document.querySelectorAll(
-			"style[data-pagedjs-inserted-styles]",
-		)) {
-			if (!existingPagedStyles.has(insertedStyle)) insertedStyle.remove();
-		}
-	};
-	const restoreDocumentState = () => {
-		document.title = previousTitle;
-		if (previousPrintMode === undefined) {
-			delete document.body.dataset.todayPrintMode;
-		} else {
-			document.body.dataset.todayPrintMode = previousPrintMode;
-		}
-		if (previousPrintStage === undefined) {
-			delete document.body.dataset.todayPrintStage;
-		} else {
-			document.body.dataset.todayPrintStage = previousPrintStage;
-		}
-	};
-
-	try {
-		if (document.fonts) await document.fonts.ready;
-		const { Previewer } = await import("pagedjs");
-		const previewer = new Previewer();
-		const previewSource = source.cloneNode(true) as HTMLElement;
-		previewSource.style.display = "block";
-		await previewer.preview(
-			previewSource.outerHTML,
-			collectReferencePrintStylesheets(),
-			previewHost,
-		);
-		const pageByTarget = new Map<string, number>();
-		for (const [pageIndex, page] of [
-			...previewHost.querySelectorAll<HTMLElement>(".pagedjs_page"),
-		].entries()) {
-			for (const target of page.querySelectorAll<HTMLElement>(
-				'[id^="reference-topic-"], [id^="reference-source-"]',
-			)) {
-				if (target.id && !pageByTarget.has(target.id)) {
-					pageByTarget.set(target.id, pageIndex + 1);
-				}
-			}
-		}
-		for (const pageNumber of previewHost.querySelectorAll<HTMLElement>(
-			"[data-reference-page-target]",
-		)) {
-			const target = pageNumber.dataset.referencePageTarget;
-			pageNumber.textContent = target
-				? String(pageByTarget.get(target) ?? "—")
-				: "—";
-		}
-		document.body.dataset.todayPrintStage = "paged";
-	} catch (error) {
-		console.warn("Paged reference PDF rendering failed", error);
-		previewHost.remove();
-		removeNewPagedStyles();
-		restoreDocumentState();
-		exportCurrentDigestPdf(title, "reference", onCleanup);
-		return;
-	}
-
-	let cleanedUp = false;
-	const cleanup = () => {
-		if (cleanedUp) return;
-		cleanedUp = true;
-		previewHost.remove();
-		removeNewPagedStyles();
-		restoreDocumentState();
-		window.removeEventListener("afterprint", cleanup);
-		onCleanup();
-	};
-
-	window.addEventListener("afterprint", cleanup, { once: true });
-	window.setTimeout(cleanup, 3000);
-	window.print();
 }
 
 function digestUrl(
@@ -688,10 +522,12 @@ function formatReferenceDate(value: string) {
 
 function ReferenceTweetCard({
 	anchorId,
+	includeMedia,
 	label,
 	tweet,
 }: {
 	anchorId?: string;
+	includeMedia: boolean;
 	label: string;
 	tweet: ReferenceTweet | null;
 }) {
@@ -724,6 +560,7 @@ function ReferenceTweetCard({
 			<p className="today-reference-source-body">
 				{tweet.text || "(empty text)"}
 			</p>
+			<ReferencePrintMedia items={includeMedia ? tweet.media : []} />
 			{tweet.replyToTweet ? (
 				<blockquote>
 					<strong>
@@ -822,7 +659,7 @@ function ReferenceDigestPrint({
 						<tr>
 							<th>排版目标</th>
 							<td>
-								适合打印、逐条阅读和做边注；黑白打印仍能清楚区分主题、原文与回复上下文。
+								适合打印、逐条阅读和做边注；推文图片使用紧凑网格完整保留，黑白打印仍能清楚区分主题、原文与回复上下文。
 							</td>
 						</tr>
 						<tr>
@@ -956,14 +793,15 @@ function ReferenceDigestPrint({
 							{group.tweetIds.map((tweetId) => {
 								const normalized = normalizeReferenceTweetId(tweetId);
 								const label = labelsById.get(normalized) ?? normalized;
+								const firstOccurrence =
+									firstGroupBySource.get(normalized) ===
+									groupIndexes.get(group);
 								return (
 									<ReferenceTweetCard
 										anchorId={
-											firstGroupBySource.get(normalized) ===
-											groupIndexes.get(group)
-												? `reference-source-${label}`
-												: undefined
+											firstOccurrence ? `reference-source-${label}` : undefined
 										}
+										includeMedia={firstOccurrence}
 										key={normalized}
 										label={label}
 										tweet={referenceTweetFor(tweetLookup, tweetId)}
@@ -1308,7 +1146,7 @@ export function TodayRouteView({
 	const [referencePdfActive, setReferencePdfActive] = useState(false);
 	const handleExportPdf = useCallback(() => {
 		if (!canExportPdf) return;
-		exportCurrentDigestPdf(exportTitle);
+		exportCurrentPdf(exportTitle);
 	}, [canExportPdf, exportTitle]);
 	const handleExportReferencePdf = useCallback(() => {
 		if (!canExportReferencePdf || !result || referencePdfActive) return;
@@ -1318,14 +1156,16 @@ export function TodayRouteView({
 			typeof CSS.supports !== "function" ||
 			!CSS.supports("page", "reference")
 		) {
-			exportCurrentDigestPdf(referenceExportTitle, "reference", () =>
+			exportCurrentPdf(referenceExportTitle, "reference", () =>
 				setReferencePdfActive(false),
 			);
 			return;
 		}
-		void exportReferenceCollectionPdf(referenceExportTitle, () =>
-			setReferencePdfActive(false),
-		);
+		void exportReferenceCollectionPdf({
+			title: referenceExportTitle,
+			sourceSelector: '[data-testid="today-reference-pdf"]',
+			onCleanup: () => setReferencePdfActive(false),
+		});
 	}, [canExportReferencePdf, referenceExportTitle, referencePdfActive, result]);
 
 	return (
