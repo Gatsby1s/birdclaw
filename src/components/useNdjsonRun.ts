@@ -43,6 +43,13 @@ export function useNdjsonRun<TEvent, TArgs extends unknown[]>({
 	const [loading, setLoading] = useState(false);
 	const abortRef = useRef<AbortController | null>(null);
 	const requestIdRef = useRef(0);
+	const cancel = useCallback(() => {
+		const controller = abortRef.current;
+		requestIdRef.current += 1;
+		abortRef.current = null;
+		controller?.abort();
+		setLoading(false);
+	}, []);
 
 	const run = useCallback(
 		(...args: TArgs) => {
@@ -109,5 +116,5 @@ export function useNdjsonRun<TEvent, TArgs extends unknown[]>({
 
 	useEffect(() => () => abortRef.current?.abort(), []);
 
-	return { error, loading, run, setError };
+	return { cancel, error, loading, run, setError };
 }

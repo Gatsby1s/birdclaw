@@ -4,6 +4,7 @@ import {
 	CheckCircle2,
 	FileDown,
 	FileText,
+	History,
 	Loader2,
 	RefreshCw,
 	Search,
@@ -18,6 +19,10 @@ import {
 	useState,
 } from "react";
 import { CustomDateRangePicker } from "#/components/CustomDateRangePicker";
+import {
+	DiscussHistoryPanel,
+	type DiscussHistoryListItem,
+} from "#/components/DiscussHistoryPanel";
 import { flushSync } from "react-dom";
 import { MarkdownViewer } from "#/components/MarkdownViewer";
 import {
@@ -120,9 +125,11 @@ function discussionUrl(
 		source: SearchDiscussionSource;
 		mode: TweetSearchMode;
 		dateRange: ReturnType<typeof resolveDiscussDateRange>;
+		range: DiscussDateRange;
 		includeDms: boolean;
 		question: string;
 		refresh: boolean;
+		parentHistoryId?: string;
 	},
 ) {
 	const url = new URL("/api/search-discussion", window.location.origin);
@@ -130,6 +137,7 @@ function discussionUrl(
 	url.searchParams.set("source", options.source);
 	url.searchParams.set("mode", options.mode);
 	url.searchParams.set("includeDms", String(options.includeDms));
+	url.searchParams.set("range", options.range);
 	url.searchParams.set("limit", String(DISCUSS_SEARCH_LIMIT));
 	url.searchParams.set("maxPages", String(DISCUSS_MAX_PAGES));
 	if (options.dateRange.since) {
@@ -143,6 +151,9 @@ function discussionUrl(
 	}
 	if (options.refresh) {
 		url.searchParams.set("refresh", "true");
+		if (options.parentHistoryId) {
+			url.searchParams.set("parentHistoryId", options.parentHistoryId);
+		}
 	}
 	return url;
 }
@@ -358,17 +369,21 @@ function useDiscussionStream(
 	source: SearchDiscussionSource,
 	mode: TweetSearchMode,
 	dateRange: ReturnType<typeof resolveDiscussDateRange>,
+	range: DiscussDateRange,
 	includeDms: boolean,
 	question: string,
+	parentHistoryId: string,
 ) {
 	const [markdown, setMarkdown] = useState("");
 	const [context, setContext] = useState<SearchDiscussionContext | null>(null);
 	const [result, setResult] = useState<SearchDiscussionRunResult | null>(null);
+	const [restoredFromHistory, setRestoredFromHistory] = useState(false);
 
 	const onStart = useCallback(() => {
 		setMarkdown("");
 		setContext(null);
 		setResult(null);
+		setRestoredFromHistory(false);
 	}, []);
 	const request = useCallback(
 		(signal: AbortSignal, refresh: boolean) => {
@@ -378,14 +393,25 @@ function useDiscussionStream(
 					source,
 					mode,
 					dateRange,
+					range,
 					includeDms,
 					question,
 					refresh,
+					parentHistoryId,
 				}),
 				{ signal },
 			);
 		},
-		[dateRange, includeDms, mode, query, question, source],
+		[
+			dateRange,
+			includeDms,
+			mode,
+			parentHistoryId,
+			query,
+			question,
+			range,
+			source,
+		],
 	);
 	const onEvent = useCallback((event: SearchDiscussionStreamEvent) => {
 		if (event.type === "start") setContext(event.context);
@@ -398,6 +424,7 @@ function useDiscussionStream(
 		} else if (event.type === "error") throw new Error(event.error);
 	}, []);
 	const {
+		cancel,
 		error,
 		loading,
 		run: runStream,
@@ -418,8 +445,31 @@ function useDiscussionStream(
 		},
 		[query, runStream],
 	);
+	const restore = useCallback((savedResult: SearchDiscussionRunResult) => {
+		setContext(savedResult.context);
+		setMarkdown(savedResult.markdown);
+		setResult(savedResult);
+		setRestoredFromHistory(true);
+	}, []);
+	const clear = useCallback(() => {
+		cancel();
+		setContext(null);
+		setMarkdown("");
+		setResult(null);
+		setRestoredFromHistory(false);
+	}, [cancel]);
 
-	return { context, error, loading, markdown, result, run };
+	return {
+		clear,
+		context,
+		error,
+		loading,
+		markdown,
+		restoredFromHistory,
+		result,
+		restore,
+		run,
+	};
 }
 
 function DiscussRoute() {
@@ -435,6 +485,35 @@ function DiscussRoute() {
 	);
 }
 
+interface DiscussionHistoryListResponse {
+	items: DiscussHistoryListItem[];
+}
+
+interface DiscussionHistoryDetailResponse {
+	item: {
+		metadata: DiscussHistoryListItem;
+		result: SearchDiscussionRunResult;
+	};
+}
+
+async function historyResponseError(response: Response) {
+	try {
+		const payload = (await response.json()) as {
+			error?: unknown;
+			message?: unknown;
+		};
+		if (typeof payload.message === "string") return payload.message;
+		if (typeof payload.error === "string") return payload.error;
+	} catch {
+		// Fall through to the HTTP status.
+	}
+	return `History request failed (${String(response.status)})`;
+}
+
+function restoredHistoryRange(item: DiscussHistoryListItem): DiscussDateRange {
+	return item.range;
+}
+
 export function DiscussRouteView({
 	searchState: controlledSearch,
 	onSearchChange,
@@ -446,9 +525,13 @@ export function DiscussRouteView({
 		validateDiscussSearch({}),
 	);
 	const searchState = controlledSearch ?? localSearch;
-	const updateSearch: RouteSearchChange<DiscussRouteSearch> = (next, options) =>
-		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
+	const updateSearch = useCallback<RouteSearchChange<DiscussRouteSearch>>(
+		(next, options) =>
+			onSearchChange ? onSearchChange(next, options) : setLocalSearch(next),
+		[onSearchChange],
+	);
 	const {
+		run: activeHistoryId,
 		q: query,
 		question,
 		source,
@@ -458,6 +541,7 @@ export function DiscussRouteView({
 		until,
 		includeDms,
 	} = searchState;
+	const historyEnabled = Boolean(controlledSearch && onSearchChange);
 	const [queryDraft, setQueryDraft] = useState(query);
 	const [questionDraft, setQuestionDraft] = useState(question);
 	const [customRangeOpen, setCustomRangeOpen] = useState(
@@ -467,18 +551,41 @@ export function DiscussRouteView({
 	const questionComposingRef = useRef(false);
 	const [submittedSearch, setSubmittedSearch] = useState(() => ({
 		query: "",
+		range: "all" as DiscussDateRange,
 		dateRange: resolveDiscussDateRange("all"),
 	}));
+	const [historyItems, setHistoryItems] = useState<DiscussHistoryListItem[]>(
+		[],
+	);
+	const [historyFilter, setHistoryFilter] = useState("");
+	const [historyLoading, setHistoryLoading] = useState(historyEnabled);
+	const [historyError, setHistoryError] = useState<string | null>(null);
+	const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+	const [historyRestoreLoading, setHistoryRestoreLoading] = useState(false);
+	const [historyRestoreError, setHistoryRestoreError] = useState<string | null>(
+		null,
+	);
 	const pendingSubmitRef = useRef(false);
-	const { context, error, loading, markdown, result, run } =
-		useDiscussionStream(
-			submittedSearch.query,
-			source,
-			mode,
-			submittedSearch.dateRange,
-			includeDms,
-			questionDraft,
-		);
+	const {
+		clear,
+		context,
+		error,
+		loading,
+		markdown,
+		restoredFromHistory,
+		result,
+		restore,
+		run,
+	} = useDiscussionStream(
+		submittedSearch.query,
+		source,
+		mode,
+		submittedSearch.dateRange,
+		submittedSearch.range,
+		includeDms,
+		questionDraft,
+		activeHistoryId,
+	);
 	const sourceLabel = useMemo(
 		() => formatCounts(result?.context ?? context),
 		[context, result],
@@ -535,6 +642,200 @@ export function DiscussRouteView({
 			onCleanup: () => setReferencePdfActive(false),
 		});
 	}, [canExportReferencePdf, referenceExportTitle, referencePdfActive, result]);
+	const loadHistory = useCallback(async () => {
+		if (!historyEnabled) return;
+		setHistoryLoading(true);
+		setHistoryError(null);
+		try {
+			const response = await fetch("/api/discussion-history?limit=200", {
+				cache: "no-store",
+			});
+			if (!response.ok) throw new Error(await historyResponseError(response));
+			const payload = (await response.json()) as DiscussionHistoryListResponse;
+			setHistoryItems(payload.items);
+		} catch (cause) {
+			setHistoryError(
+				cause instanceof Error ? cause.message : "Could not load history",
+			);
+		} finally {
+			setHistoryLoading(false);
+		}
+	}, [historyEnabled]);
+	const completedHistoryIdRef = useRef("");
+
+	useEffect(() => {
+		void loadHistory();
+	}, [loadHistory]);
+
+	useEffect(() => {
+		const historyId = result?.historyId;
+		if (!historyEnabled || !historyId || restoredFromHistory) return;
+		if (completedHistoryIdRef.current !== historyId) {
+			completedHistoryIdRef.current = historyId;
+			void loadHistory();
+		}
+		if (activeHistoryId !== historyId) {
+			updateSearch({ ...searchState, run: historyId }, { replace: true });
+		}
+	}, [
+		activeHistoryId,
+		historyEnabled,
+		loadHistory,
+		restoredFromHistory,
+		result?.historyId,
+		searchState,
+		updateSearch,
+	]);
+
+	useEffect(() => {
+		if (
+			!historyEnabled ||
+			!activeHistoryId ||
+			loading ||
+			(!restoredFromHistory && Boolean(result?.historyId)) ||
+			result?.historyId === activeHistoryId
+		) {
+			return;
+		}
+		const controller = new AbortController();
+		setHistoryRestoreLoading(true);
+		setHistoryRestoreError(null);
+		void fetch(
+			`/api/discussion-history?id=${encodeURIComponent(activeHistoryId)}`,
+			{ cache: "no-store", signal: controller.signal },
+		)
+			.then(async (response) => {
+				if (!response.ok) throw new Error(await historyResponseError(response));
+				return (await response.json()) as DiscussionHistoryDetailResponse;
+			})
+			.then(({ item }) => {
+				if (controller.signal.aborted) return;
+				const rangeValue = restoredHistoryRange(item.metadata);
+				const restoredSearch = validateDiscussSearch({
+					run: item.metadata.id,
+					q: item.metadata.query,
+					question: item.metadata.question ?? "",
+					source: item.metadata.source,
+					mode: item.metadata.mode,
+					range: rangeValue,
+					since: item.metadata.since ?? "",
+					until: item.metadata.until ?? "",
+					includeDms: item.metadata.includeDms,
+				});
+				setQueryDraft(restoredSearch.q);
+				setQuestionDraft(restoredSearch.question);
+				setCustomRangeOpen(restoredSearch.range === "custom");
+				setSubmittedSearch({
+					query: restoredSearch.q,
+					range: restoredSearch.range,
+					dateRange: resolveDiscussDateRange(restoredSearch.range, new Date(), {
+						since: restoredSearch.since,
+						until: restoredSearch.until,
+					}),
+				});
+				restore(item.result);
+				setHistoryRestoreLoading(false);
+				updateSearch(restoredSearch, { replace: true });
+			})
+			.catch((cause: unknown) => {
+				if (controller.signal.aborted) return;
+				setHistoryRestoreError(
+					cause instanceof Error
+						? cause.message
+						: "Could not restore discussion",
+				);
+			})
+			.finally(() => {
+				if (!controller.signal.aborted) setHistoryRestoreLoading(false);
+			});
+		return () => {
+			controller.abort();
+			setHistoryRestoreLoading(false);
+		};
+	}, [
+		activeHistoryId,
+		historyEnabled,
+		loading,
+		restore,
+		restoredFromHistory,
+		result?.historyId,
+		updateSearch,
+	]);
+
+	useEffect(() => {
+		if (!historyDrawerOpen) return;
+		function closeOnEscape(event: KeyboardEvent) {
+			if (event.key === "Escape") setHistoryDrawerOpen(false);
+		}
+		window.addEventListener("keydown", closeOnEscape);
+		return () => window.removeEventListener("keydown", closeOnEscape);
+	}, [historyDrawerOpen]);
+
+	function selectHistory(historyId: string) {
+		setHistoryDrawerOpen(false);
+		if (historyId === activeHistoryId) return;
+		clear();
+		updateSearch({ ...searchState, run: historyId });
+	}
+
+	async function deleteHistory(historyId: string) {
+		const item = historyItems.find((candidate) => candidate.id === historyId);
+		if (
+			typeof window !== "undefined" &&
+			!window.confirm(
+				`Delete “${item?.title ?? "this discussion"}” from local history?`,
+			)
+		) {
+			return;
+		}
+		const response = await fetch(
+			`/api/discussion-history?id=${encodeURIComponent(historyId)}`,
+			{ method: "DELETE" },
+		);
+		if (!response.ok) {
+			setHistoryError(await historyResponseError(response));
+			return;
+		}
+		setHistoryItems((current) =>
+			current.filter((candidate) => candidate.id !== historyId),
+		);
+		if (historyId === activeHistoryId) {
+			clear();
+			setSubmittedSearch({
+				query: "",
+				range: "all",
+				dateRange: resolveDiscussDateRange("all"),
+			});
+			updateSearch({ ...searchState, run: "" }, { replace: true });
+		}
+	}
+
+	async function toggleHistoryPin(item: DiscussHistoryListItem) {
+		const response = await fetch("/api/discussion-history", {
+			method: "PATCH",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ id: item.id, pinned: !item.pinned }),
+		});
+		if (!response.ok) {
+			setHistoryError(await historyResponseError(response));
+			return;
+		}
+		const payload = (await response.json()) as {
+			item: DiscussHistoryListItem;
+		};
+		setHistoryItems((current) =>
+			current
+				.map((candidate) =>
+					candidate.id === payload.item.id ? payload.item : candidate,
+				)
+				.sort(
+					(left, right) =>
+						Number(right.pinned) - Number(left.pinned) ||
+						new Date(right.createdAt).getTime() -
+							new Date(left.createdAt).getTime(),
+				),
+		);
+	}
 
 	useEffect(() => {
 		if (!queryComposingRef.current) setQueryDraft(query);
@@ -551,22 +852,29 @@ export function DiscussRouteView({
 	function changeQuery(value: string) {
 		setQueryDraft(value);
 		if (queryComposingRef.current) return;
-		updateSearch({ ...searchState, q: value }, { replace: true });
+		updateSearch({ ...searchState, run: "", q: value }, { replace: true });
 	}
 
 	function changeQuestion(value: string) {
 		setQuestionDraft(value);
 		if (questionComposingRef.current) return;
-		updateSearch({ ...searchState, question: value }, { replace: true });
+		updateSearch(
+			{ ...searchState, run: "", question: value },
+			{ replace: true },
+		);
 	}
 
 	function submit(event: FormEvent) {
 		event.preventDefault();
 		const trimmed = queryDraft.trim();
 		if (!trimmed) return;
+		if (activeHistoryId) {
+			updateSearch({ ...searchState, run: "" }, { replace: true });
+		}
 		pendingSubmitRef.current = true;
 		setSubmittedSearch({
 			query: trimmed,
+			range,
 			dateRange: resolveDiscussDateRange(range, new Date(), { since, until }),
 		});
 	}
@@ -578,250 +886,321 @@ export function DiscussRouteView({
 	}, [run, submittedSearch]);
 
 	return (
-		<div className="today-pdf-root flex min-h-screen flex-col">
-			<header className={cx("today-pdf-header", pageHeaderClass)}>
-				<div className={pageHeaderRowClass}>
-					<div className="min-w-0">
-						<h1 className={pageTitleClass}>Discuss</h1>
-						<p className={pageSubtitleClass}>{sourceLabel}</p>
+		<div className="grid min-h-screen w-full min-[1240px]:grid-cols-[minmax(0,680px)_minmax(280px,1fr)]">
+			<section className="today-pdf-root flex min-h-screen min-w-0 flex-col min-[1240px]:border-r min-[1240px]:border-[var(--line)]">
+				<header className={cx("today-pdf-header", pageHeaderClass)}>
+					<div className={pageHeaderRowClass}>
+						<div className="min-w-0">
+							<h1 className={pageTitleClass}>Discuss</h1>
+							<p className={pageSubtitleClass}>{sourceLabel}</p>
+						</div>
+						<div className={cx("today-screen-only", pageHeaderActionsClass)}>
+							<button
+								type="button"
+								aria-label="History"
+								className={cx(secondaryButtonClass, "min-[1240px]:hidden")}
+								onClick={() => setHistoryDrawerOpen(true)}
+							>
+								<History className="size-4" aria-hidden="true" />
+								<span className="hidden min-[900px]:inline">History</span>
+							</button>
+							<button
+								type="button"
+								aria-label="Export PDF"
+								className={secondaryButtonClass}
+								onClick={handleExportPdf}
+								disabled={!canExportPdf || referencePdfActive}
+							>
+								<FileDown className="size-4" aria-hidden="true" />
+								<span className="hidden min-[900px]:inline">Export PDF</span>
+							</button>
+							<button
+								type="button"
+								aria-label="导出完整 PDF"
+								className={secondaryButtonClass}
+								onClick={handleExportReferencePdf}
+								disabled={!canExportReferencePdf || referencePdfActive}
+							>
+								{referencePdfActive ? (
+									<Loader2 className="size-4 animate-spin" aria-hidden="true" />
+								) : (
+									<FileText className="size-4" aria-hidden="true" />
+								)}
+								<span className="hidden min-[900px]:inline">导出完整 PDF</span>
+							</button>
+							<button
+								type="button"
+								aria-label="Regenerate"
+								className={secondaryButtonClass}
+								onClick={() => run(true)}
+								disabled={
+									loading || !submittedSearch.query || referencePdfActive
+								}
+							>
+								<RefreshCw
+									className={cx("size-4", loading && "animate-spin")}
+									aria-hidden="true"
+								/>
+								<span className="hidden min-[900px]:inline">Regenerate</span>
+							</button>
+						</div>
 					</div>
-					<div className={cx("today-screen-only", pageHeaderActionsClass)}>
-						<button
-							type="button"
-							className={secondaryButtonClass}
-							onClick={handleExportPdf}
-							disabled={!canExportPdf || referencePdfActive}
-						>
-							<FileDown className="size-4" aria-hidden="true" />
-							Export PDF
-						</button>
-						<button
-							type="button"
-							className={secondaryButtonClass}
-							onClick={handleExportReferencePdf}
-							disabled={!canExportReferencePdf || referencePdfActive}
-						>
-							{referencePdfActive ? (
-								<Loader2 className="size-4 animate-spin" aria-hidden="true" />
-							) : (
-								<FileText className="size-4" aria-hidden="true" />
-							)}
-							导出完整 PDF
-						</button>
-						<button
-							type="button"
-							className={secondaryButtonClass}
-							onClick={() => run(true)}
-							disabled={loading || !submittedSearch.query || referencePdfActive}
-						>
-							<RefreshCw
-								className={cx("size-4", loading && "animate-spin")}
-								aria-hidden="true"
+					<div className="today-pdf-meta" aria-hidden="true">
+						<span>Query: {result?.context.query ?? exportQuery}</span>
+						<span>·</span>
+						<span>Sources: {sourceLabel}</span>
+						{exportUpdatedAt ? (
+							<>
+								<span>·</span>
+								<span>Generated {exportUpdatedAt}</span>
+							</>
+						) : null}
+					</div>
+					<form
+						className="today-screen-only grid gap-2 px-4 pb-3 md:grid-cols-[minmax(220px,1fr)_minmax(180px,0.8fr)_auto]"
+						onSubmit={submit}
+					>
+						<label className={searchFieldShellClass}>
+							<Search className={searchFieldIconClass} strokeWidth={2} />
+							<input
+								className={searchFieldInputClass}
+								placeholder="Keywords"
+								value={queryDraft}
+								onCompositionStart={() => {
+									queryComposingRef.current = true;
+								}}
+								onCompositionEnd={(event) => {
+									queryComposingRef.current = false;
+									changeQuery(event.currentTarget.value);
+								}}
+								onChange={(event) => changeQuery(event.currentTarget.value)}
 							/>
-							Refresh
-						</button>
-					</div>
-				</div>
-				<div className="today-pdf-meta" aria-hidden="true">
-					<span>Query: {result?.context.query ?? exportQuery}</span>
-					<span>·</span>
-					<span>Sources: {sourceLabel}</span>
-					{exportUpdatedAt ? (
-						<>
-							<span>·</span>
-							<span>Generated {exportUpdatedAt}</span>
-						</>
-					) : null}
-				</div>
-				<form
-					className="today-screen-only grid gap-2 px-4 pb-3 md:grid-cols-[minmax(220px,1fr)_minmax(180px,0.8fr)_auto]"
-					onSubmit={submit}
-				>
-					<label className={searchFieldShellClass}>
-						<Search className={searchFieldIconClass} strokeWidth={2} />
+						</label>
 						<input
-							className={searchFieldInputClass}
-							placeholder="Keywords"
-							value={queryDraft}
+							className={textFieldClass}
+							placeholder="Optional question"
+							value={questionDraft}
 							onCompositionStart={() => {
-								queryComposingRef.current = true;
+								questionComposingRef.current = true;
 							}}
 							onCompositionEnd={(event) => {
-								queryComposingRef.current = false;
-								changeQuery(event.currentTarget.value);
+								questionComposingRef.current = false;
+								changeQuestion(event.currentTarget.value);
 							}}
-							onChange={(event) => changeQuery(event.currentTarget.value)}
+							onChange={(event) => changeQuestion(event.currentTarget.value)}
 						/>
-					</label>
-					<input
-						className={textFieldClass}
-						placeholder="Optional question"
-						value={questionDraft}
-						onCompositionStart={() => {
-							questionComposingRef.current = true;
-						}}
-						onCompositionEnd={(event) => {
-							questionComposingRef.current = false;
-							changeQuestion(event.currentTarget.value);
-						}}
-						onChange={(event) => changeQuestion(event.currentTarget.value)}
-					/>
-					<button
-						type="submit"
-						className={primaryButtonClass}
-						disabled={loading || !queryDraft.trim() || referencePdfActive}
-					>
-						<Sparkles className="size-4" aria-hidden="true" />
-						Discuss
-					</button>
-					<div className="grid gap-2 md:col-span-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-						<DropdownField
-							label="Source"
-							options={sources}
-							value={source}
-							onChange={(value) =>
-								updateSearch({ ...searchState, source: value })
-							}
-						/>
-						<DropdownField
-							label="Mode"
-							options={modes}
-							value={mode}
-							onChange={(value) =>
-								updateSearch({ ...searchState, mode: value })
-							}
-						/>
-						<label className="inline-flex h-[54px] items-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--bg)] px-3 text-[13px] font-medium text-[var(--ink-soft)]">
-							<input
-								type="checkbox"
-								checked={includeDms}
-								onChange={(event) =>
+						<button
+							type="submit"
+							className={primaryButtonClass}
+							disabled={loading || !queryDraft.trim() || referencePdfActive}
+						>
+							<Sparkles className="size-4" aria-hidden="true" />
+							Discuss
+						</button>
+						<div className="grid gap-2 md:col-span-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+							<DropdownField
+								label="Source"
+								options={sources}
+								value={source}
+								onChange={(value) =>
+									updateSearch({ ...searchState, run: "", source: value })
+								}
+							/>
+							<DropdownField
+								label="Mode"
+								options={modes}
+								value={mode}
+								onChange={(value) =>
+									updateSearch({ ...searchState, run: "", mode: value })
+								}
+							/>
+							<label className="inline-flex h-[54px] items-center gap-2 rounded-2xl border border-[var(--line)] bg-[var(--bg)] px-3 text-[13px] font-medium text-[var(--ink-soft)]">
+								<input
+									type="checkbox"
+									checked={includeDms}
+									onChange={(event) =>
+										updateSearch({
+											...searchState,
+											run: "",
+											includeDms: event.currentTarget.checked,
+										})
+									}
+								/>
+								DMs
+							</label>
+						</div>
+						<div
+							aria-label="Date range"
+							className={cx(
+								segmentedClass,
+								"col-span-full w-fit max-w-full overflow-x-auto max-sm:grid max-sm:w-full max-sm:grid-cols-3 max-sm:overflow-visible max-sm:rounded-2xl",
+							)}
+							role="group"
+						>
+							{ranges.map((item) => (
+								<button
+									key={item.value}
+									type="button"
+									className={cx(
+										segmentClass,
+										"shrink-0",
+										(item.value === "custom"
+											? range === "custom" || customRangeOpen
+											: !customRangeOpen && range === item.value) &&
+											discussRangeSegmentActiveClass,
+									)}
+									onClick={() => {
+										if (item.value === "custom") {
+											setCustomRangeOpen((open) => !open);
+											return;
+										}
+										setCustomRangeOpen(false);
+										updateSearch({
+											...searchState,
+											run: "",
+											range: item.value,
+											since: "",
+											until: "",
+										});
+									}}
+								>
+									{item.label}
+								</button>
+							))}
+						</div>
+						{customRangeOpen ? (
+							<CustomDateRangePicker
+								value={range === "custom" ? { since, until } : null}
+								onApply={(customRange) =>
 									updateSearch({
 										...searchState,
-										includeDms: event.currentTarget.checked,
+										run: "",
+										range: "custom",
+										...customRange,
 									})
 								}
 							/>
-							DMs
-						</label>
-					</div>
-					<div
-						aria-label="Date range"
-						className={cx(
-							segmentedClass,
-							"col-span-full w-fit max-w-full overflow-x-auto max-sm:grid max-sm:w-full max-sm:grid-cols-3 max-sm:overflow-visible max-sm:rounded-2xl",
+						) : null}
+					</form>
+				</header>
+
+				{error || historyRestoreError ? (
+					<div className={errorCopyClass}>{error ?? historyRestoreError}</div>
+				) : null}
+
+				<div className="today-screen-only border-b border-[var(--line)] px-4 py-2 text-[13px] text-[var(--ink-soft)]">
+					<span className="inline-flex items-center gap-1">
+						{historyRestoreLoading ? (
+							<Loader2 className="size-4 animate-spin" aria-hidden="true" />
+						) : loading ? (
+							<Loader2 className="size-4 animate-spin" aria-hidden="true" />
+						) : markdown ? (
+							<CheckCircle2 className="size-4" aria-hidden="true" />
+						) : (
+							<Sparkles className="size-4" aria-hidden="true" />
 						)}
-						role="group"
-					>
-						{ranges.map((item) => (
-							<button
-								key={item.value}
-								type="button"
-								className={cx(
-									segmentClass,
-									"shrink-0",
-									(item.value === "custom"
-										? range === "custom" || customRangeOpen
-										: !customRangeOpen && range === item.value) &&
-										discussRangeSegmentActiveClass,
-								)}
-								onClick={() => {
-									if (item.value === "custom") {
-										setCustomRangeOpen((open) => !open);
-										return;
-									}
-									setCustomRangeOpen(false);
-									updateSearch({
-										...searchState,
-										range: item.value,
-										since: "",
-										until: "",
-									});
-								}}
-							>
-								{item.label}
-							</button>
-						))}
+						{historyRestoreLoading
+							? "Restoring saved discussion"
+							: loading
+								? "Searching and streaming"
+								: result && restoredFromHistory
+									? "Restored from history · 0 token"
+									: result
+										? `${result.cached ? "Cached" : "Ready"} · ${result.context.query}`
+										: "Ready"}
+					</span>
+				</div>
+
+				{referencePdfActive && result ? (
+					<ReferenceCollectionPrint
+						coverTitle="BirdClaw Discuss 参考内容合集"
+						documentTitle={result.discussion.title}
+						documentSummary={result.discussion.summary}
+						dms={referenceDms}
+						groups={referenceGroups}
+						insights={[
+							{ title: "观点分歧", items: result.discussion.tensions },
+							{ title: "后续关注", items: result.discussion.followUps },
+						]}
+						metadata={[
+							`检索词：${result.context.query}`,
+							...(result.context.question
+								? [`讨论问题：${result.context.question}`]
+								: []),
+							`时间范围：${formatDiscussionRange(result.context)} · 数据源：${result.context.source}`,
+							`生成日期：${formatDiscussionDate(result.updatedAt)} · 来源：${String(referenceSourceCount)} 条引用原文`,
+						]}
+						sectionLabels={{
+							"Discussion themes": "热议主题",
+							"Supplemental source list": "补充来源",
+						}}
+						sectionNotes={{
+							"Discussion themes": "按讨论主题逐组阅读。",
+							"Supplemental source list": "只作完整性补充。",
+						}}
+						testId="discuss-reference-pdf"
+						tweets={result.context.tweets}
+					/>
+				) : null}
+
+				{markdown ? (
+					<MarkdownViewer
+						className="today-digest-pdf"
+						context={result?.context ?? context}
+						markdownLinkClassName={discussMarkdownLinkClass}
+						markdown={markdown}
+						sourceOnlyCitations
+					/>
+				) : (
+					<div className="px-4 py-5 text-[14px] text-[var(--ink-soft)]">
+						{loading ? "Waiting for the first tokens..." : "Search to begin."}
 					</div>
-					{customRangeOpen ? (
-						<CustomDateRangePicker
-							value={range === "custom" ? { since, until } : null}
-							onApply={(customRange) =>
-								updateSearch({
-									...searchState,
-									range: "custom",
-									...customRange,
-								})
-							}
-						/>
-					) : null}
-				</form>
-			</header>
+				)}
+			</section>
 
-			{error ? <div className={errorCopyClass}>{error}</div> : null}
-
-			<div className="today-screen-only border-b border-[var(--line)] px-4 py-2 text-[13px] text-[var(--ink-soft)]">
-				<span className="inline-flex items-center gap-1">
-					{loading ? (
-						<Loader2 className="size-4 animate-spin" aria-hidden="true" />
-					) : markdown ? (
-						<CheckCircle2 className="size-4" aria-hidden="true" />
-					) : (
-						<Sparkles className="size-4" aria-hidden="true" />
-					)}
-					{loading
-						? "Searching and streaming"
-						: result
-							? `${result.cached ? "Cached" : "Ready"} · ${result.context.query}`
-							: "Ready"}
-				</span>
+			<div className="today-screen-only sticky top-0 hidden h-screen min-h-0 min-[1240px]:block">
+				<DiscussHistoryPanel
+					items={historyItems}
+					activeId={activeHistoryId}
+					loading={historyLoading}
+					error={historyError}
+					filter={historyFilter}
+					onFilterChange={setHistoryFilter}
+					onSelect={selectHistory}
+					onDelete={(historyId) => void deleteHistory(historyId)}
+					onTogglePin={(item) => void toggleHistoryPin(item)}
+				/>
 			</div>
 
-			{referencePdfActive && result ? (
-				<ReferenceCollectionPrint
-					coverTitle="BirdClaw Discuss 参考内容合集"
-					documentTitle={result.discussion.title}
-					documentSummary={result.discussion.summary}
-					dms={referenceDms}
-					groups={referenceGroups}
-					insights={[
-						{ title: "观点分歧", items: result.discussion.tensions },
-						{ title: "后续关注", items: result.discussion.followUps },
-					]}
-					metadata={[
-						`检索词：${result.context.query}`,
-						...(result.context.question
-							? [`讨论问题：${result.context.question}`]
-							: []),
-						`时间范围：${formatDiscussionRange(result.context)} · 数据源：${result.context.source}`,
-						`生成日期：${formatDiscussionDate(result.updatedAt)} · 来源：${String(referenceSourceCount)} 条引用原文`,
-					]}
-					sectionLabels={{
-						"Discussion themes": "热议主题",
-						"Supplemental source list": "补充来源",
-					}}
-					sectionNotes={{
-						"Discussion themes": "按讨论主题逐组阅读。",
-						"Supplemental source list": "只作完整性补充。",
-					}}
-					testId="discuss-reference-pdf"
-					tweets={result.context.tweets}
-				/>
-			) : null}
-
-			{markdown ? (
-				<MarkdownViewer
-					className="today-digest-pdf"
-					context={result?.context ?? context}
-					markdownLinkClassName={discussMarkdownLinkClass}
-					markdown={markdown}
-					sourceOnlyCitations
-				/>
-			) : (
-				<div className="px-4 py-5 text-[14px] text-[var(--ink-soft)]">
-					{loading ? "Waiting for the first tokens..." : "Search to begin."}
+			{historyDrawerOpen ? (
+				<div className="today-screen-only fixed inset-0 z-50 min-[1240px]:hidden">
+					<button
+						type="button"
+						aria-label="Close history overlay"
+						className="absolute inset-0 bg-black/40"
+						onClick={() => setHistoryDrawerOpen(false)}
+					/>
+					<div
+						role="dialog"
+						aria-modal="true"
+						aria-label="Discussion history"
+						className="absolute inset-y-0 right-0 h-full w-[min(360px,calc(100%-32px))] border-l border-[var(--line)] bg-[var(--bg)] shadow-[-12px_0_32px_rgba(0,0,0,0.18)]"
+					>
+						<DiscussHistoryPanel
+							items={historyItems}
+							activeId={activeHistoryId}
+							loading={historyLoading}
+							error={historyError}
+							filter={historyFilter}
+							onFilterChange={setHistoryFilter}
+							onSelect={selectHistory}
+							onDelete={(historyId) => void deleteHistory(historyId)}
+							onTogglePin={(item) => void toggleHistoryPin(item)}
+							onClose={() => setHistoryDrawerOpen(false)}
+						/>
+					</div>
 				</div>
-			)}
+			) : null}
 		</div>
 	);
 }

@@ -61,6 +61,47 @@ describe("useNdjsonRun", () => {
 		expect(result.current.stream.error).toBeNull();
 	});
 
+	it("cancels an active request and suppresses its eventual response", async () => {
+		let pending:
+			| {
+					signal: AbortSignal;
+					resolve: (response: Response) => void;
+			  }
+			| undefined;
+		const request = vi.fn(
+			(signal: AbortSignal) =>
+				new Promise<Response>((resolve) => {
+					pending = { signal, resolve };
+				}),
+		);
+		const onEvent = vi.fn();
+		const { result } = renderHook(() =>
+			useNdjsonRun({
+				schema: eventSchema,
+				request,
+				onEvent,
+				isTerminal: (event) => event.type === "done",
+				errorLabel: "Request failed",
+				emptyBodyMessage: "empty",
+				prematureEofError: () => new Error("premature"),
+			}),
+		);
+
+		act(() => result.current.run());
+		expect(result.current.loading).toBe(true);
+		act(() => result.current.cancel());
+		expect(pending?.signal.aborted).toBe(true);
+		expect(result.current.loading).toBe(false);
+
+		await act(async () => {
+			pending?.resolve(
+				ndjsonResponse([{ type: "value", value: "stale" }, { type: "done" }]),
+			);
+		});
+		expect(onEvent).not.toHaveBeenCalled();
+		expect(result.current.error).toBeNull();
+	});
+
 	it("reports invalid events and premature EOF", async () => {
 		const responses = [
 			ndjsonResponse([{ type: "value", value: 4 }]),

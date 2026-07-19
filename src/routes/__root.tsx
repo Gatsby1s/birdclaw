@@ -58,8 +58,9 @@ function RootDocument({ children }: { children: ReactNode }) {
 	const pathname = useRouterState({
 		select: (state) => state.location.pathname,
 	});
-	const wideMode =
+	const compactNavigation =
 		pathname.startsWith("/dms") || pathname.startsWith("/network-map");
+	const wideMain = compactNavigation || pathname.startsWith("/discuss");
 
 	return (
 		<html lang="en" suppressHydrationWarning>
@@ -72,8 +73,8 @@ function RootDocument({ children }: { children: ReactNode }) {
 					<ThemeProvider>
 						<LiveVersionReloader />
 						<div className={siteShellClass}>
-							<AppNav compact={wideMode} />
-							<main className={wideMode ? mainColumnDmClass : mainColumnClass}>
+							<AppNav compact={compactNavigation} />
+							<main className={wideMain ? mainColumnDmClass : mainColumnClass}>
 								{children}
 							</main>
 						</div>

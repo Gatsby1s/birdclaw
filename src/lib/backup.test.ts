@@ -47,6 +47,7 @@ function switchHome(prefix: string) {
 function clearData() {
 	const db = getNativeDb();
 	db.exec(`
+    delete from discussion_history;
     delete from follow_events;
     delete from follow_edges;
     delete from follow_snapshot_members;
@@ -210,6 +211,26 @@ function seedBackupFixture() {
       entity_kind, entity_id, model, score, summary, reasoning, updated_at
     ) values (
       'tweet', 'tweet_2025', 'test-model', 88, 'useful', 'has context', '2025-01-09T00:00:00.000Z'
+    );
+
+    insert into discussion_history (
+      id, root_id, parent_id, cache_key, title, summary, query, question,
+      account, source, mode, range, since, until, include_dms,
+      originals_only, hide_low_quality, model, reasoning_effort,
+      service_tier, context_hash, counts_json, discussion_json, markdown,
+      tweets_json, dms_json, live_search_json, created_at, updated_at,
+      pinned_at, deleted_at
+    ) values (
+      'discussion_1', 'discussion_1', null, 'search-discussion:test',
+      'Backup discussion', 'A durable saved discussion', 'backup', null,
+      'acct_primary', 'all', 'local', 'all', null, null, 1, 0, 0,
+      'gpt-5.5', 'medium', 'priority', 'history_hash',
+      '{"search":0,"home":1,"mentions":0,"authored":0,"likes":0,"bookmarks":0,"dms":1}',
+      '{"title":"Backup discussion","summary":"A durable saved discussion","themes":[],"tensions":[],"followUps":[],"sourceTweetIds":["tweet_2025"],"sourceDmConversationIds":["dm:friend"]}',
+      '# Backup discussion',
+      '[{"id":"tweet_2025","text":"Saved useful thing"}]',
+      '[{"id":"dm:friend","text":"Backup this please"}]', null,
+      '2025-01-09T01:00:00.000Z', '2025-01-09T01:00:00.000Z', null, null
     );
 
     insert into follow_snapshots (
@@ -420,6 +441,7 @@ describe("text backup", () => {
 			mutes: 1,
 			tweet_actions: 1,
 			ai_scores: 1,
+			discussion_history: 1,
 			follow_snapshots: 1,
 			follow_snapshot_members: 1,
 			follow_edges: 1,
@@ -479,10 +501,23 @@ describe("text backup", () => {
 		expect(existsSync(path.join(repoPath, "data/follow_edges.jsonl"))).toBe(
 			true,
 		);
+		expect(
+			existsSync(path.join(repoPath, "data/discussions/history.jsonl")),
+		).toBe(true);
 
 		switchHome("birdclaw-backup-dst-");
 		const staleDb = getNativeDb();
 		staleDb.exec(`
+	  insert into discussion_history (
+	    id, root_id, cache_key, title, summary, query, source, mode, range,
+	    model, reasoning_effort, service_tier, context_hash, counts_json,
+	    discussion_json, markdown, created_at, updated_at
+	  ) values (
+	    'stale_discussion', 'stale_discussion', 'stale', 'Stale', 'Stale',
+	    'stale', 'all', 'local', 'all', 'gpt-5.5', 'medium', 'priority',
+	    'stale', '{}', '{}', 'stale', '2026-04-01T00:00:00.000Z',
+	    '2026-04-01T00:00:00.000Z'
+	  );
       insert into url_expansions (
         short_url, expanded_url, final_url, status, source, updated_at
       ) values (
@@ -578,12 +613,17 @@ describe("text backup", () => {
 				)
 				.get(),
 		).toEqual({ count: 1 });
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare("select id, title from discussion_history order by id")
+				.all(),
+		).toEqual([{ id: "discussion_1", title: "Backup discussion" }]);
 
 		const validation = await validateBackup(repoPath);
 		expect(validation.ok).toBe(true);
 	}, 20000);
 
-	it("emits byte-identical schema-v2 data and hashes for the same database", async () => {
+	it("emits byte-identical schema-v3 data and still accepts schema v2", async () => {
 		switchHome("birdclaw-backup-stable-src-");
 		seedBackupFixture();
 		const firstRepoPath = makeTempDir("birdclaw-backup-stable-first-");
@@ -592,9 +632,9 @@ describe("text backup", () => {
 		const first = await exportBackup({ repoPath: firstRepoPath });
 		const second = await exportBackup({ repoPath: secondRepoPath });
 
-		expect(first.manifest.schemaVersion).toBe(2);
+		expect(first.manifest.schemaVersion).toBe(3);
 		expect(first.manifest.backupHash).toBe(
-			"bec137fa89f0f39cef137e8e74dfc59a7a892972189019c7d5e841f9c4c17895",
+			"61f28f03fe0c721815512bd2e4828ad1ae02f87eb4811b1a0549c97a35be0faf",
 		);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);
@@ -604,6 +644,11 @@ describe("text backup", () => {
 				readFileSync(path.join(firstRepoPath, file.path)),
 			);
 		}
+		writeFileSync(
+			path.join(secondRepoPath, "manifest.json"),
+			JSON.stringify({ ...second.manifest, schemaVersion: 2 }, null, 2) + "\n",
+		);
+		expect((await validateBackup(secondRepoPath)).ok).toBe(true);
 	}, 20000);
 
 	it("does not downgrade a fresh DM request when merging a stale backup", async () => {
@@ -728,6 +773,7 @@ describe("text backup", () => {
 			mutes: 1,
 			tweet_actions: 1,
 			ai_scores: 1,
+			discussion_history: 1,
 			follow_snapshots: 1,
 			follow_snapshot_members: 1,
 			follow_edges: 1,

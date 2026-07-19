@@ -24,6 +24,7 @@ data/dms/conversations.jsonl
 data/dms/YYYY.jsonl
 data/moderation/blocks.jsonl
 data/moderation/mutes.jsonl
+data/discussions/history.jsonl
 data/follow_snapshots.jsonl
 data/follow_snapshot_members.jsonl
 data/follow_edges.jsonl
@@ -41,6 +42,7 @@ Design rules:
 - **profile snapshots** preserve deduplicated profile-history states for identity evidence over time
 - **profile bio entities** preserve extracted `@handle`, domain, and company-phrase identity hints, including inactive historical values
 - **follow graph** shards preserve followers/following snapshots, snapshot members, current edges, and append-only churn events
+- **discussion history** preserves completed Discuss results and only their cited tweet/DM snapshots, so old analyses can be restored without another model call
 - **no SQLite WAL/SHM, FTS shadow tables, or transient live cache rows** ever land in the backup
 
 The manifest pins per-shard byte counts, row counts, and SHA hashes. Validation walks every shard and verifies they line up.

@@ -26,7 +26,7 @@ import {
 } from "./streaming-ingestion";
 import { runSubprocessEffect, SubprocessError } from "./subprocess";
 
-const BACKUP_SCHEMA_VERSION = 2;
+const BACKUP_SCHEMA_VERSION = 3;
 const MIN_SUPPORTED_BACKUP_SCHEMA_VERSION = 1;
 const MANIFEST_PATH = "manifest.json";
 const DATA_DIR = "data";
@@ -391,6 +391,7 @@ data/links/url_expansions.jsonl
 data/links/occurrences.jsonl
 data/moderation/blocks.jsonl
 data/moderation/mutes.jsonl
+data/discussions/history.jsonl
 data/follow_snapshots.jsonl
 data/follow_snapshot_members.jsonl
 data/follow_edges.jsonl

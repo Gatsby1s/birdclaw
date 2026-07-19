@@ -65,7 +65,7 @@ describe("api search discussion route", () => {
 	it("streams NDJSON and passes query options to the discussion runner", async () => {
 		const response = await GET({
 			request: new Request(
-				"http://localhost/api/search-discussion?query=ChatGPT&source=home&mode=bird&account=acct_primary&includeDms=yes&since=2026-05-01&until=2026-05-16&question=themes&originalsOnly=1&hideLowQuality=true&refresh=1&model=gpt-5.5&limit=42&maxPages=7",
+				"http://localhost/api/search-discussion?query=ChatGPT&source=home&mode=bird&range=custom&account=acct_primary&includeDms=yes&since=2026-05-01&until=2026-05-16&question=themes&originalsOnly=1&hideLowQuality=true&refresh=1&parentHistoryId=history_1&model=gpt-5.5&limit=42&maxPages=7",
 			),
 		});
 
@@ -83,6 +83,7 @@ describe("api search discussion route", () => {
 				account: "acct_primary",
 				source: "home",
 				mode: "bird",
+				range: "custom",
 				includeDms: true,
 				since: "2026-05-01",
 				until: "2026-05-16",
@@ -93,6 +94,7 @@ describe("api search discussion route", () => {
 				model: "gpt-5.5",
 				limit: 42,
 				maxPages: 7,
+				parentHistoryId: "history_1",
 				signal: expect.any(AbortSignal),
 				prefetchAvatars: true,
 			},

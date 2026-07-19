@@ -9,9 +9,14 @@ import {
 	streamHybridAnalysisEffect,
 } from "./analysis-runtime";
 import { prefetchCachedAvatarsForProfileIdsEffect } from "./avatar-cache";
+import {
+	reuseOrSaveDiscussionHistory,
+	saveDiscussionHistory,
+} from "./discussion-history";
 import { runEffectBackground, runEffectPromise } from "./effect-runtime";
 import { getNativeDb } from "./db";
 import { listDmConversations } from "./dm-read-model";
+import type { DiscussDateRange } from "./discuss-date-range";
 import {
 	type OpenAIStreamState,
 	processOpenAIResponseSseChunk,
@@ -46,6 +51,7 @@ export interface SearchDiscussionOptions {
 	hideLowQuality?: boolean;
 	question?: string;
 	mode?: TweetSearchMode;
+	range?: DiscussDateRange;
 	limit?: number;
 	maxPages?: number;
 	refresh?: boolean;
@@ -54,6 +60,7 @@ export interface SearchDiscussionOptions {
 	serviceTier?: "default" | "flex" | "priority";
 	signal?: AbortSignal;
 	prefetchAvatars?: boolean;
+	parentHistoryId?: string;
 }
 
 export interface SearchDiscussionStreamHandlers {
@@ -132,6 +139,7 @@ export interface SearchDiscussionRunResult {
 	serviceTier: string;
 	cached: boolean;
 	updatedAt: string;
+	historyId?: string;
 }
 
 export type SearchDiscussionStreamEvent =
@@ -689,8 +697,9 @@ function completeOpenAIStreamEffect(
 	handlers: SearchDiscussionStreamHandlers,
 ): Effect.Effect<SearchDiscussionRunResult, Error> {
 	return Effect.gen(function* () {
+		const resolvedCacheKey = cacheKey(context, options);
 		const updatedAt = yield* trySearchSync(() =>
-			writeSyncCache(cacheKey(context, options), {
+			writeSyncCache(resolvedCacheKey, {
 				discussion: stream.value,
 				markdown: stream.markdown,
 				model: modelFromOptions(options),
@@ -700,7 +709,7 @@ function completeOpenAIStreamEffect(
 				responseId: stream.responseId,
 			}),
 		);
-		const result = {
+		const result: SearchDiscussionRunResult = {
 			context,
 			discussion: stream.value,
 			markdown: stream.markdown,
@@ -710,8 +719,16 @@ function completeOpenAIStreamEffect(
 			cached: false,
 			updatedAt,
 		};
-		handlers.onEvent?.({ type: "done", result });
-		return result;
+		const historyId = yield* trySearchSync(() =>
+			saveDiscussionHistory({
+				cacheKey: resolvedCacheKey,
+				options,
+				result,
+			}),
+		);
+		const completed = { ...result, historyId };
+		handlers.onEvent?.({ type: "done", result: completed });
+		return completed;
 	});
 }
 
@@ -765,16 +782,25 @@ export function streamSearchDiscussionEffect(
 					}>(cacheKey(context, options)),
 				);
 		if (cached) {
-			const result: SearchDiscussionRunResult = yield* trySearchSync(() => ({
-				context,
-				discussion: SearchDiscussionSchema.parse(cached.value.discussion),
-				markdown: cached.value.markdown,
-				model: cached.value.model,
-				reasoningEffort: cached.value.reasoningEffort,
-				serviceTier: cached.value.serviceTier,
-				cached: true,
-				updatedAt: cached.updatedAt,
-			}));
+			const resolvedCacheKey = cacheKey(context, options);
+			const result: SearchDiscussionRunResult = yield* trySearchSync(() => {
+				const baseResult: SearchDiscussionRunResult = {
+					context,
+					discussion: SearchDiscussionSchema.parse(cached.value.discussion),
+					markdown: cached.value.markdown,
+					model: cached.value.model,
+					reasoningEffort: cached.value.reasoningEffort,
+					serviceTier: cached.value.serviceTier,
+					cached: true,
+					updatedAt: cached.updatedAt,
+				};
+				const historyId = reuseOrSaveDiscussionHistory({
+					cacheKey: resolvedCacheKey,
+					options,
+					result: baseResult,
+				});
+				return { ...baseResult, historyId };
+			});
 			handlers.onEvent?.({ type: "start", context, cached: true });
 			handlers.onDelta?.(result.markdown);
 			handlers.onEvent?.({ type: "delta", delta: result.markdown });
