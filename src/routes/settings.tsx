@@ -7,11 +7,15 @@ import {
 	KeyRound,
 	Route as RouteIcon,
 	Settings2,
+	StickyNote,
+	Upload,
 } from "lucide-react";
+import { useRef } from "react";
 import {
 	birdclawSettingsSchema,
 	type BirdclawSettings,
 	type ProfileAnalysisSourceSetting,
+	xRemarkSyncStatusSchema,
 } from "#/lib/api-contracts";
 import { fetchJson } from "#/lib/api-client";
 import { queryKeys } from "#/lib/query-client";
@@ -80,11 +84,51 @@ async function updateProfileSource(
 	);
 }
 
+async function fetchXRemarkStatus() {
+	return fetchJson(
+		"/api/xremark",
+		undefined,
+		xRemarkSyncStatusSchema,
+		"X Remark status unavailable",
+	);
+}
+
+async function importXRemarkBackup(file: File) {
+	if (file.size > 25 * 1024 * 1024) {
+		throw new Error(
+			"Backup is too large. Export Remarks, Tags, and Categories only.",
+		);
+	}
+
+	let backup: unknown;
+	try {
+		backup = JSON.parse(await file.text()) as unknown;
+	} catch {
+		throw new Error("This is not a valid JSON backup.");
+	}
+
+	return fetchJson(
+		"/api/xremark",
+		{
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(backup),
+		},
+		xRemarkSyncStatusSchema,
+		"X Remark import failed",
+	);
+}
+
 function SettingsRoute() {
 	const queryClient = useQueryClient();
+	const xRemarkFileRef = useRef<HTMLInputElement>(null);
 	const settingsQuery = useQuery({
 		queryKey: queryKeys.settings,
 		queryFn: fetchSettings,
+	});
+	const xRemarkQuery = useQuery({
+		queryKey: queryKeys.xRemark,
+		queryFn: fetchXRemarkStatus,
 	});
 	const settings = settingsQuery.data ?? null;
 	const mutation = useMutation({
@@ -94,10 +138,20 @@ function SettingsRoute() {
 			void queryClient.invalidateQueries({ queryKey: queryKeys.dataSources });
 		},
 	});
+	const xRemarkMutation = useMutation({
+		mutationFn: importXRemarkBackup,
+		onSuccess: (data) => {
+			queryClient.setQueryData(queryKeys.xRemark, data);
+			void queryClient.invalidateQueries({ queryKey: queryKeys.xRemark });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.timelines });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.conversations });
+		},
+	});
 	const currentSource = settings?.analysis.profileSource;
 	const pendingSource = mutation.variables;
 	const saving = mutation.isPending;
 	const twitter6551 = settings?.providers.twitter6551;
+	const xRemarkStatus = xRemarkMutation.data ?? xRemarkQuery.data;
 
 	return (
 		<section className="flex min-h-screen flex-col">
@@ -125,8 +179,62 @@ function SettingsRoute() {
 						: "Settings update failed"}
 				</div>
 			) : null}
+			{xRemarkMutation.error ? (
+				<div className={errorCopyClass}>
+					{xRemarkMutation.error instanceof Error
+						? xRemarkMutation.error.message
+						: "X Remark import failed"}
+				</div>
+			) : null}
 			{settings ? (
 				<div className="border-t border-[var(--line)]">
+					<section className="border-b border-[var(--line)] px-4 py-4">
+						<div className="flex flex-col gap-3 min-[760px]:flex-row min-[760px]:items-center min-[760px]:justify-between">
+							<div className="min-w-0">
+								<div className="flex items-center gap-2 text-[16px] font-bold text-[var(--ink)]">
+									<StickyNote className="size-4.5" strokeWidth={1.9} />
+									<span>X Remark Notes</span>
+								</div>
+								<p className="mt-1 text-[13px] text-[var(--ink-soft)]">
+									{xRemarkStatus?.imported
+										? `${String(xRemarkStatus.annotationCount)} notes imported · ${String(xRemarkStatus.matchedProfileCount)} matched to BirdClaw profiles`
+										: "Export Remarks, Tags, and Categories from X Remark, then import that JSON backup here."}
+								</p>
+								{xRemarkStatus?.importedAt ? (
+									<p className="mt-1 text-[12px] text-[var(--ink-soft)]">
+										Last import:{" "}
+										{new Date(xRemarkStatus.importedAt).toLocaleString()}
+									</p>
+								) : null}
+							</div>
+							<div className="shrink-0">
+								<input
+									ref={xRemarkFileRef}
+									accept="application/json,.json"
+									className="sr-only"
+									onChange={(event) => {
+										const file = event.target.files?.[0];
+										if (file) xRemarkMutation.mutate(file);
+										event.target.value = "";
+									}}
+									type="file"
+								/>
+								<button
+									className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1 text-[13px] font-bold text-[var(--ink)] transition-colors duration-150 hover:bg-[var(--bg-hover)] disabled:opacity-55"
+									disabled={xRemarkMutation.isPending}
+									onClick={() => xRemarkFileRef.current?.click()}
+									type="button"
+								>
+									<Upload className="size-4" strokeWidth={2} />
+									{xRemarkMutation.isPending
+										? "Importing"
+										: xRemarkStatus?.imported
+											? "Replace from backup"
+											: "Import backup"}
+								</button>
+							</div>
+						</div>
+					</section>
 					<section className="border-b border-[var(--line)] px-4 py-4">
 						<div className="flex flex-col gap-3 min-[760px]:flex-row min-[760px]:items-center min-[760px]:justify-between">
 							<div className="min-w-0">

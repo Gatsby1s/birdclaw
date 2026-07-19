@@ -32,7 +32,30 @@ export interface ProfileRecord {
 	entities?: Record<string, unknown>;
 	affiliations?: ProfileAffiliation[];
 	primaryAffiliation?: ProfileAffiliation;
+	xRemark?: XRemarkAnnotation;
 	createdAt: string;
+}
+
+export interface XRemarkAnnotation {
+	identifier: string;
+	handle: string;
+	displayName?: string;
+	remark: string;
+	description: string;
+	tags: string[];
+	category?: string;
+	sourceUpdatedAt?: string;
+}
+
+export interface XRemarkSyncStatus {
+	imported: boolean;
+	annotationCount: number;
+	matchedProfileCount: number;
+	backupId?: string;
+	backupTime?: string;
+	importedAt?: string;
+	sourceVersion?: number;
+	annotation?: XRemarkAnnotation | null;
 }
 
 export interface ProfileAffiliation {

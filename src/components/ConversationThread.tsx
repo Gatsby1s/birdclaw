@@ -14,6 +14,7 @@ import { SmartTimestamp } from "./SmartTimestamp";
 import { TweetArticleCard } from "./TweetArticleCard";
 import { TweetMediaGrid } from "./TweetMediaGrid";
 import { TweetRichText } from "./TweetRichText";
+import { XRemarkAnnotationInline } from "./XRemarkAnnotation";
 
 export function ConversationThread({
 	anchorId,
@@ -112,6 +113,9 @@ export function ConversationThread({
 										</span>
 									) : null}
 								</header>
+								{tweet.author.xRemark ? (
+									<XRemarkAnnotationInline annotation={tweet.author.xRemark} />
+								) : null}
 								<TweetRichText
 									className="mt-1 whitespace-pre-wrap break-words text-[14px] leading-[1.45] text-[var(--ink)] [overflow-wrap:anywhere]"
 									entities={tweet.entities}

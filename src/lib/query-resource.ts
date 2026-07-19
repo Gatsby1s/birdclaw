@@ -2,6 +2,7 @@ import { getConversationThread, listDmConversations } from "./dm-read-model";
 import { listTimelineItems } from "./timeline-read-model";
 import type { QueryResponse } from "./api-contracts";
 import type { DmQuery, TimelineQuery } from "./types";
+import { enrichTimelineItemsWithXRemark } from "./xremark";
 
 export type { QueryResponse } from "./api-contracts";
 
@@ -34,9 +35,11 @@ export function queryResource(
 
 	return {
 		resource,
-		items: listTimelineItems({
-			resource,
-			...timelineFilters,
-		}),
+		items: enrichTimelineItemsWithXRemark(
+			listTimelineItems({
+				resource,
+				...timelineFilters,
+			}),
+		),
 	};
 }

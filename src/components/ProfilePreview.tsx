@@ -21,6 +21,7 @@ import { safeHttpUrl } from "#/lib/url-safety";
 import { AvatarChip } from "./AvatarChip";
 import { useAvatarPreload } from "./AvatarPreload";
 import { useFloatingPreview } from "./FloatingPreview";
+import { XRemarkAnnotationInline } from "./XRemarkAnnotation";
 
 function ProfilePreviewBio({ profile }: { profile: ProfileRecord }) {
 	const segments = collectTweetSegmentsForText(
@@ -119,6 +120,9 @@ export function ProfilePreview({
 								</span>
 							</span>
 						</span>
+						{profile.xRemark ? (
+							<XRemarkAnnotationInline annotation={profile.xRemark} />
+						) : null}
 						{profile.bio ? <ProfilePreviewBio profile={profile} /> : null}
 						<span className={profilePreviewMetaClass}>
 							{formatCompactNumber(profile.followersCount)} followers

@@ -112,6 +112,21 @@ describe("profile route", () => {
 		];
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/xremark") {
+				return Response.json({
+					imported: true,
+					annotationCount: 1,
+					matchedProfileCount: 1,
+					annotation: {
+						identifier: "123",
+						handle: "steipete",
+						remark: "Local-first builder",
+						description: "Follow up about agent tooling",
+						tags: ["Founder"],
+						category: "People",
+					},
+				});
+			}
 			if (url.pathname === "/api/profile-hydrate") {
 				return new Response(
 					JSON.stringify({
@@ -159,6 +174,10 @@ describe("profile route", () => {
 		expect(screen.getByText("@steipete")).toBeInTheDocument();
 		expect(screen.getByText(/Futurist/)).toBeInTheDocument();
 		expect(screen.getByText(/Contact hello@openai\.com/)).toBeInTheDocument();
+		expect(await screen.findByText("Local-first builder")).toBeInTheDocument();
+		expect(
+			screen.getByText("Follow up about agent tooling"),
+		).toBeInTheDocument();
 		expect(screen.queryByRole("link", { name: "@openai" })).toBeNull();
 		expect(screen.queryByText(/t\.co\/LZwHTUFwPq/)).toBeNull();
 		expect(screen.queryByText(/t\.co\/sN2FFU8PVE/)).toBeNull();
@@ -210,9 +229,11 @@ describe("profile route", () => {
 			const calls = fetchMock.mock.calls as unknown as Array<
 				[RequestInfo | URL]
 			>;
-			const firstInput = calls[0]?.[0];
-			expect(firstInput).toBeDefined();
-			const url = new URL(String(firstInput), "http://localhost");
+			const analysisInput = calls.find(([input]) =>
+				String(input).includes("/api/profile-analysis"),
+			)?.[0];
+			expect(analysisInput).toBeDefined();
+			const url = new URL(String(analysisInput), "http://localhost");
 			expect(url.pathname).toBe("/api/profile-analysis");
 			expect(url.searchParams.get("handle")).toBe("steipete");
 		});
@@ -224,5 +245,35 @@ describe("profile route", () => {
 		expect(hydrateUrl.searchParams.get("handles")).toBe(
 			"openclaw,forbes,mit,microsoft,qantas",
 		);
+	});
+
+	it("shows a local X Remark note even when profile analysis fails", async () => {
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/xremark") {
+				return Response.json({
+					imported: true,
+					annotationCount: 1,
+					matchedProfileCount: 0,
+					annotation: {
+						identifier: "123",
+						handle: "steipete",
+						remark: "Available without AI",
+						description: "Local private note",
+						tags: [],
+					},
+				});
+			}
+			return new Response(
+				ndjsonBody([{ type: "error", error: "Provider unavailable" }]),
+			);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<ProfileRouteView handle="steipete" />);
+
+		expect(await screen.findByText("Available without AI")).toBeInTheDocument();
+		expect(screen.getByText("Local private note")).toBeInTheDocument();
+		expect(await screen.findByText("Provider unavailable")).toBeInTheDocument();
 	});
 });

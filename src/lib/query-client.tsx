@@ -15,6 +15,7 @@ export const queryKeys = {
 	inbox: ["inbox"] as const,
 	dataSources: ["data-sources"] as const,
 	settings: ["settings"] as const,
+	xRemark: ["xremark"] as const,
 	rateLimits: ["rate-limits"] as const,
 };
 

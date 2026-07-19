@@ -50,6 +50,7 @@ import { SmartTimestamp } from "./SmartTimestamp";
 import { TweetArticleCard } from "./TweetArticleCard";
 import { TweetMediaGrid } from "./TweetMediaGrid";
 import { TweetRichText } from "./TweetRichText";
+import { XRemarkAnnotationCard } from "./XRemarkAnnotation";
 
 function comparableUrl(value: string | null | undefined) {
 	if (!value) return null;
@@ -453,6 +454,13 @@ export function TimelineCard({
 						</span>
 					) : null}
 				</header>
+				{displayAuthor.xRemark ? (
+					<XRemarkAnnotationCard
+						annotation={displayAuthor.xRemark}
+						className="mb-2"
+						compact
+					/>
+				) : null}
 				<TweetPresentation
 					hiddenUrlRanges={hiddenMediaUrlRanges}
 					mediaViewerPermalink={openTweetUrl}

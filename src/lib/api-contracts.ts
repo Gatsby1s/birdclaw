@@ -14,6 +14,8 @@ import type {
 	TweetEntities,
 	TweetMediaItem,
 	UrlExpansionItem,
+	XRemarkAnnotation,
+	XRemarkSyncStatus,
 } from "./types";
 import type {
 	WebSyncJobSnapshot,
@@ -52,6 +54,28 @@ export const profileAffiliationSchema: z.ZodType<ProfileAffiliation> = z.object(
 	},
 );
 
+export const xRemarkAnnotationSchema: z.ZodType<XRemarkAnnotation> = z.object({
+	identifier: z.string(),
+	handle: z.string(),
+	displayName: z.string().optional(),
+	remark: z.string(),
+	description: z.string(),
+	tags: z.array(z.string()),
+	category: z.string().optional(),
+	sourceUpdatedAt: z.string().optional(),
+});
+
+export const xRemarkSyncStatusSchema: z.ZodType<XRemarkSyncStatus> = z.object({
+	imported: z.boolean(),
+	annotationCount: z.number(),
+	matchedProfileCount: z.number(),
+	backupId: z.string().optional(),
+	backupTime: z.string().optional(),
+	importedAt: z.string().optional(),
+	sourceVersion: z.number().optional(),
+	annotation: xRemarkAnnotationSchema.nullable().optional(),
+});
+
 export const profileRecordSchema = z.object({
 	id: z.string().default("profile_unknown"),
 	handle: z.string().default("unknown"),
@@ -67,6 +91,7 @@ export const profileRecordSchema = z.object({
 	entities: jsonRecordSchema.optional(),
 	affiliations: z.array(profileAffiliationSchema).optional(),
 	primaryAffiliation: profileAffiliationSchema.optional(),
+	xRemark: xRemarkAnnotationSchema.optional(),
 	createdAt: z.string().default(""),
 }) satisfies z.ZodType<ProfileRecord>;
 

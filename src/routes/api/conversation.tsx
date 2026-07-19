@@ -7,6 +7,7 @@ import {
 	sensitiveRequestErrorResponse,
 } from "#/lib/http-effect";
 import { getTweetConversation } from "#/lib/timeline-read-model";
+import { enrichEmbeddedTweetsWithXRemark } from "#/lib/xremark";
 
 function json(data: unknown, status = 200) {
 	return new Response(JSON.stringify(data), {
@@ -38,12 +39,14 @@ export const Route = createFileRoute("/api/conversation")({
 							return json({ ok: false, error: "Tweet not found" }, 404);
 						}
 
-						return json(
-							tweetConversationResponseSchema.parse({
-								ok: true,
-								...conversation,
-							}),
-						);
+						const response = tweetConversationResponseSchema.parse({
+							ok: true,
+							...conversation,
+						});
+						return json({
+							...response,
+							items: enrichEmbeddedTweetsWithXRemark(response.items),
+						});
 					}),
 				),
 		},

@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { AvatarChip } from "#/components/AvatarChip";
 import { TweetRichText } from "#/components/TweetRichText";
+import { XRemarkAnnotationCard } from "#/components/XRemarkAnnotation";
 import {
 	cleanProfileHandle,
 	formatProfileAnalysisCounts,
@@ -11,7 +13,10 @@ import {
 	useProfileAnalysisStream,
 } from "#/components/ProfileAnalysisStream";
 import { formatCompactNumber } from "#/lib/present";
+import { fetchJson } from "#/lib/api-client";
+import { xRemarkSyncStatusSchema } from "#/lib/api-contracts";
 import type { ProfileAnalysisContext } from "#/lib/profile-analysis";
+import { queryKeys } from "#/lib/query-client";
 import { profileDescriptionEntitiesFromXurl } from "#/lib/tweet-render";
 import type { ProfileRecord, TweetEntities } from "#/lib/types";
 
@@ -34,6 +39,18 @@ function stableHue(value: string) {
 function ProfilesHandleRoute() {
 	const { handle } = Route.useParams();
 	return <ProfileRouteView handle={handle} />;
+}
+
+async function fetchXRemarkForProfile(handle: string, identifier?: string) {
+	const url = new URL("/api/xremark", window.location.origin);
+	url.searchParams.set("handle", handle);
+	if (identifier) url.searchParams.set("identifier", identifier);
+	return fetchJson(
+		url,
+		undefined,
+		xRemarkSyncStatusSchema,
+		"X Remark note unavailable",
+	);
 }
 
 function profilesByHandleFromContext(context: ProfileAnalysisContext | null) {
@@ -111,6 +128,12 @@ export function ProfileRouteView({ handle }: { handle: string }) {
 	const autoRunHandleRef = useRef("");
 	const runAnalysisRef = useRef(analysis.run);
 	const profile = analysis.context?.profile;
+	const xRemarkHandle = profile?.handle ?? cleanHandle;
+	const xRemarkQuery = useQuery({
+		queryKey: [...queryKeys.xRemark, xRemarkHandle, profile?.id ?? ""],
+		queryFn: () => fetchXRemarkForProfile(xRemarkHandle, profile?.id),
+		enabled: Boolean(xRemarkHandle),
+	});
 	const displayName = profile?.displayName || `@${cleanHandle}`;
 	const bio = profile?.bio ?? "";
 	const profilesByHandle = profilesByHandleFromContext(analysis.context);
@@ -190,6 +213,13 @@ export function ProfileRouteView({ handle }: { handle: string }) {
 							<ProfileBioText
 								profile={profile}
 								profilesByHandle={profilesByHandle}
+							/>
+						) : null}
+
+						{xRemarkQuery.data?.annotation ? (
+							<XRemarkAnnotationCard
+								annotation={xRemarkQuery.data.annotation}
+								className="max-w-2xl"
 							/>
 						) : null}
 

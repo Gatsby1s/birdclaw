@@ -13,6 +13,7 @@ import { SmartTimestamp } from "./SmartTimestamp";
 import { TweetArticleCard } from "./TweetArticleCard";
 import { TweetMediaGrid } from "./TweetMediaGrid";
 import { TweetRichText } from "./TweetRichText";
+import { XRemarkAnnotationInline } from "./XRemarkAnnotation";
 
 export function EmbeddedTweetCard({
 	item,
@@ -41,6 +42,9 @@ export function EmbeddedTweetCard({
 					value={item.createdAt}
 				/>
 			</header>
+			{item.author.xRemark ? (
+				<XRemarkAnnotationInline annotation={item.author.xRemark} />
+			) : null}
 			<TweetRichText
 				className={embeddedCardCopyClass}
 				entities={item.entities}

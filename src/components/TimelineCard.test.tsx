@@ -149,6 +149,36 @@ describe("TimelineCard", () => {
 		expect(onReply).toHaveBeenCalledWith("tweet_1");
 	});
 
+	it("renders an imported X Remark annotation for the displayed author", () => {
+		render(
+			<TimelineCard
+				item={{
+					...item,
+					author: {
+						...item.author,
+						xRemark: {
+							identifier: "42",
+							handle: "sam",
+							remark: "Met at WWDC",
+							description: "Interested in local-first products",
+							tags: ["Founder", "AI"],
+							category: "People",
+						},
+					},
+				}}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		expect(screen.getByText("X Remark")).toBeInTheDocument();
+		expect(screen.getByText("Met at WWDC")).toBeInTheDocument();
+		expect(
+			screen.getByText("Interested in local-first products"),
+		).toBeInTheDocument();
+		expect(screen.getByText("#Founder")).toBeInTheDocument();
+		expect(screen.getByText("People")).toBeInTheDocument();
+	});
+
 	it("renders retweets as the original tweet with repost attribution", () => {
 		const fetchMock = vi.fn().mockResolvedValue({
 			ok: true,

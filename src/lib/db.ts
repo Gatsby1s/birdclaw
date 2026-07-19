@@ -721,6 +721,35 @@ function ensureDiscussionHistoryTable(db: Database) {
       on discussion_history(cache_key, deleted_at, created_at desc);
     create index if not exists idx_discussion_history_root
       on discussion_history(root_id, deleted_at, created_at asc);
+	`);
+}
+
+function ensureXRemarkTables(db: Database) {
+	db.exec(`
+    create table if not exists xremark_profile_notes (
+      identifier text primary key,
+      additional_name text not null,
+      given_name text not null default '',
+      remark text not null default '',
+      description text not null default '',
+      tags_json text not null default '[]',
+      category_name text,
+      source_created_at integer,
+      source_updated_at integer,
+      imported_at text not null
+    );
+
+    create table if not exists xremark_import_state (
+      id integer primary key check (id = 1),
+      backup_id text,
+      backup_time integer,
+      source_version integer not null,
+      imported_at text not null,
+      annotation_count integer not null default 0
+    );
+
+    create index if not exists idx_xremark_profile_notes_handle
+      on xremark_profile_notes(lower(additional_name));
   `);
 }
 
@@ -908,6 +937,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add discussion history",
 		up: (db) => {
 			ensureDiscussionHistoryTable(db);
+		},
+	},
+	{
+		version: 5,
+		name: "add X Remark profile notes",
+		up: (db) => {
+			ensureXRemarkTables(db);
 		},
 	},
 ];
