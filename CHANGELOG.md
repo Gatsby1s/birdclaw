@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.36 - 2026-07-19
+
+### Added
+
+- Import X Remark JSON backups from Settings and match profile annotations by stable X user ID, with a guarded handle fallback for notes whose profile has not reached BirdClaw yet.
+- Show private remarks, descriptions, categories, and tags across timelines, profile pages, previews, embedded posts, and conversation threads without adding them to AI analysis contexts or portable Git backups.
+
+### Fixed
+
+- Reject oversized or older X Remark snapshots before they can replace current local notes, and avoid attaching a note to a reused former handle when its stable profile is already known.
+
 ## 0.8.35 - 2026-07-19
 
 ### Fixed
