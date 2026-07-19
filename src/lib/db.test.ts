@@ -341,7 +341,23 @@ describe("database init", () => {
 		}) as number;
 		expect(busyTimeout).toBe(SQLITE_BUSY_TIMEOUT_MS);
 		expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
-		expect(db.pragma("user_version", { simple: true })).toBe(3);
+		const discussionHistoryColumnNames = db
+			.prepare("pragma table_info(discussion_history)")
+			.all() as Array<{ name: string }>;
+		expect(discussionHistoryColumnNames.map((column) => column.name)).toEqual(
+			expect.arrayContaining([
+				"id",
+				"root_id",
+				"cache_key",
+				"range",
+				"context_hash",
+				"discussion_json",
+				"tweets_json",
+				"dms_json",
+				"deleted_at",
+			]),
+		);
+		expect(db.pragma("user_version", { simple: true })).toBe(4);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -370,7 +386,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(3);
+		expect(db.pragma("user_version", { simple: true })).toBe(4);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

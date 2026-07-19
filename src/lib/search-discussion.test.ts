@@ -437,11 +437,18 @@ describe("search discussion", () => {
 		vi.stubGlobal("fetch", fetchMock);
 		const options = { query: "local-first", mode: "local" as const, limit: 20 };
 
-		await streamSearchDiscussion({ ...options, refresh: true });
+		const first = await streamSearchDiscussion({ ...options, refresh: true });
 		const cached = await streamSearchDiscussion(options);
 
 		expect(cached.cached).toBe(true);
 		expect(cached.discussion.title).toBe("Cached");
+		expect(first.historyId).toBeTruthy();
+		expect(cached.historyId).toBe(first.historyId);
+		expect(
+			getNativeDb()
+				.prepare("select count(*) as count from discussion_history")
+				.get(),
+		).toEqual({ count: 1 });
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 

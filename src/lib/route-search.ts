@@ -110,6 +110,7 @@ export function validateLinksSearch(
 }
 
 export interface DiscussRouteSearch {
+	run: string;
 	q: string;
 	question: string;
 	source: SearchDiscussionSource;
@@ -133,6 +134,7 @@ export function validateDiscussSearch(
 		stringValue(search.until),
 	);
 	return {
+		run: stringValue(search.run),
 		q: stringValue(search.q),
 		question: stringValue(search.question),
 		source: enumValue(

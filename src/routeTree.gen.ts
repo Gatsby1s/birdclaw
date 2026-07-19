@@ -38,6 +38,7 @@ import { Route as ApiNetworkMapRouteImport } from './routes/api/network-map'
 import { Route as ApiLinkPreviewRouteImport } from './routes/api/link-preview'
 import { Route as ApiLinkInsightsRouteImport } from './routes/api/link-insights'
 import { Route as ApiInboxRouteImport } from './routes/api/inbox'
+import { Route as ApiDiscussionHistoryRouteImport } from './routes/api/discussion-history'
 import { Route as ApiDataSourcesRouteImport } from './routes/api/data-sources'
 import { Route as ApiConversationRouteImport } from './routes/api/conversation'
 import { Route as ApiBlocksRouteImport } from './routes/api/blocks'
@@ -189,6 +190,11 @@ const ApiInboxRoute = ApiInboxRouteImport.update({
   path: '/api/inbox',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDiscussionHistoryRoute = ApiDiscussionHistoryRouteImport.update({
+  id: '/api/discussion-history',
+  path: '/api/discussion-history',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiDataSourcesRoute = ApiDataSourcesRouteImport.update({
   id: '/api/data-sources',
   path: '/api/data-sources',
@@ -236,6 +242,7 @@ export interface FileRoutesByFullPath {
   '/api/blocks': typeof ApiBlocksRoute
   '/api/conversation': typeof ApiConversationRoute
   '/api/data-sources': typeof ApiDataSourcesRoute
+  '/api/discussion-history': typeof ApiDiscussionHistoryRoute
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
@@ -272,6 +279,7 @@ export interface FileRoutesByTo {
   '/api/blocks': typeof ApiBlocksRoute
   '/api/conversation': typeof ApiConversationRoute
   '/api/data-sources': typeof ApiDataSourcesRoute
+  '/api/discussion-history': typeof ApiDiscussionHistoryRoute
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
@@ -309,6 +317,7 @@ export interface FileRoutesById {
   '/api/blocks': typeof ApiBlocksRoute
   '/api/conversation': typeof ApiConversationRoute
   '/api/data-sources': typeof ApiDataSourcesRoute
+  '/api/discussion-history': typeof ApiDiscussionHistoryRoute
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
@@ -347,6 +356,7 @@ export interface FileRouteTypes {
     | '/api/blocks'
     | '/api/conversation'
     | '/api/data-sources'
+    | '/api/discussion-history'
     | '/api/inbox'
     | '/api/link-insights'
     | '/api/link-preview'
@@ -383,6 +393,7 @@ export interface FileRouteTypes {
     | '/api/blocks'
     | '/api/conversation'
     | '/api/data-sources'
+    | '/api/discussion-history'
     | '/api/inbox'
     | '/api/link-insights'
     | '/api/link-preview'
@@ -419,6 +430,7 @@ export interface FileRouteTypes {
     | '/api/blocks'
     | '/api/conversation'
     | '/api/data-sources'
+    | '/api/discussion-history'
     | '/api/inbox'
     | '/api/link-insights'
     | '/api/link-preview'
@@ -456,6 +468,7 @@ export interface RootRouteChildren {
   ApiBlocksRoute: typeof ApiBlocksRoute
   ApiConversationRoute: typeof ApiConversationRoute
   ApiDataSourcesRoute: typeof ApiDataSourcesRoute
+  ApiDiscussionHistoryRoute: typeof ApiDiscussionHistoryRoute
   ApiInboxRoute: typeof ApiInboxRoute
   ApiLinkInsightsRoute: typeof ApiLinkInsightsRoute
   ApiLinkPreviewRoute: typeof ApiLinkPreviewRoute
@@ -677,6 +690,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiInboxRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/discussion-history': {
+      id: '/api/discussion-history'
+      path: '/api/discussion-history'
+      fullPath: '/api/discussion-history'
+      preLoaderRoute: typeof ApiDiscussionHistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/data-sources': {
       id: '/api/data-sources'
       path: '/api/data-sources'
@@ -736,6 +756,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiBlocksRoute: ApiBlocksRoute,
   ApiConversationRoute: ApiConversationRoute,
   ApiDataSourcesRoute: ApiDataSourcesRoute,
+  ApiDiscussionHistoryRoute: ApiDiscussionHistoryRoute,
   ApiInboxRoute: ApiInboxRoute,
   ApiLinkInsightsRoute: ApiLinkInsightsRoute,
   ApiLinkPreviewRoute: ApiLinkPreviewRoute,

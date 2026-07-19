@@ -130,6 +130,30 @@ describe("root route", () => {
 		expect(appNavProps).toEqual([{ compact: true }]);
 	});
 
+	it("opens the Discuss workspace without collapsing the primary navigation", () => {
+		routerState.path = "/discuss";
+		appNavProps.length = 0;
+		const routeOptions = Route.options as unknown as {
+			shellComponent: ({ children }: { children: ReactNode }) => ReactNode;
+		};
+		const Shell = routeOptions.shellComponent as ({
+			children,
+		}: {
+			children: ReactNode;
+		}) => ReactNode;
+
+		const markup = renderToStaticMarkup(
+			<Shell>
+				<main>discussion workspace</main>
+			</Shell>,
+		);
+
+		expect(markup).toContain("max-w-[1280px]");
+		expect(markup).not.toContain("max-w-[680px]");
+		expect(markup).toContain("birdclaw nav full");
+		expect(appNavProps).toEqual([{ compact: false }]);
+	});
+
 	it("reloads an open local tab when the served version changes", async () => {
 		vi.useFakeTimers();
 		const fetchManifest = vi

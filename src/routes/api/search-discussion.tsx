@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { searchDiscussionStreamEventSchema } from "#/lib/client-stream-contracts";
+import type { DiscussDateRange } from "#/lib/discuss-date-range";
 import { maybeAutoUpdateBackupEffect } from "#/lib/backup";
 import {
 	parseBoundedInteger,
@@ -50,12 +51,26 @@ function parseMode(value: string | null): TweetSearchMode {
 	return "auto";
 }
 
+function parseRange(value: string | null): DiscussDateRange {
+	if (
+		value === "today" ||
+		value === "24h" ||
+		value === "yesterday" ||
+		value === "week" ||
+		value === "custom"
+	) {
+		return value;
+	}
+	return "all";
+}
+
 function parseOptions(url: URL): SearchDiscussionOptions {
 	return {
 		query: url.searchParams.get("query") ?? "",
 		account: url.searchParams.get("account") ?? undefined,
 		source: parseSource(url.searchParams.get("source")),
 		mode: parseMode(url.searchParams.get("mode")),
+		range: parseRange(url.searchParams.get("range")),
 		includeDms: parseBoolean(url.searchParams.get("includeDms")),
 		since: url.searchParams.get("since") ?? undefined,
 		until: url.searchParams.get("until") ?? undefined,
@@ -70,6 +85,8 @@ function parseOptions(url: URL): SearchDiscussionOptions {
 		maxPages: parseBoundedInteger(url.searchParams.get("maxPages"), {
 			max: MAX_DISCUSSION_SEARCH_PAGES,
 		}),
+		parentHistoryId:
+			url.searchParams.get("parentHistoryId")?.trim() || undefined,
 	};
 }
 

@@ -1,4 +1,5 @@
 import {
+	act,
 	cleanup,
 	fireEvent,
 	render,
@@ -6,6 +7,7 @@ import {
 	waitFor,
 	within,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateDiscussSearch } from "#/lib/route-search";
 import type { TweetMediaItem } from "#/lib/types";
@@ -91,6 +93,35 @@ function discussionResult(markdown: string) {
 	};
 }
 
+function historyMetadata(
+	id: string,
+	overrides: Partial<ReturnType<typeof historyMetadataBase>> = {},
+) {
+	return { ...historyMetadataBase(id), ...overrides };
+}
+
+function historyMetadataBase(id: string) {
+	return {
+		id,
+		title: "Storage systems",
+		summary: "A saved discussion about durable local storage.",
+		query: "storage",
+		question: "What lasts?",
+		source: "all",
+		mode: "bird",
+		range: "week" as const,
+		includeDms: true,
+		themeTitles: ["Durability"],
+		sourceCount: 1,
+		dmCount: 0,
+		createdAt: "2026-07-18T08:20:00.000Z",
+		updatedAt: "2026-07-18T08:20:00.000Z",
+		parentId: null,
+		pinned: false,
+		versionCount: 1,
+	};
+}
+
 describe("discuss route", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
@@ -171,6 +202,7 @@ describe("discuss route", () => {
 		expect(urls[0]?.searchParams.get("source")).toBe("all");
 		expect(urls[0]?.searchParams.get("mode")).toBe("bird");
 		expect(urls[0]?.searchParams.get("includeDms")).toBe("true");
+		expect(urls[0]?.searchParams.get("range")).toBe("yesterday");
 		expect(urls[0]?.searchParams.get("question")).toBe("Useful takeaways");
 		expect(urls[0]?.searchParams.get("since")).toBeTruthy();
 		expect(urls[0]?.searchParams.get("until")).toBeTruthy();
@@ -183,7 +215,7 @@ describe("discuss route", () => {
 		expect(urls[0]?.searchParams.get("maxPages")).toBe("200");
 		expect(urls[0]?.searchParams.has("refresh")).toBe(false);
 
-		fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+		fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
 		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 		expect(urls[1]?.searchParams.get("refresh")).toBe("true");
 		expect(urls[1]?.searchParams.get("since")).toBe(
@@ -200,6 +232,347 @@ describe("discuss route", () => {
 		expect(urls[2]?.searchParams.has("refresh")).toBe(false);
 		expect(urls[2]?.searchParams.has("since")).toBe(false);
 		expect(urls[2]?.searchParams.has("until")).toBe(false);
+	});
+
+	it("restores a saved discussion without spending tokens and regenerates as a version", async () => {
+		const restoredMarkdown = "# Storage systems\n\nSaved result.";
+		const restoredResult = {
+			...discussionResult(restoredMarkdown),
+			historyId: "history_1",
+			context: {
+				...discussionResult(restoredMarkdown).context,
+				query: "storage",
+				question: "What lasts?",
+				source: "all" as const,
+				includeDms: true,
+			},
+			discussion: {
+				...discussionResult(restoredMarkdown).discussion,
+				title: "Storage systems",
+				summary: "A saved discussion about durable local storage.",
+			},
+		};
+		const requestedUrls: URL[] = [];
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input), window.location.origin);
+			requestedUrls.push(url);
+			if (url.pathname === "/api/discussion-history") {
+				if (url.searchParams.has("id")) {
+					return Response.json({
+						item: {
+							metadata: historyMetadata("history_1"),
+							result: restoredResult,
+						},
+					});
+				}
+				return Response.json({ items: [historyMetadata("history_1")] });
+			}
+			const nextResult = {
+				...restoredResult,
+				historyId: "history_2",
+				updatedAt: "2026-07-19T08:20:00.000Z",
+			};
+			return ndjsonResponse([
+				{ type: "start", context: nextResult.context, cached: false },
+				{ type: "delta", delta: restoredMarkdown },
+				{ type: "done", result: nextResult },
+			]);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		const onSearchChange = vi.fn();
+		function ControlledDiscuss() {
+			const [searchState, setSearchState] = useState(() =>
+				validateDiscussSearch({ run: "history_1" }),
+			);
+			return (
+				<DiscussRoute
+					searchState={searchState}
+					onSearchChange={(next, options) => {
+						onSearchChange(next, options);
+						setSearchState(next);
+					}}
+				/>
+			);
+		}
+
+		render(<ControlledDiscuss />);
+
+		expect(
+			await screen.findByText("Restored from history · 0 token"),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Storage systems", level: 1 }),
+		).toBeInTheDocument();
+		expect(screen.getByPlaceholderText("Keywords")).toHaveValue("storage");
+		expect(screen.getByPlaceholderText("Optional question")).toHaveValue(
+			"What lasts?",
+		);
+		expect(screen.getByLabelText("Source")).toHaveValue("all");
+		expect(screen.getByLabelText("Mode")).toHaveValue("bird");
+		expect(screen.getByLabelText("DMs")).toBeChecked();
+		expect(
+			requestedUrls.filter((url) => url.pathname === "/api/search-discussion"),
+		).toHaveLength(0);
+
+		fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+		await waitFor(() =>
+			expect(
+				requestedUrls.filter(
+					(url) => url.pathname === "/api/search-discussion",
+				),
+			).toHaveLength(1),
+		);
+		const regenerateUrl = requestedUrls.find(
+			(url) => url.pathname === "/api/search-discussion",
+		);
+		expect(regenerateUrl?.searchParams.get("refresh")).toBe("true");
+		expect(regenerateUrl?.searchParams.get("parentHistoryId")).toBe(
+			"history_1",
+		);
+		expect(regenerateUrl?.searchParams.get("range")).toBe("week");
+		await waitFor(() =>
+			expect(onSearchChange).toHaveBeenCalledWith(
+				expect.objectContaining({ run: "history_2" }),
+				{ replace: true },
+			),
+		);
+	});
+
+	it("opens history as a dismissible drawer below the desktop breakpoint", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				Response.json({ items: [historyMetadata("history_1")] }),
+			),
+		);
+		render(
+			<DiscussRoute
+				searchState={validateDiscussSearch({})}
+				onSearchChange={() => undefined}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "History" }));
+		expect(
+			screen.getByRole("dialog", { name: "Discussion history" }),
+		).toBeInTheDocument();
+		fireEvent.keyDown(window, { key: "Escape" });
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("dialog", { name: "Discussion history" }),
+			).toBeNull(),
+		);
+	});
+
+	it("switches between saved discussions without the completed result forcing the old URL back", async () => {
+		const items = [
+			historyMetadata("history_1"),
+			historyMetadata("history_other", {
+				title: "Other topic",
+				query: "other",
+				summary: "Another saved result.",
+			}),
+		];
+		const searchRequests: URL[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input), window.location.origin);
+				if (url.pathname === "/api/search-discussion") {
+					searchRequests.push(url);
+				}
+				if (!url.searchParams.has("id")) return Response.json({ items });
+				const id = url.searchParams.get("id") ?? "history_1";
+				const metadata =
+					items.find((item) => item.id === id) ?? historyMetadata(id);
+				const markdown = `# ${metadata.title}\n\n${metadata.summary}`;
+				return Response.json({
+					item: {
+						metadata,
+						result: {
+							...discussionResult(markdown),
+							historyId: id,
+							discussion: {
+								...discussionResult(markdown).discussion,
+								title: metadata.title,
+								summary: metadata.summary,
+							},
+							context: {
+								...discussionResult(markdown).context,
+								query: metadata.query,
+							},
+						},
+					},
+				});
+			}),
+		);
+		const onSearchChange = vi.fn();
+		function ControlledHistory() {
+			const [searchState, setSearchState] = useState(() =>
+				validateDiscussSearch({ run: "history_1" }),
+			);
+			return (
+				<DiscussRoute
+					searchState={searchState}
+					onSearchChange={(next, options) => {
+						onSearchChange(next, options);
+						setSearchState(next);
+					}}
+				/>
+			);
+		}
+
+		render(<ControlledHistory />);
+		await screen.findByText("Restored from history · 0 token");
+		fireEvent.click(
+			await screen.findByRole("heading", { name: "Other topic", level: 3 }),
+		);
+
+		expect(
+			await screen.findByRole("heading", { name: "Other topic", level: 1 }),
+		).toBeInTheDocument();
+		expect(searchRequests).toHaveLength(0);
+		expect(onSearchChange).toHaveBeenCalledWith(
+			expect.objectContaining({ run: "history_other" }),
+			undefined,
+		);
+	});
+
+	it("aborts an in-flight generation before restoring a selected history item", async () => {
+		const metadata = historyMetadata("history_saved", {
+			title: "Saved while streaming",
+			query: "saved",
+		});
+		const savedMarkdown = "# Saved while streaming\n\nRecovered locally.";
+		const savedResult = {
+			...discussionResult(savedMarkdown),
+			historyId: metadata.id,
+			discussion: {
+				...discussionResult(savedMarkdown).discussion,
+				title: metadata.title,
+			},
+		};
+		let pendingSearch:
+			| {
+					signal: AbortSignal;
+					resolve: (response: Response) => void;
+			  }
+			| undefined;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), window.location.origin);
+				if (url.pathname === "/api/search-discussion") {
+					return new Promise<Response>((resolve) => {
+						pendingSearch = {
+							signal: init?.signal as AbortSignal,
+							resolve,
+						};
+					});
+				}
+				if (url.searchParams.has("id")) {
+					return Promise.resolve(
+						Response.json({
+							item: { metadata, result: savedResult },
+						}),
+					);
+				}
+				return Promise.resolve(Response.json({ items: [metadata] }));
+			}),
+		);
+		function ControlledStreamingHistory() {
+			const [searchState, setSearchState] = useState(() =>
+				validateDiscussSearch({}),
+			);
+			return (
+				<DiscussRoute
+					searchState={searchState}
+					onSearchChange={(next) => setSearchState(next)}
+				/>
+			);
+		}
+
+		render(<ControlledStreamingHistory />);
+		await screen.findByRole("heading", {
+			name: "Saved while streaming",
+			level: 3,
+		});
+		fireEvent.change(screen.getByPlaceholderText("Keywords"), {
+			target: { value: "new generation" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+		await waitFor(() => expect(pendingSearch).toBeDefined());
+
+		fireEvent.click(
+			screen.getByRole("heading", {
+				name: "Saved while streaming",
+				level: 3,
+			}),
+		);
+		expect(pendingSearch?.signal.aborted).toBe(true);
+		expect(
+			await screen.findByRole("heading", {
+				name: "Saved while streaming",
+				level: 1,
+			}),
+		).toBeInTheDocument();
+		expect(
+			screen.getByText("Restored from history · 0 token"),
+		).toBeInTheDocument();
+
+		await act(async () => {
+			pendingSearch?.resolve(
+				ndjsonResponse([
+					{
+						type: "done",
+						result: {
+							...discussionResult("# Stale result"),
+							historyId: "history_stale",
+						},
+					},
+				]),
+			);
+		});
+		expect(
+			screen.queryByRole("heading", { name: "Stale result", level: 1 }),
+		).toBeNull();
+	});
+
+	it("clears the restore loading state when editing exits a pending history URL", async () => {
+		const metadata = historyMetadata("history_pending");
+		let detailSignal: AbortSignal | undefined;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), window.location.origin);
+				if (url.searchParams.has("id")) {
+					detailSignal = init?.signal as AbortSignal;
+					return new Promise<Response>(() => undefined);
+				}
+				return Promise.resolve(Response.json({ items: [metadata] }));
+			}),
+		);
+		function ControlledPendingHistory() {
+			const [searchState, setSearchState] = useState(() =>
+				validateDiscussSearch({ run: metadata.id }),
+			);
+			return (
+				<DiscussRoute
+					searchState={searchState}
+					onSearchChange={(next) => setSearchState(next)}
+				/>
+			);
+		}
+
+		render(<ControlledPendingHistory />);
+		await screen.findByText("Restoring saved discussion");
+		fireEvent.change(screen.getByPlaceholderText("Keywords"), {
+			target: { value: "edited query" },
+		});
+
+		await waitFor(() => expect(detailSignal?.aborted).toBe(true));
+		expect(screen.queryByText("Restoring saved discussion")).toBeNull();
+		expect(screen.getByText("Ready")).toBeInTheDocument();
 	});
 
 	it("exports a completed discussion through the browser PDF flow", async () => {
@@ -328,7 +701,9 @@ describe("discuss route", () => {
 				expect(
 					screen.getByRole("button", { name: "导出完整 PDF" }),
 				).toBeDisabled();
-				expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+				expect(
+					screen.getByRole("button", { name: "Regenerate" }),
+				).toBeDisabled();
 				expect(screen.getByRole("button", { name: "Discuss" })).toBeDisabled();
 			} finally {
 				window.dispatchEvent(new Event("afterprint"));
@@ -471,7 +846,7 @@ describe("discuss route", () => {
 			new Date(untilLocal).toISOString(),
 		);
 
-		fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+		fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
 		await waitFor(() => expect(urls).toHaveLength(2));
 		expect(urls[1]?.searchParams.get("since")).toBe(
 			urls[0]?.searchParams.get("since"),

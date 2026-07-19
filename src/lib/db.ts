@@ -217,6 +217,40 @@ const BASE_SCHEMA_SQL = `
     updated_at text not null
   );
 
+  create table if not exists discussion_history (
+    id text primary key,
+    root_id text not null,
+    parent_id text,
+    cache_key text not null,
+    title text not null,
+    summary text not null,
+    query text not null,
+    question text,
+    account text,
+    source text not null,
+    mode text not null,
+    range text not null default 'all',
+    since text,
+    until text,
+    include_dms integer not null default 0,
+    originals_only integer not null default 0,
+    hide_low_quality integer not null default 0,
+    model text not null,
+    reasoning_effort text not null,
+    service_tier text not null,
+    context_hash text not null,
+    counts_json text not null,
+    discussion_json text not null,
+    markdown text not null,
+    tweets_json text not null default '[]',
+    dms_json text not null default '[]',
+    live_search_json text,
+    created_at text not null,
+    updated_at text not null,
+    pinned_at text,
+    deleted_at text
+  );
+
   create table if not exists url_expansions (
     short_url text primary key,
     expanded_url text not null,
@@ -353,6 +387,9 @@ const INDEX_SQL = `
   create index if not exists idx_mutes_account_created on mutes(account_id, created_at desc);
   create index if not exists idx_ai_scores_updated on ai_scores(updated_at desc);
   create index if not exists idx_sync_cache_updated on sync_cache(updated_at desc);
+  create index if not exists idx_discussion_history_list on discussion_history(deleted_at, pinned_at desc, created_at desc);
+  create index if not exists idx_discussion_history_cache on discussion_history(cache_key, deleted_at, created_at desc);
+  create index if not exists idx_discussion_history_root on discussion_history(root_id, deleted_at, created_at asc);
   create index if not exists idx_url_expansions_expanded on url_expansions(expanded_url);
   create index if not exists idx_url_expansions_tweet on url_expansions(expanded_tweet_id);
   create index if not exists idx_url_expansions_handle on url_expansions(expanded_handle);
@@ -642,6 +679,51 @@ function ensureFollowGraphTables(db: Database) {
 	`);
 }
 
+function ensureDiscussionHistoryTable(db: Database) {
+	db.exec(`
+    create table if not exists discussion_history (
+      id text primary key,
+      root_id text not null,
+      parent_id text,
+      cache_key text not null,
+      title text not null,
+      summary text not null,
+      query text not null,
+      question text,
+      account text,
+      source text not null,
+      mode text not null,
+      range text not null default 'all',
+      since text,
+      until text,
+      include_dms integer not null default 0,
+      originals_only integer not null default 0,
+      hide_low_quality integer not null default 0,
+      model text not null,
+      reasoning_effort text not null,
+      service_tier text not null,
+      context_hash text not null,
+      counts_json text not null,
+      discussion_json text not null,
+      markdown text not null,
+      tweets_json text not null default '[]',
+      dms_json text not null default '[]',
+      live_search_json text,
+      created_at text not null,
+      updated_at text not null,
+      pinned_at text,
+      deleted_at text
+    );
+
+    create index if not exists idx_discussion_history_list
+      on discussion_history(deleted_at, pinned_at desc, created_at desc);
+    create index if not exists idx_discussion_history_cache
+      on discussion_history(cache_key, deleted_at, created_at desc);
+    create index if not exists idx_discussion_history_root
+      on discussion_history(root_id, deleted_at, created_at asc);
+  `);
+}
+
 function backfillTweetCollections(db: Database) {
 	const missingKinds = (
 		[
@@ -820,6 +902,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		version: 3,
 		name: "normalize tweet created timestamps",
 		up: normalizeStoredTweetTimestamps,
+	},
+	{
+		version: 4,
+		name: "add discussion history",
+		up: (db) => {
+			ensureDiscussionHistoryTable(db);
+		},
 	},
 ];
 

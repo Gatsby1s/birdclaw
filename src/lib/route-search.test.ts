@@ -25,9 +25,13 @@ describe("route search schemas", () => {
 			range: "week",
 		});
 		expect(validateDiscussSearch({ mode: "bad", range: "bad" })).toMatchObject({
+			run: "",
 			mode: "xurl",
 			range: "all",
 		});
+		expect(validateDiscussSearch({ run: "discussion_123" }).run).toBe(
+			"discussion_123",
+		);
 		expect(validateTodaySearch({ period: "bad" }).period).toBe("today");
 		expect(validateNetworkMapSearch({ type: "bad" }).type).toBe("all");
 	});

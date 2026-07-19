@@ -96,6 +96,7 @@ export class ImportRepository {
 
 	clearBackupImport() {
 		this.db.exec(`
+	  delete from discussion_history;
       delete from follow_events;
       delete from follow_edges;
       delete from follow_snapshot_members;
