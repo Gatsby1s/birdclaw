@@ -1,7 +1,7 @@
-import { X } from "lucide-react";
 import { useState } from "react";
 import type { TweetMediaItem } from "#/lib/types";
 import { cx, tweetMediaGridClass, tweetMediaTileClass } from "#/lib/ui";
+import { TweetMediaViewer } from "./TweetMediaViewer";
 
 export function TweetMediaGrid({ items }: { items: TweetMediaItem[] }) {
 	const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -10,12 +10,6 @@ export function TweetMediaGrid({ items }: { items: TweetMediaItem[] }) {
 	}
 
 	const visibleItems = items.slice(0, 4);
-	const selectedItem =
-		selectedIndex === null ? null : (visibleItems[selectedIndex] ?? null);
-	const selectedVideoUrl =
-		selectedItem?.type === "video" || selectedItem?.type === "gif"
-			? (selectedItem.variants?.[0]?.url ?? playableVideoUrl(selectedItem.url))
-			: null;
 	const singleImage =
 		visibleItems.length === 1 && visibleItems[0]?.type === "image"
 			? visibleItems[0]
@@ -36,6 +30,7 @@ export function TweetMediaGrid({ items }: { items: TweetMediaItem[] }) {
 						event.stopPropagation();
 						setSelectedIndex(0);
 					}}
+					onFocus={(event) => event.stopPropagation()}
 					style={singleImageStyle(singleImage)}
 					type="button"
 				>
@@ -64,6 +59,7 @@ export function TweetMediaGrid({ items }: { items: TweetMediaItem[] }) {
 								event.stopPropagation();
 								setSelectedIndex(index);
 							}}
+							onFocus={(event) => event.stopPropagation()}
 							style={
 								visibleItems.length === 1 && item.width && item.height
 									? {
@@ -93,69 +89,12 @@ export function TweetMediaGrid({ items }: { items: TweetMediaItem[] }) {
 					))}
 				</div>
 			)}
-			{selectedItem ? (
-				<div
-					aria-modal="true"
-					className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
-					onClick={(event) => {
-						event.stopPropagation();
-						setSelectedIndex(null);
-					}}
-					role="dialog"
-				>
-					<button
-						aria-label="Close media viewer"
-						className="absolute right-4 top-4 grid size-10 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
-						onClick={(event) => {
-							event.stopPropagation();
-							setSelectedIndex(null);
-						}}
-						type="button"
-					>
-						<X className="size-5" strokeWidth={1.8} />
-					</button>
-					{selectedItem.type === "image" ? (
-						<img
-							alt={selectedItem.altText ?? "Tweet media"}
-							className="max-h-[92vh] max-w-[92vw] object-contain"
-							onClick={(event) => event.stopPropagation()}
-							src={selectedItem.url}
-						/>
-					) : selectedVideoUrl ? (
-						<video
-							autoPlay={selectedItem.type === "gif"}
-							className="max-h-[92vh] max-w-[92vw]"
-							controls
-							loop={selectedItem.type === "gif"}
-							muted={selectedItem.type === "gif"}
-							onClick={(event) => event.stopPropagation()}
-							playsInline
-							poster={selectedItem.thumbnailUrl}
-							src={selectedVideoUrl}
-						/>
-					) : (
-						<div
-							className="grid min-h-64 min-w-80 place-items-center gap-3 rounded-2xl border border-white/20 bg-black p-6 text-white"
-							onClick={(event) => event.stopPropagation()}
-						>
-							<span>
-								{selectedItem.type === "video"
-									? "Video"
-									: selectedItem.type === "gif"
-										? "GIF"
-										: "Media"}
-							</span>
-							<a
-								className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/20"
-								href={selectedItem.url}
-								rel="noreferrer"
-								target="_blank"
-							>
-								Open media
-							</a>
-						</div>
-					)}
-				</div>
+			{selectedIndex !== null ? (
+				<TweetMediaViewer
+					initialIndex={selectedIndex}
+					items={visibleItems}
+					onClose={() => setSelectedIndex(null)}
+				/>
 			) : null}
 		</>
 	);
@@ -172,14 +111,4 @@ function singleImageStyle(item: TweetMediaItem) {
 		aspectRatio: `${String(item.width)} / ${String(item.height)}`,
 		width: `${String(width)}px`,
 	};
-}
-
-function playableVideoUrl(url: string) {
-	try {
-		const parsed = new URL(url);
-		if (parsed.hostname === "video.twimg.com") return url;
-		return /\.(?:mp4|m3u8)(?:$|[?#])/i.test(parsed.pathname) ? url : undefined;
-	} catch {
-		return /\.(?:mp4|m3u8)(?:$|[?#])/i.test(url) ? url : undefined;
-	}
 }
