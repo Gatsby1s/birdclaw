@@ -46,7 +46,7 @@ export function EmbeddedTweetCard({
 				entities={item.entities}
 				text={item.text}
 			/>
-			<TweetMediaGrid items={item.media} />
+			<TweetMediaGrid items={item.media} tweet={item} />
 			{item.entities.article ? (
 				<TweetArticleCard article={item.entities.article} />
 			) : null}

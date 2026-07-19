@@ -246,12 +246,14 @@ function TweetPresentation({
 	visibleUrlCards,
 	replyToTweet,
 	quotedTweet,
+	mediaViewerPermalink,
 }: {
 	tweet: TimelineItem | EmbeddedTweet;
 	hiddenUrlRanges: Array<{ start: number; end: number }>;
 	visibleUrlCards: TweetUrlEntity[];
 	replyToTweet?: EmbeddedTweet | null;
 	quotedTweet?: EmbeddedTweet | null;
+	mediaViewerPermalink?: string | null;
 }) {
 	return (
 		<>
@@ -261,7 +263,14 @@ function TweetPresentation({
 				hiddenUrlRanges={hiddenUrlRanges}
 				text={tweet.text}
 			/>
-			<TweetMediaGrid items={tweet.media} />
+			<TweetMediaGrid
+				items={tweet.media}
+				tweet={{
+					...tweet,
+					hiddenUrlRanges,
+					permalink: mediaViewerPermalink,
+				}}
+			/>
 			{tweet.entities.article ? (
 				<TweetArticleCard article={tweet.entities.article} />
 			) : null}
@@ -446,6 +455,7 @@ export function TimelineCard({
 				</header>
 				<TweetPresentation
 					hiddenUrlRanges={hiddenMediaUrlRanges}
+					mediaViewerPermalink={openTweetUrl}
 					quotedTweet={item.retweetedTweet ? null : item.quotedTweet}
 					replyToTweet={item.retweetedTweet ? null : item.replyToTweet}
 					tweet={displayTweet}

@@ -117,7 +117,7 @@ export function ConversationThread({
 									entities={tweet.entities}
 									text={tweet.text}
 								/>
-								<TweetMediaGrid items={tweet.media} />
+								<TweetMediaGrid items={tweet.media} tweet={tweet} />
 								{tweet.entities.article ? (
 									<TweetArticleCard article={tweet.entities.article} />
 								) : null}
