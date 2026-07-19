@@ -16,6 +16,7 @@ export const queryKeys = {
 	dataSources: ["data-sources"] as const,
 	settings: ["settings"] as const,
 	xRemark: ["xremark"] as const,
+	xRemarkLive: ["xremark-live"] as const,
 	rateLimits: ["rate-limits"] as const,
 };
 

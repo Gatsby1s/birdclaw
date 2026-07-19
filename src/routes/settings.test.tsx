@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { queryKeys } from "#/lib/query-client";
 import { renderWithQueryClient as render } from "#/test/render";
 import { Route } from "./settings";
 
@@ -34,6 +35,15 @@ describe("settings route", () => {
 						imported: false,
 						annotationCount: 0,
 						matchedProfileCount: 0,
+					});
+				}
+				if (url.pathname === "/api/integrations/xremark") {
+					return Response.json({
+						paired: false,
+						connected: false,
+						extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
+						endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+						lastSequence: 0,
 					});
 				}
 				return Response.json(
@@ -80,6 +90,15 @@ describe("settings route", () => {
 				const url = new URL(String(input), "http://localhost");
 				if (url.pathname === "/api/settings") {
 					return Response.json(settingsPayload("local"));
+				}
+				if (url.pathname === "/api/integrations/xremark") {
+					return Response.json({
+						paired: false,
+						connected: false,
+						extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
+						endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+						lastSequence: 0,
+					});
 				}
 				return Response.json(
 					init?.method === "POST"
@@ -133,5 +152,64 @@ describe("settings route", () => {
 				"2 notes imported · 1 matched to BirdClaw profiles",
 			),
 		).toBeInTheDocument();
+	});
+
+	it("creates a live-sync pairing token without removing manual import", async () => {
+		let liveStatusReads = 0;
+		const fetchMock = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/settings") {
+					return Response.json(settingsPayload("local"));
+				}
+				if (url.pathname === "/api/xremark") {
+					return Response.json({
+						imported: false,
+						annotationCount: 0,
+						matchedProfileCount: 0,
+					});
+				}
+				if (url.pathname === "/api/integrations/xremark") {
+					if (init?.method === "POST") {
+						return Response.json({
+							paired: true,
+							connected: false,
+							extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
+							endpoint:
+								"http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+							lastSequence: 0,
+							token: "a".repeat(43),
+						});
+					}
+					liveStatusReads += 1;
+					return Response.json({
+						paired: liveStatusReads > 1,
+						connected: liveStatusReads > 1,
+						extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
+						endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+						lastSequence: liveStatusReads > 1 ? 1 : 0,
+						...(liveStatusReads > 1
+							? { lastSeenAt: "2026-07-19T12:00:00.000Z" }
+							: {}),
+					});
+				}
+				throw new Error(`Unexpected URL: ${url.pathname}`);
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const { queryClient } = render(<SettingsRoute />);
+		expect(await screen.findByText("X Remark Live Sync")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Import backup" })).toBeVisible();
+		fireEvent.click(screen.getByRole("button", { name: "Pair bridge" }));
+
+		expect(await screen.findByText("a".repeat(43))).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Disconnect" })).toBeVisible();
+		await queryClient.refetchQueries({ queryKey: queryKeys.xRemarkLive });
+		expect(
+			await screen.findByText(
+				"Connected · saved and deleted notes appear automatically",
+			),
+		).toBeVisible();
 	});
 });

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>BirdClaw · X Remark bridge</title>
+		<link rel="stylesheet" href="birdclaw-options.css" />
+	</head>
+	<body>
+		<main>
+			<header>
+				<p class="eyebrow">BirdClaw integration</p>
+				<h1>X Remark bridge</h1>
+				<p class="lede">
+					Pair this local bridge with BirdClaw. Notes remain in X Remark and are
+					sent only to BirdClaw on this Mac.
+				</p>
+			</header>
+
+			<section aria-labelledby="pairing-heading">
+				<h2 id="pairing-heading">Pairing</h2>
+				<form id="pairing-form">
+					<label for="token">Pairing token</label>
+					<div class="row">
+						<input
+							id="token"
+							name="token"
+							type="password"
+							autocomplete="off"
+							spellcheck="false"
+							placeholder="Paste the token from BirdClaw"
+							required
+						/>
+						<button type="submit">Save &amp; sync</button>
+					</div>
+					<p class="hint">The saved token is never displayed again.</p>
+				</form>
+			</section>
+
+			<section aria-labelledby="status-heading">
+				<div class="section-title">
+					<h2 id="status-heading">Sync status</h2>
+					<button id="sync-now" class="secondary" type="button">
+						Sync now
+					</button>
+				</div>
+				<dl>
+					<div>
+						<dt>Pairing</dt>
+						<dd id="pairing-status">Checking…</dd>
+					</div>
+					<div>
+						<dt>State</dt>
+						<dd id="sync-state">Checking…</dd>
+					</div>
+					<div>
+						<dt>Sequence</dt>
+						<dd id="sequence">—</dd>
+					</div>
+					<div>
+						<dt>Last success</dt>
+						<dd id="last-success">Never</dd>
+					</div>
+					<div>
+						<dt>Last error</dt>
+						<dd id="last-error">None</dd>
+					</div>
+				</dl>
+				<p id="notice" class="notice" role="status" aria-live="polite"></p>
+			</section>
+		</main>
+		<script src="birdclaw-options.js"></script>
+	</body>
+</html>
