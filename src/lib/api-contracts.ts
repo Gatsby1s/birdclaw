@@ -16,6 +16,8 @@ import type {
 	UrlExpansionItem,
 	XRemarkAnnotation,
 	XRemarkSyncStatus,
+	XRemarkLiveSyncStatus,
+	XRemarkPairingResult,
 } from "./types";
 import type {
 	WebSyncJobSnapshot,
@@ -75,6 +77,22 @@ export const xRemarkSyncStatusSchema: z.ZodType<XRemarkSyncStatus> = z.object({
 	sourceVersion: z.number().optional(),
 	annotation: xRemarkAnnotationSchema.nullable().optional(),
 });
+
+export const xRemarkLiveSyncStatusSchema = z.object({
+	paired: z.boolean(),
+	connected: z.boolean(),
+	extensionId: z.string(),
+	endpoint: z.string(),
+	lastSequence: z.number().int().nonnegative(),
+	tokenCreatedAt: z.string().optional(),
+	sourceId: z.string().optional(),
+	lastSnapshotAt: z.string().optional(),
+	lastSeenAt: z.string().optional(),
+}) satisfies z.ZodType<XRemarkLiveSyncStatus>;
+
+export const xRemarkPairingResultSchema = xRemarkLiveSyncStatusSchema.extend({
+	token: z.string(),
+}) satisfies z.ZodType<XRemarkPairingResult>;
 
 export const profileRecordSchema = z.object({
 	id: z.string().default("profile_unknown"),

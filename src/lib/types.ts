@@ -58,6 +58,22 @@ export interface XRemarkSyncStatus {
 	annotation?: XRemarkAnnotation | null;
 }
 
+export interface XRemarkLiveSyncStatus {
+	paired: boolean;
+	connected: boolean;
+	extensionId: string;
+	endpoint: string;
+	lastSequence: number;
+	tokenCreatedAt?: string;
+	sourceId?: string;
+	lastSnapshotAt?: string;
+	lastSeenAt?: string;
+}
+
+export interface XRemarkPairingResult extends XRemarkLiveSyncStatus {
+	token: string;
+}
+
 export interface ProfileAffiliation {
 	organizationProfileId: string;
 	organizationName?: string;

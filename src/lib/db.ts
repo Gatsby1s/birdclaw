@@ -753,6 +753,21 @@ function ensureXRemarkTables(db: Database) {
   `);
 }
 
+function ensureXRemarkLiveSyncTable(db: Database) {
+	db.exec(`
+    create table if not exists xremark_live_sync (
+      id integer primary key check (id = 1),
+      token_hash text,
+      token_created_at text,
+      source_id text,
+      last_sequence integer not null default 0,
+      last_captured_at integer,
+      last_snapshot_at text,
+      last_seen_at text
+    );
+  `);
+}
+
 function backfillTweetCollections(db: Database) {
 	const missingKinds = (
 		[
@@ -944,6 +959,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add X Remark profile notes",
 		up: (db) => {
 			ensureXRemarkTables(db);
+		},
+	},
+	{
+		version: 6,
+		name: "add X Remark live sync pairing",
+		up: (db) => {
+			ensureXRemarkLiveSyncTable(db);
 		},
 	},
 ];

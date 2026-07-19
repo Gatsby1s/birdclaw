@@ -349,6 +349,19 @@ describe("database init", () => {
 				"category_name",
 			]),
 		);
+		const xRemarkLiveColumnNames = db
+			.prepare("pragma table_info(xremark_live_sync)")
+			.all() as Array<{ name: string }>;
+		expect(xRemarkLiveColumnNames.map((column) => column.name)).toEqual(
+			expect.arrayContaining([
+				"token_hash",
+				"source_id",
+				"last_sequence",
+				"last_captured_at",
+				"last_snapshot_at",
+				"last_seen_at",
+			]),
+		);
 
 		const busyTimeout = db.pragma("busy_timeout", {
 			simple: true,
@@ -371,7 +384,7 @@ describe("database init", () => {
 				"deleted_at",
 			]),
 		);
-		expect(db.pragma("user_version", { simple: true })).toBe(5);
+		expect(db.pragma("user_version", { simple: true })).toBe(6);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -400,7 +413,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(5);
+		expect(db.pragma("user_version", { simple: true })).toBe(6);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

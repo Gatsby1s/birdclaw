@@ -245,11 +245,13 @@ export class XRemarkImportError extends Error {
 export function importXRemarkBackup(
 	backup: XRemarkBackup,
 	db: Database = getNativeDb({ seedDemoData: false }),
+	options: { allowOlder?: boolean } = {},
 ) {
 	const previousState = db
 		.prepare("select backup_time from xremark_import_state where id = 1")
 		.get() as { backup_time?: number | null } | undefined;
 	if (
+		!options.allowOlder &&
 		previousState?.backup_time != null &&
 		backup.database.backupTime < previousState.backup_time
 	) {

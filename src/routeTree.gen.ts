@@ -45,6 +45,8 @@ import { Route as ApiConversationRouteImport } from './routes/api/conversation'
 import { Route as ApiBlocksRouteImport } from './routes/api/blocks'
 import { Route as ApiAvatarRouteImport } from './routes/api/avatar'
 import { Route as ApiActionRouteImport } from './routes/api/action'
+import { Route as ApiIntegrationsXremarkRouteImport } from './routes/api/integrations.xremark'
+import { Route as ApiIntegrationsXremarkSnapshotRouteImport } from './routes/api/integrations.xremark.snapshot'
 
 const TodayRoute = TodayRouteImport.update({
   id: '/today',
@@ -226,6 +228,17 @@ const ApiActionRoute = ApiActionRouteImport.update({
   path: '/api/action',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiIntegrationsXremarkRoute = ApiIntegrationsXremarkRouteImport.update({
+  id: '/api/integrations/xremark',
+  path: '/api/integrations/xremark',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiIntegrationsXremarkSnapshotRoute =
+  ApiIntegrationsXremarkSnapshotRouteImport.update({
+    id: '/snapshot',
+    path: '/snapshot',
+    getParentRoute: () => ApiIntegrationsXremarkRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -264,6 +277,8 @@ export interface FileRoutesByFullPath {
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
+  '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -302,6 +317,8 @@ export interface FileRoutesByTo {
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
+  '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -341,6 +358,8 @@ export interface FileRoutesById {
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
+  '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -381,6 +400,8 @@ export interface FileRouteTypes {
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/profiles/$handle'
+    | '/api/integrations/xremark'
+    | '/api/integrations/xremark/snapshot'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -419,6 +440,8 @@ export interface FileRouteTypes {
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/profiles/$handle'
+    | '/api/integrations/xremark'
+    | '/api/integrations/xremark/snapshot'
   id:
     | '__root__'
     | '/'
@@ -457,6 +480,8 @@ export interface FileRouteTypes {
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/profiles/$handle'
+    | '/api/integrations/xremark'
+    | '/api/integrations/xremark/snapshot'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -496,6 +521,7 @@ export interface RootRouteChildren {
   ApiXremarkRoute: typeof ApiXremarkRoute
   ApiXurlRateLimitsRoute: typeof ApiXurlRateLimitsRoute
   ProfilesHandleRoute: typeof ProfilesHandleRoute
+  ApiIntegrationsXremarkRoute: typeof ApiIntegrationsXremarkRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -752,8 +778,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiActionRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/integrations/xremark': {
+      id: '/api/integrations/xremark'
+      path: '/api/integrations/xremark'
+      fullPath: '/api/integrations/xremark'
+      preLoaderRoute: typeof ApiIntegrationsXremarkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/integrations/xremark/snapshot': {
+      id: '/api/integrations/xremark/snapshot'
+      path: '/snapshot'
+      fullPath: '/api/integrations/xremark/snapshot'
+      preLoaderRoute: typeof ApiIntegrationsXremarkSnapshotRouteImport
+      parentRoute: typeof ApiIntegrationsXremarkRoute
+    }
   }
 }
+
+interface ApiIntegrationsXremarkRouteChildren {
+  ApiIntegrationsXremarkSnapshotRoute: typeof ApiIntegrationsXremarkSnapshotRoute
+}
+
+const ApiIntegrationsXremarkRouteChildren: ApiIntegrationsXremarkRouteChildren =
+  {
+    ApiIntegrationsXremarkSnapshotRoute: ApiIntegrationsXremarkSnapshotRoute,
+  }
+
+const ApiIntegrationsXremarkRouteWithChildren =
+  ApiIntegrationsXremarkRoute._addFileChildren(
+    ApiIntegrationsXremarkRouteChildren,
+  )
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -792,6 +846,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiXremarkRoute: ApiXremarkRoute,
   ApiXurlRateLimitsRoute: ApiXurlRateLimitsRoute,
   ProfilesHandleRoute: ProfilesHandleRoute,
+  ApiIntegrationsXremarkRoute: ApiIntegrationsXremarkRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

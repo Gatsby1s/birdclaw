@@ -48,6 +48,7 @@ Status: WIP. Real and usable. Not done. Expect schema churn, transport gaps, and
 - tweet expansion with URLs, inline images, quoted tweets, replies, and profile hover cards
 - sender bio and influence context in the DM detail header
 - system / light / dark theme switcher with animated transition
+- private X Remark notes on timeline cards and profiles, with manual JSON import or an optional loopback-only live bridge
 
 ### Triage + filtering
 
@@ -288,6 +289,17 @@ pnpm cli blocks import ~/triage/blocklist.txt --account acct_primary --json
 ```
 
 ## CLI Highlights
+
+### X Remark notes and live sync
+
+The Settings page can import an X Remark JSON backup without sending private notes to AI providers or the portable Git backup. For automatic updates, Birdclaw also ships a local bridge builder that copies the already-installed extension into separate bridge and rollback directories; it never edits Chrome's managed extension directory.
+
+```bash
+node integrations/xremark-bridge/build.mjs \
+  --source "/absolute/path/to/the/installed/X-Remark/version-directory"
+```
+
+Keep a fresh X Remark export before switching extension code. The complete pairing, Chrome loading, verification, upgrade, and safe rollback instructions are in [integrations/xremark-bridge/README.md](integrations/xremark-bridge/README.md).
 
 ### Search local tweets
 

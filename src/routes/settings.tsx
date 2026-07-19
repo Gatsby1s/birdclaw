@@ -3,11 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	CheckCircle2,
 	Cloud,
+	Copy,
 	Database,
 	KeyRound,
+	Radio,
 	Route as RouteIcon,
 	Settings2,
 	StickyNote,
+	Unplug,
 	Upload,
 } from "lucide-react";
 import { useRef } from "react";
@@ -15,10 +18,13 @@ import {
 	birdclawSettingsSchema,
 	type BirdclawSettings,
 	type ProfileAnalysisSourceSetting,
+	xRemarkLiveSyncStatusSchema,
+	xRemarkPairingResultSchema,
 	xRemarkSyncStatusSchema,
 } from "#/lib/api-contracts";
 import { fetchJson } from "#/lib/api-client";
 import { queryKeys } from "#/lib/query-client";
+import type { XRemarkLiveSyncStatus, XRemarkPairingResult } from "#/lib/types";
 import {
 	cx,
 	errorCopyClass,
@@ -93,6 +99,38 @@ async function fetchXRemarkStatus() {
 	);
 }
 
+async function fetchXRemarkLiveStatus() {
+	return fetchJson(
+		"/api/integrations/xremark",
+		{ cache: "no-store" },
+		xRemarkLiveSyncStatusSchema,
+		"X Remark live sync status unavailable",
+	);
+}
+
+async function manageXRemarkLiveSync(
+	action: "pair" | "disconnect",
+): Promise<XRemarkLiveSyncStatus | XRemarkPairingResult> {
+	const init = {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ action }),
+	};
+	return action === "pair"
+		? fetchJson(
+				"/api/integrations/xremark",
+				init,
+				xRemarkPairingResultSchema,
+				"X Remark live sync update failed",
+			)
+		: fetchJson(
+				"/api/integrations/xremark",
+				init,
+				xRemarkLiveSyncStatusSchema,
+				"X Remark live sync update failed",
+			);
+}
+
 async function importXRemarkBackup(file: File) {
 	if (file.size > 25 * 1024 * 1024) {
 		throw new Error(
@@ -130,6 +168,12 @@ function SettingsRoute() {
 		queryKey: queryKeys.xRemark,
 		queryFn: fetchXRemarkStatus,
 	});
+	const xRemarkLiveQuery = useQuery({
+		queryKey: queryKeys.xRemarkLive,
+		queryFn: fetchXRemarkLiveStatus,
+		refetchInterval: 5_000,
+		staleTime: 0,
+	});
 	const settings = settingsQuery.data ?? null;
 	const mutation = useMutation({
 		mutationFn: updateProfileSource,
@@ -147,11 +191,22 @@ function SettingsRoute() {
 			void queryClient.invalidateQueries({ queryKey: queryKeys.conversations });
 		},
 	});
+	const xRemarkLiveMutation = useMutation({
+		mutationFn: manageXRemarkLiveSync,
+		onSuccess: (data) => {
+			queryClient.setQueryData(queryKeys.xRemarkLive, data);
+		},
+	});
 	const currentSource = settings?.analysis.profileSource;
 	const pendingSource = mutation.variables;
 	const saving = mutation.isPending;
 	const twitter6551 = settings?.providers.twitter6551;
 	const xRemarkStatus = xRemarkMutation.data ?? xRemarkQuery.data;
+	const xRemarkLiveStatus = xRemarkLiveQuery.data ?? xRemarkLiveMutation.data;
+	const pairingToken =
+		xRemarkLiveMutation.data && "token" in xRemarkLiveMutation.data
+			? xRemarkLiveMutation.data.token
+			: undefined;
 
 	return (
 		<section className="flex min-h-screen flex-col">
@@ -184,6 +239,13 @@ function SettingsRoute() {
 					{xRemarkMutation.error instanceof Error
 						? xRemarkMutation.error.message
 						: "X Remark import failed"}
+				</div>
+			) : null}
+			{xRemarkLiveMutation.error ? (
+				<div className={errorCopyClass}>
+					{xRemarkLiveMutation.error instanceof Error
+						? xRemarkLiveMutation.error.message
+						: "X Remark live sync update failed"}
 				</div>
 			) : null}
 			{settings ? (
@@ -231,6 +293,72 @@ function SettingsRoute() {
 										: xRemarkStatus?.imported
 											? "Replace from backup"
 											: "Import backup"}
+								</button>
+							</div>
+						</div>
+					</section>
+					<section className="border-b border-[var(--line)] px-4 py-4">
+						<div className="flex flex-col gap-3 min-[760px]:flex-row min-[760px]:items-center min-[760px]:justify-between">
+							<div className="min-w-0">
+								<div className="flex items-center gap-2 text-[16px] font-bold text-[var(--ink)]">
+									<Radio className="size-4.5" strokeWidth={1.9} />
+									<span>X Remark Live Sync</span>
+								</div>
+								<p className="mt-1 text-[13px] text-[var(--ink-soft)]">
+									{xRemarkLiveStatus?.connected
+										? "Connected · saved and deleted notes appear automatically"
+										: xRemarkLiveStatus?.paired
+											? "Paired · waiting for the local X Remark bridge"
+											: "Pair the local bridge to enable automatic updates."}
+								</p>
+								{xRemarkLiveStatus?.lastSeenAt ? (
+									<p className="mt-1 text-[12px] text-[var(--ink-soft)]">
+										Last heartbeat:{" "}
+										{new Date(xRemarkLiveStatus.lastSeenAt).toLocaleString()}
+									</p>
+								) : null}
+								{pairingToken ? (
+									<div className="mt-2 flex max-w-xl items-center gap-2">
+										<code className="min-w-0 flex-1 truncate rounded-md border border-[var(--line)] bg-[var(--bg-subtle)] px-2 py-1 text-[12px] text-[var(--ink)]">
+											{pairingToken}
+										</code>
+										<button
+											aria-label="Copy pairing token"
+											className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-[var(--line-strong)] text-[var(--ink)] hover:bg-[var(--bg-hover)]"
+											onClick={() =>
+												void navigator.clipboard.writeText(pairingToken)
+											}
+											type="button"
+										>
+											<Copy className="size-4" strokeWidth={2} />
+										</button>
+									</div>
+								) : null}
+							</div>
+							<div className="flex shrink-0 items-center gap-2">
+								{xRemarkLiveStatus?.paired ? (
+									<button
+										className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1 text-[13px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)] disabled:opacity-55"
+										disabled={xRemarkLiveMutation.isPending}
+										onClick={() => xRemarkLiveMutation.mutate("disconnect")}
+										type="button"
+									>
+										<Unplug className="size-4" strokeWidth={2} />
+										Disconnect
+									</button>
+								) : null}
+								<button
+									className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1 text-[13px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)] disabled:opacity-55"
+									disabled={xRemarkLiveMutation.isPending}
+									onClick={() => xRemarkLiveMutation.mutate("pair")}
+									type="button"
+								>
+									<KeyRound className="size-4" strokeWidth={2} />
+									{xRemarkLiveMutation.isPending
+										? "Preparing"
+										: xRemarkLiveStatus?.paired
+											? "Reset token"
+											: "Pair bridge"}
 								</button>
 							</div>
 						</div>

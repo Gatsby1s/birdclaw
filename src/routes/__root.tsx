@@ -7,6 +7,7 @@ import {
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { AppNav } from "#/components/AppNav";
+import { XRemarkLiveUpdater } from "#/components/XRemarkLiveUpdater";
 import { BirdclawQueryProvider } from "#/lib/query-client";
 import { ThemeProvider, themeScript } from "#/lib/theme";
 import {
@@ -72,6 +73,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 				<BirdclawQueryProvider>
 					<ThemeProvider>
 						<LiveVersionReloader />
+						<XRemarkLiveUpdater />
 						<div className={siteShellClass}>
 							<AppNav compact={compactNavigation} />
 							<main className={wideMain ? mainColumnDmClass : mainColumnClass}>
