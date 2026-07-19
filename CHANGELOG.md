@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.31 - 2026-07-19
+
+### Fixed
+
+- Include cited tweet images and available video or GIF covers in both Today and Discuss complete PDF exports, using compact non-cropping grids and printing repeated sources' media only once.
+- Bound image preparation before Paged.js pagination, retry original images when thumbnails fail, and replace unreachable media with a compact placeholder so one bad URL cannot stall the entire export.
+
 ## 0.8.30 - 2026-07-19
 
 ### Added
