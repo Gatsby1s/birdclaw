@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.33 - 2026-07-19
+
+### Fixed
+
+- Size complete-PDF tweet media from its loaded proportions instead of fixed-height thumbnails, keeping ordinary images readable without letting them dominate the page.
+- Split ultra-tall screenshots into ordered 55 mm print columns, prefer full-resolution image sources, and retain the prepared readable layout if Paged.js falls back.
+
 ## 0.8.32 - 2026-07-19
 
 ### Added
