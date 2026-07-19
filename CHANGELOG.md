@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.29 - 2026-07-19
+
+### Added
+
+- Add a custom local date-and-time range to Today and Discuss, store the applied window in the URL, preserve it on refresh, and keep every existing preset available.
+- Validate custom ranges before requests and keep the picker and preset controls usable in narrow layouts.
+
 ## 0.8.28 - 2026-07-19
 
 ### Fixed
