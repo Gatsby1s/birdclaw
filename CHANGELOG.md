@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 0.8.37 - 2026-07-20
+
+### Added
+
+- Add loopback-only real-time X Remark synchronization with one-time pairing tokens, persistent retry, full-snapshot deletion semantics, and immediate BirdClaw UI refresh.
+- Ship a local bridge builder that preserves the official extension ID, observes committed IndexedDB remark changes without writing to X Remark, and produces a separate vanilla rollback copy.
+
+### Security
+
+- Restrict live snapshots to `127.0.0.1`, the exact X Remark extension origin, and a hashed high-entropy pairing token while rejecting forwarded requests and oversized payloads.
+- Keep Chrome's managed X Remark installation untouched and forbid loading it as an unpacked extension; generated bridge and rollback directories are isolated and overwrite-protected.
+
 ## 0.8.36 - 2026-07-19
 
 ### Added
