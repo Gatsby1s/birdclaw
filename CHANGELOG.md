@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.30 - 2026-07-19
+
+### Added
+
+- Add `Export PDF` and `导出完整 PDF` actions to Discuss, preserving the existing on-screen summary export while building an A4 reference booklet from the completed discussion without rerunning it.
+- Recover cited tweets and DMs from structured results and Markdown references, include complete cited private context, fill final Paged.js page references, and omit raw tweet URLs and like counts from the booklet.
+
 ## 0.8.29 - 2026-07-19
 
 ### Added
