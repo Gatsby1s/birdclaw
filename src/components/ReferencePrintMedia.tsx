@@ -47,17 +47,14 @@ export function ReferencePrintMedia({ items }: { items: TweetMediaItem[] }) {
 function referencePrintImages(items: TweetMediaItem[]) {
 	const seen = new Set<string>();
 	return items.flatMap((item, index): ReferencePrintImage[] => {
-		const candidate =
-			item.type === "image"
-				? (item.thumbnailUrl ?? item.url)
-				: item.thumbnailUrl;
+		const candidate = item.type === "image" ? item.url : item.thumbnailUrl;
 		const src = safeHttpUrl(candidate);
 		if (!src || seen.has(src)) return [];
 		seen.add(src);
 
 		const fallbackSrc =
 			item.type === "image" && item.thumbnailUrl !== undefined
-				? safeHttpUrl(item.url)
+				? safeHttpUrl(item.thumbnailUrl)
 				: null;
 		const fallbackAlt =
 			item.type === "image"
