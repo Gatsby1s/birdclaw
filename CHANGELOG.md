@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.32 - 2026-07-19
+
+### Added
+
+- Add a persistent Discuss history rail with time-grouped topics, summaries, theme labels, source and DM counts, pin/delete actions, search, and a responsive narrow-screen drawer.
+- Restore saved discussions from a direct `run` URL without another model call, keep regenerated results as versions, and include cited source snapshots in the portable JSONL backup.
+
+### Fixed
+
+- Cancel active generation and stale restore requests when switching history entries, preventing late stream results from replacing the selected saved discussion.
+
 ## 0.8.31 - 2026-07-19
 
 ### Fixed
