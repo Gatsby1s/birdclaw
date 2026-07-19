@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateTodaySearch } from "#/lib/route-search";
+import type { TweetMediaItem } from "#/lib/types";
 import { ndjsonResponse } from "#/test/ndjson";
 import { renderWithQueryClient as render } from "#/test/render";
 import { TodayRouteView as TodayRoute } from "./today";
@@ -57,6 +58,7 @@ function digestResult(label: string, markdown: string, includeDms = false) {
 					authorProfile,
 					createdAt: "2026-05-16T10:00:00.000Z",
 					text: "Peter should see this.",
+					media: [] as TweetMediaItem[],
 					entities: {
 						urls: [
 							{
@@ -510,6 +512,41 @@ describe("today route", () => {
 				expect(document.body.dataset.todayPrintMode).toBe("reference");
 				const referencePdf = screen.getByTestId("today-reference-pdf");
 				const referenceText = referencePdf.textContent ?? "";
+				const mediaGrid = referencePdf.querySelector(
+					".today-reference-media-grid",
+				);
+				expect(mediaGrid).not.toBeNull();
+				expect(mediaGrid).toHaveAttribute("data-reference-media-count", "3");
+				expect(
+					referencePdf.querySelectorAll(".today-reference-media"),
+				).toHaveLength(1);
+				for (const image of within(referencePdf).getAllByRole("img", {
+					name: "第一张推文图片",
+				})) {
+					expect(image).toHaveAttribute(
+						"src",
+						"https://pbs.twimg.com/media/one.jpg",
+					);
+				}
+				for (const image of within(referencePdf).getAllByRole("img", {
+					name: "第二张推文图片",
+				})) {
+					expect(image).toHaveAttribute(
+						"src",
+						"https://pbs.twimg.com/media/two.jpg",
+					);
+				}
+				for (const image of within(referencePdf).getAllByRole("img", {
+					name: "推文视频封面 3",
+				})) {
+					expect(image).toHaveAttribute(
+						"src",
+						"https://pbs.twimg.com/media/video-cover.jpg",
+					);
+				}
+				for (const image of within(referencePdf).getAllByRole("img")) {
+					expect(image).toHaveAttribute("loading", "eager");
+				}
 				expect(
 					within(referencePdf).getByRole("heading", {
 						name: "BirdClaw Today 参考内容合集",
@@ -642,6 +679,29 @@ describe("today route", () => {
 				const result = digestResult("Today", markdown);
 				result.digest.summary =
 					"Structured summary must not replace the webpage.";
+				result.context.tweets[0]!.media = [
+					{
+						url: "https://pbs.twimg.com/media/one.jpg",
+						type: "image",
+						altText: "第一张推文图片",
+						width: 1600,
+						height: 900,
+					},
+					{
+						url: "https://pbs.twimg.com/media/two.jpg",
+						type: "image",
+						altText: "第二张推文图片",
+						width: 900,
+						height: 1600,
+					},
+					{
+						url: "https://video.twimg.com/ext_tw_video/demo.mp4",
+						thumbnailUrl: "https://pbs.twimg.com/media/video-cover.jpg",
+						type: "video",
+						width: 1280,
+						height: 720,
+					},
+				];
 				return ndjsonResponse([
 					{ type: "delta", delta: markdown },
 					{ type: "done", result },
@@ -660,7 +720,7 @@ describe("today route", () => {
 
 		fireEvent.click(referenceButton);
 
-		expect(printMock).toHaveBeenCalledTimes(1);
+		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
 		expect(digestRequests).toHaveLength(1);
 		expect(document.title).toBe("birdclaw");
 		expect(document.body.dataset.todayPrintMode).toBeUndefined();

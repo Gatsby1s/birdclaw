@@ -1,3 +1,6 @@
+import type { TweetMediaItem } from "#/lib/types";
+import { ReferencePrintMedia } from "./ReferencePrintMedia";
+
 export interface ReferenceCollectionGroup {
 	section: string;
 	title: string;
@@ -11,6 +14,7 @@ export interface ReferenceCollectionTweet {
 	name?: string;
 	createdAt?: string;
 	text: string;
+	media: TweetMediaItem[];
 	replyToTweet?: {
 		author: string;
 		createdAt?: string;
@@ -102,10 +106,12 @@ function formatDate(value: string | undefined) {
 
 function ReferenceTweetCard({
 	anchorId,
+	includeMedia,
 	label,
 	tweet,
 }: {
 	anchorId?: string;
+	includeMedia: boolean;
 	label: string;
 	tweet: ReferenceCollectionTweet | null;
 }) {
@@ -136,6 +142,7 @@ function ReferenceTweetCard({
 			<p className="today-reference-source-body">
 				{tweet.text || "(empty text)"}
 			</p>
+			<ReferencePrintMedia items={includeMedia ? tweet.media : []} />
 			{tweet.replyToTweet ? (
 				<blockquote>
 					<strong>
@@ -260,7 +267,7 @@ export function ReferenceCollectionPrint({
 						<tr>
 							<th>排版目标</th>
 							<td>
-								适合打印、逐条阅读和做边注；黑白打印仍能清楚区分主题与原文。
+								适合打印、逐条阅读和做边注；推文图片使用紧凑网格完整保留，黑白打印仍能清楚区分主题与原文。
 							</td>
 						</tr>
 						<tr>
@@ -406,14 +413,15 @@ export function ReferenceCollectionPrint({
 							{group.tweetIds.map((tweetId) => {
 								const normalized = normalizeTweetId(tweetId);
 								const label = labelsById.get(normalized) ?? normalized;
+								const firstOccurrence =
+									firstGroupBySource.get(normalized) ===
+									groupIndexes.get(group);
 								return (
 									<ReferenceTweetCard
 										anchorId={
-											firstGroupBySource.get(normalized) ===
-											groupIndexes.get(group)
-												? `reference-source-${label}`
-												: undefined
+											firstOccurrence ? `reference-source-${label}` : undefined
 										}
+										includeMedia={firstOccurrence}
 										key={`${groupAnchors.get(group) ?? group.title}-${normalized}`}
 										label={label}
 										tweet={tweetFor(tweetLookup, tweetId)}

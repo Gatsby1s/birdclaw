@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateDiscussSearch } from "#/lib/route-search";
+import type { TweetMediaItem } from "#/lib/types";
 import { ndjsonResponse } from "#/test/ndjson";
 import { DiscussRouteView as DiscussRoute } from "./discuss";
 
@@ -45,6 +46,7 @@ function discussionResult(markdown: string) {
 					},
 					createdAt: "2026-05-23T08:18:00.000Z",
 					text: "ChatGPT is useful for summaries.",
+					media: [] as TweetMediaItem[],
 					likeCount: 4,
 					liked: false,
 					bookmarked: false,
@@ -256,6 +258,23 @@ describe("discuss route", () => {
 				);
 				expect(document.body.dataset.todayPrintMode).toBe("reference");
 				const referencePdf = screen.getByTestId("discuss-reference-pdf");
+				const mediaGrid = referencePdf.querySelector(
+					".today-reference-media-pair",
+				);
+				expect(mediaGrid).toHaveAttribute("data-reference-media-count", "2");
+				expect(
+					within(referencePdf).getByRole("img", {
+						name: "讨论来源图表",
+					}),
+				).toHaveAttribute(
+					"src",
+					"https://pbs.twimg.com/media/discuss-chart.jpg",
+				);
+				expect(
+					within(referencePdf).getByRole("img", {
+						name: "推文 GIF 封面 2",
+					}),
+				).toHaveAttribute("src", "https://pbs.twimg.com/media/discuss-gif.jpg");
 				expect(
 					within(referencePdf).getByRole("heading", {
 						name: "BirdClaw Discuss 参考内容合集",
@@ -339,12 +358,29 @@ describe("discuss route", () => {
 						includeDms: true,
 						counts: { ...baseResult.context.counts, dms: citedDms.length },
 						tweets: [
-							...baseResult.context.tweets,
+							{
+								...baseResult.context.tweets[0],
+								media: [
+									{
+										url: "https://pbs.twimg.com/media/discuss-chart.jpg",
+										type: "image" as const,
+										altText: "讨论来源图表",
+										width: 1400,
+										height: 900,
+									},
+									{
+										url: "https://video.twimg.com/tweet-video/demo.mp4",
+										thumbnailUrl: "https://pbs.twimg.com/media/discuss-gif.jpg",
+										type: "gif" as const,
+									},
+								],
+							},
 							{
 								...baseResult.context.tweets[0],
 								id: "tweet_2",
 								url: "https://x.com/alice/status/tweet_2",
 								text: "A Markdown-only source is still complete.",
+								media: [],
 							},
 						],
 						dms: citedDms,

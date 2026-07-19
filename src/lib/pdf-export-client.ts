@@ -6,6 +6,8 @@ export interface ReferencePdfExportOptions {
 	onCleanup: () => void;
 }
 
+const REFERENCE_IMAGE_ATTEMPT_TIMEOUT_MS = 4_000;
+
 export function exportCurrentPdf(
 	title: string,
 	mode: PdfPrintMode = "summary",
@@ -74,6 +76,75 @@ function collectReferencePrintStylesheets() {
 	];
 }
 
+function waitForImageAttempt(image: HTMLImageElement, timeoutMs: number) {
+	if (image.complete) return Promise.resolve(image.naturalWidth > 0);
+
+	return new Promise<boolean>((resolve) => {
+		let settled = false;
+		const finish = (loaded: boolean) => {
+			if (settled) return;
+			settled = true;
+			window.clearTimeout(timer);
+			image.removeEventListener("load", handleLoad);
+			image.removeEventListener("error", handleError);
+			resolve(loaded);
+		};
+		const handleLoad = () => finish(true);
+		const handleError = () => finish(false);
+		const timer = window.setTimeout(() => finish(false), timeoutMs);
+		image.addEventListener("load", handleLoad, { once: true });
+		image.addEventListener("error", handleError, { once: true });
+		if (image.complete) finish(image.naturalWidth > 0);
+	});
+}
+
+async function resolveReferencePrintImage(
+	image: HTMLImageElement,
+	timeoutMs: number,
+) {
+	if (await waitForImageAttempt(image, timeoutMs)) return true;
+	const fallback = image.dataset.referenceFallbackSrc;
+	if (!fallback || fallback === image.currentSrc || fallback === image.src) {
+		return false;
+	}
+	delete image.dataset.referenceFallbackSrc;
+	image.src = fallback;
+	return waitForImageAttempt(image, timeoutMs);
+}
+
+function replaceFailedReferenceImage(image: HTMLImageElement) {
+	const placeholder = document.createElement("span");
+	placeholder.className = "today-reference-media-unavailable";
+	placeholder.setAttribute("role", "img");
+	placeholder.setAttribute(
+		"aria-label",
+		image.alt ? `${image.alt}（加载失败）` : "推文图片加载失败",
+	);
+	placeholder.textContent = "图片暂时无法加载";
+	image.replaceWith(placeholder);
+}
+
+export async function prepareReferencePrintSource(
+	source: HTMLElement,
+	imageAttemptTimeoutMs = REFERENCE_IMAGE_ATTEMPT_TIMEOUT_MS,
+) {
+	const images = [...source.querySelectorAll<HTMLImageElement>("img")];
+	const loaded = await Promise.all(
+		images.map((image) =>
+			resolveReferencePrintImage(image, imageAttemptTimeoutMs),
+		),
+	);
+	const previewSource = source.cloneNode(true) as HTMLElement;
+	previewSource.style.display = "block";
+	const previewImages = [
+		...previewSource.querySelectorAll<HTMLImageElement>("img"),
+	];
+	for (const [index, image] of previewImages.entries()) {
+		if (!loaded[index]) replaceFailedReferenceImage(image);
+	}
+	return previewSource;
+}
+
 export async function exportReferenceCollectionPdf({
 	title,
 	sourceSelector,
@@ -119,11 +190,12 @@ export async function exportReferenceCollectionPdf({
 	};
 
 	try {
-		if (document.fonts) await document.fonts.ready;
+		const [previewSource] = await Promise.all([
+			prepareReferencePrintSource(source),
+			document.fonts?.ready ?? Promise.resolve(),
+		]);
 		const { Previewer } = await import("pagedjs");
 		const previewer = new Previewer();
-		const previewSource = source.cloneNode(true) as HTMLElement;
-		previewSource.style.display = "block";
 		await previewer.preview(
 			previewSource.outerHTML,
 			collectReferencePrintStylesheets(),

@@ -745,6 +745,78 @@ html.theme-transition::view-transition-new(theme) {
 		widows: 3;
 	}
 
+	.today-reference-media {
+		background: #f7f6f1 !important;
+		border: 0.35pt solid #d7d3c9;
+		border-top: 0;
+		break-inside: avoid;
+		display: grid;
+		gap: 1.2mm;
+		padding: 1.5mm;
+	}
+
+	.today-reference-media figure {
+		align-items: center;
+		background: #fff !important;
+		border: 0.35pt solid #e4e0d7;
+		display: flex;
+		justify-content: center;
+		margin: 0;
+		overflow: hidden;
+	}
+
+	.today-reference-media img {
+		display: block;
+		height: 100%;
+		max-width: 100%;
+		object-fit: contain;
+		width: 100%;
+	}
+
+	.today-reference-media-unavailable {
+		align-items: center;
+		color: #7b8491 !important;
+		display: flex;
+		font-size: 7.6pt;
+		height: 100%;
+		justify-content: center;
+		padding: 2mm;
+		text-align: center;
+		width: 100%;
+	}
+
+	.today-reference-media-single {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.today-reference-media-single figure {
+		height: 44mm;
+	}
+
+	.today-reference-media-pair {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.today-reference-media-pair figure {
+		height: 36mm;
+	}
+
+	.today-reference-media-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.today-reference-media-grid figure {
+		height: 25mm;
+	}
+
+	.today-reference-media-dense {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
+	.today-reference-media-dense figure {
+		height: 20mm;
+	}
+
 	.today-reference-source blockquote {
 		background: #fff7e6 !important;
 		border: 0.35pt solid #e6d8a8;
