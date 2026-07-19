@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
 	ChevronDown,
 	CheckCircle2,
+	FileDown,
+	FileText,
 	Loader2,
 	RefreshCw,
 	Search,
@@ -16,7 +18,12 @@ import {
 	useState,
 } from "react";
 import { CustomDateRangePicker } from "#/components/CustomDateRangePicker";
+import { flushSync } from "react-dom";
 import { MarkdownViewer } from "#/components/MarkdownViewer";
+import {
+	ReferenceCollectionPrint,
+	type ReferenceCollectionGroup,
+} from "#/components/ReferenceCollectionPrint";
 import { useNdjsonRun } from "#/components/useNdjsonRun";
 import type {
 	SearchDiscussionContext,
@@ -33,6 +40,10 @@ import {
 	resolveDiscussDateRange,
 } from "#/lib/discuss-date-range";
 import type { TweetSearchMode } from "#/lib/tweet-search-live";
+import {
+	exportCurrentPdf,
+	exportReferenceCollectionPdf,
+} from "#/lib/pdf-export-client";
 import {
 	type DiscussRouteSearch,
 	type RouteSearchChange,
@@ -195,6 +206,153 @@ function formatCounts(context: SearchDiscussionContext | null) {
 		.join(" · ");
 }
 
+function normalizeDiscussionReferenceId(value: string) {
+	return value.trim().replace(/^tweet[_:]/, "");
+}
+
+function referenceLookupKeys(value: string, prefix: "tweet" | "dm") {
+	const trimmed = value.trim();
+	const withoutPrefix = trimmed.replace(new RegExp(`^${prefix}[_:]`), "");
+	return [
+		...new Set([
+			trimmed,
+			withoutPrefix,
+			`${prefix}_${withoutPrefix}`,
+			`${prefix}:${withoutPrefix}`,
+		]),
+	];
+}
+
+function knownReferenceLookup(prefix: "tweet" | "dm", knownIds: string[]) {
+	const knownByKey = new Map<string, string>();
+	for (const id of knownIds) {
+		for (const key of referenceLookupKeys(id, prefix)) knownByKey.set(key, id);
+	}
+	return knownByKey;
+}
+
+function resolveKnownReferenceIds(
+	values: string[],
+	prefix: "tweet" | "dm",
+	knownIds: string[],
+) {
+	const knownByKey = knownReferenceLookup(prefix, knownIds);
+	const resolved: string[] = [];
+	for (const value of values) {
+		const id = referenceLookupKeys(value, prefix)
+			.map((key) => knownByKey.get(key))
+			.find((candidate): candidate is string => Boolean(candidate));
+		if (id && !resolved.includes(id)) resolved.push(id);
+	}
+	return resolved;
+}
+
+function collectMarkdownReferenceIds(
+	markdown: string,
+	prefix: "tweet" | "dm",
+	knownIds: string[],
+) {
+	const knownByKey = knownReferenceLookup(prefix, knownIds);
+	const resolved: string[] = [];
+	for (const match of markdown.matchAll(/[（(]([^()（）]+)[）)]/g)) {
+		for (const rawToken of (match[1] ?? "").split(/[\s,，、]+/)) {
+			const token = rawToken.replace(/^[`'"{}]+|[`'"{}.;]+$/g, "");
+			if (!token) continue;
+			const id = referenceLookupKeys(token, prefix)
+				.map((key) => knownByKey.get(key))
+				.find((candidate): candidate is string => Boolean(candidate));
+			if (id && !resolved.includes(id)) resolved.push(id);
+		}
+	}
+	return resolved;
+}
+
+function dedupeDiscussionTweetIds(tweetIds: string[]) {
+	const seen = new Set<string>();
+	return tweetIds.filter((tweetId) => {
+		const normalized = normalizeDiscussionReferenceId(tweetId);
+		if (seen.has(normalized)) return false;
+		seen.add(normalized);
+		return true;
+	});
+}
+
+function collectDiscussionReferenceGroups(
+	result: SearchDiscussionRunResult,
+	markdown: string,
+): ReferenceCollectionGroup[] {
+	const groups = result.discussion.themes.map((theme) => ({
+		section: "Discussion themes",
+		title: theme.title,
+		summary: theme.summary,
+		tweetIds: dedupeDiscussionTweetIds(theme.tweetIds),
+	}));
+	const seen = new Set(
+		groups.flatMap((group) =>
+			group.tweetIds.map(normalizeDiscussionReferenceId),
+		),
+	);
+	const referencedIds = [
+		...result.discussion.sourceTweetIds,
+		...collectMarkdownReferenceIds(
+			markdown,
+			"tweet",
+			result.context.tweets.map((tweet) => tweet.id),
+		),
+	];
+	const supplemental = referencedIds.filter((tweetId) => {
+		const normalized = normalizeDiscussionReferenceId(tweetId);
+		if (seen.has(normalized)) return false;
+		seen.add(normalized);
+		return true;
+	});
+	if (supplemental.length > 0) {
+		groups.push({
+			section: "Supplemental source list",
+			title: "未在主题里直接成组的来源",
+			summary: "这些来源来自当前讨论的引用集合，单独列出便于补查。",
+			tweetIds: supplemental,
+		});
+	}
+	return groups;
+}
+
+function collectDiscussionReferenceDms(
+	result: SearchDiscussionRunResult,
+	markdown: string,
+) {
+	const knownIds = result.context.dms.map((dm) => dm.id);
+	const citedIds = new Set([
+		...resolveKnownReferenceIds(
+			[
+				...result.discussion.sourceDmConversationIds,
+				...result.discussion.themes.flatMap((theme) => theme.dmConversationIds),
+			],
+			"dm",
+			knownIds,
+		),
+		...collectMarkdownReferenceIds(markdown, "dm", knownIds),
+	]);
+	return result.context.dms.filter((dm) => citedIds.has(dm.id));
+}
+
+function formatDiscussionDate(value: string | undefined) {
+	if (!value) return "";
+	const parsed = new Date(value);
+	return Number.isNaN(parsed.getTime())
+		? ""
+		: parsed.toLocaleDateString("sv-SE");
+}
+
+function formatDiscussionRange(context: SearchDiscussionContext) {
+	const since = formatDiscussionDate(context.since);
+	const until = formatDiscussionDate(context.until);
+	if (since && until) return `${since} 至 ${until}`;
+	if (since) return `${since} 起`;
+	if (until) return `${until} 前`;
+	return "全部时间";
+}
+
 function useDiscussionStream(
 	query: string,
 	source: SearchDiscussionSource,
@@ -325,6 +483,58 @@ export function DiscussRouteView({
 		() => formatCounts(result?.context ?? context),
 		[context, result],
 	);
+	const exportQuery = result?.context.query ?? submittedSearch.query;
+	const [referencePdfActive, setReferencePdfActive] = useState(false);
+	const canExportPdf = Boolean(markdown.trim()) && !loading;
+	const canExportReferencePdf = Boolean(result) && !loading;
+	const exportTitle = `BirdClaw ${exportQuery || "Discuss"} discussion`;
+	const referenceExportTitle = `BirdClaw ${exportQuery || "Discuss"} discussion reference collection`;
+	const exportUpdatedAt = result
+		? new Date(result.updatedAt).toLocaleString(undefined, {
+				dateStyle: "medium",
+				timeStyle: "short",
+			})
+		: null;
+	const referenceGroups = useMemo(
+		() => (result ? collectDiscussionReferenceGroups(result, markdown) : []),
+		[markdown, result],
+	);
+	const referenceDms = useMemo(
+		() => (result ? collectDiscussionReferenceDms(result, markdown) : []),
+		[markdown, result],
+	);
+	const referenceSourceCount = useMemo(
+		() =>
+			new Set(
+				referenceGroups.flatMap((group) =>
+					group.tweetIds.map(normalizeDiscussionReferenceId),
+				),
+			).size,
+		[referenceGroups],
+	);
+	const handleExportPdf = useCallback(() => {
+		if (!canExportPdf || referencePdfActive) return;
+		exportCurrentPdf(exportTitle);
+	}, [canExportPdf, exportTitle, referencePdfActive]);
+	const handleExportReferencePdf = useCallback(() => {
+		if (!canExportReferencePdf || !result || referencePdfActive) return;
+		flushSync(() => setReferencePdfActive(true));
+		if (
+			typeof CSS === "undefined" ||
+			typeof CSS.supports !== "function" ||
+			!CSS.supports("page", "reference")
+		) {
+			exportCurrentPdf(referenceExportTitle, "reference", () =>
+				setReferencePdfActive(false),
+			);
+			return;
+		}
+		void exportReferenceCollectionPdf({
+			title: referenceExportTitle,
+			sourceSelector: '[data-testid="discuss-reference-pdf"]',
+			onCleanup: () => setReferencePdfActive(false),
+		});
+	}, [canExportReferencePdf, referenceExportTitle, referencePdfActive, result]);
 
 	useEffect(() => {
 		if (!queryComposingRef.current) setQueryDraft(query);
@@ -368,19 +578,41 @@ export function DiscussRouteView({
 	}, [run, submittedSearch]);
 
 	return (
-		<div className="flex min-h-screen flex-col">
-			<header className={pageHeaderClass}>
+		<div className="today-pdf-root flex min-h-screen flex-col">
+			<header className={cx("today-pdf-header", pageHeaderClass)}>
 				<div className={pageHeaderRowClass}>
 					<div className="min-w-0">
 						<h1 className={pageTitleClass}>Discuss</h1>
 						<p className={pageSubtitleClass}>{sourceLabel}</p>
 					</div>
-					<div className={pageHeaderActionsClass}>
+					<div className={cx("today-screen-only", pageHeaderActionsClass)}>
+						<button
+							type="button"
+							className={secondaryButtonClass}
+							onClick={handleExportPdf}
+							disabled={!canExportPdf || referencePdfActive}
+						>
+							<FileDown className="size-4" aria-hidden="true" />
+							Export PDF
+						</button>
+						<button
+							type="button"
+							className={secondaryButtonClass}
+							onClick={handleExportReferencePdf}
+							disabled={!canExportReferencePdf || referencePdfActive}
+						>
+							{referencePdfActive ? (
+								<Loader2 className="size-4 animate-spin" aria-hidden="true" />
+							) : (
+								<FileText className="size-4" aria-hidden="true" />
+							)}
+							导出完整 PDF
+						</button>
 						<button
 							type="button"
 							className={secondaryButtonClass}
 							onClick={() => run(true)}
-							disabled={loading || !submittedSearch.query}
+							disabled={loading || !submittedSearch.query || referencePdfActive}
 						>
 							<RefreshCw
 								className={cx("size-4", loading && "animate-spin")}
@@ -390,8 +622,19 @@ export function DiscussRouteView({
 						</button>
 					</div>
 				</div>
+				<div className="today-pdf-meta" aria-hidden="true">
+					<span>Query: {result?.context.query ?? exportQuery}</span>
+					<span>·</span>
+					<span>Sources: {sourceLabel}</span>
+					{exportUpdatedAt ? (
+						<>
+							<span>·</span>
+							<span>Generated {exportUpdatedAt}</span>
+						</>
+					) : null}
+				</div>
 				<form
-					className="grid gap-2 px-4 pb-3 md:grid-cols-[minmax(220px,1fr)_minmax(180px,0.8fr)_auto]"
+					className="today-screen-only grid gap-2 px-4 pb-3 md:grid-cols-[minmax(220px,1fr)_minmax(180px,0.8fr)_auto]"
 					onSubmit={submit}
 				>
 					<label className={searchFieldShellClass}>
@@ -426,7 +669,7 @@ export function DiscussRouteView({
 					<button
 						type="submit"
 						className={primaryButtonClass}
-						disabled={loading || !queryDraft.trim()}
+						disabled={loading || !queryDraft.trim() || referencePdfActive}
 					>
 						<Sparkles className="size-4" aria-hidden="true" />
 						Discuss
@@ -517,7 +760,7 @@ export function DiscussRouteView({
 
 			{error ? <div className={errorCopyClass}>{error}</div> : null}
 
-			<div className="border-b border-[var(--line)] px-4 py-2 text-[13px] text-[var(--ink-soft)]">
+			<div className="today-screen-only border-b border-[var(--line)] px-4 py-2 text-[13px] text-[var(--ink-soft)]">
 				<span className="inline-flex items-center gap-1">
 					{loading ? (
 						<Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -534,8 +777,41 @@ export function DiscussRouteView({
 				</span>
 			</div>
 
+			{referencePdfActive && result ? (
+				<ReferenceCollectionPrint
+					coverTitle="BirdClaw Discuss 参考内容合集"
+					documentTitle={result.discussion.title}
+					documentSummary={result.discussion.summary}
+					dms={referenceDms}
+					groups={referenceGroups}
+					insights={[
+						{ title: "观点分歧", items: result.discussion.tensions },
+						{ title: "后续关注", items: result.discussion.followUps },
+					]}
+					metadata={[
+						`检索词：${result.context.query}`,
+						...(result.context.question
+							? [`讨论问题：${result.context.question}`]
+							: []),
+						`时间范围：${formatDiscussionRange(result.context)} · 数据源：${result.context.source}`,
+						`生成日期：${formatDiscussionDate(result.updatedAt)} · 来源：${String(referenceSourceCount)} 条引用原文`,
+					]}
+					sectionLabels={{
+						"Discussion themes": "热议主题",
+						"Supplemental source list": "补充来源",
+					}}
+					sectionNotes={{
+						"Discussion themes": "按讨论主题逐组阅读。",
+						"Supplemental source list": "只作完整性补充。",
+					}}
+					testId="discuss-reference-pdf"
+					tweets={result.context.tweets}
+				/>
+			) : null}
+
 			{markdown ? (
 				<MarkdownViewer
+					className="today-digest-pdf"
 					context={result?.context ?? context}
 					markdownLinkClassName={discussMarkdownLinkClass}
 					markdown={markdown}

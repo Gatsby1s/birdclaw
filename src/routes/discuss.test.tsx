@@ -4,6 +4,7 @@ import {
 	render,
 	screen,
 	waitFor,
+	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateDiscussSearch } from "#/lib/route-search";
@@ -65,9 +66,17 @@ function discussionResult(markdown: string) {
 		discussion: {
 			title: "ChatGPT",
 			summary: "People discuss practical AI workflows.",
-			themes: [],
-			tensions: [],
-			followUps: [],
+			themes: [
+				{
+					title: "Practical workflows",
+					summary: "Summaries stay readable and useful.",
+					tweetIds: ["tweet_1"],
+					dmConversationIds: [],
+					handles: ["alice"],
+				},
+			],
+			tensions: ["Speed and depth still need balancing."],
+			followUps: ["Compare the strongest workflows."],
 			sourceTweetIds: ["tweet_1"],
 			sourceDmConversationIds: [],
 		},
@@ -189,6 +198,194 @@ describe("discuss route", () => {
 		expect(urls[2]?.searchParams.has("refresh")).toBe(false);
 		expect(urls[2]?.searchParams.has("since")).toBe(false);
 		expect(urls[2]?.searchParams.has("until")).toBe(false);
+	});
+
+	it("exports a completed discussion through the browser PDF flow", async () => {
+		document.title = "birdclaw";
+		const printMock = vi.spyOn(window, "print").mockImplementation(() => {
+			expect(document.title).toBe("BirdClaw ChatGPT discussion");
+			expect(document.body.dataset.todayPrintMode).toBe("summary");
+			window.dispatchEvent(new Event("afterprint"));
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				const markdown = "# ChatGPT\n\nDiscussion complete.";
+				return ndjsonResponse([
+					{
+						type: "start",
+						context: discussionResult(markdown).context,
+						cached: false,
+					},
+					{ type: "delta", delta: markdown },
+					{ type: "done", result: discussionResult(markdown) },
+				]);
+			}),
+		);
+
+		render(<DiscussRoute />);
+		const exportButton = screen.getByRole("button", { name: "Export PDF" });
+		const fullExportButton = screen.getByRole("button", {
+			name: "导出完整 PDF",
+		});
+		expect(exportButton).toBeDisabled();
+		expect(fullExportButton).toBeDisabled();
+
+		fireEvent.change(screen.getByPlaceholderText("Keywords"), {
+			target: { value: "ChatGPT" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+
+		await screen.findByRole("heading", { name: "ChatGPT", level: 1 });
+		expect(exportButton).toBeEnabled();
+		expect(fullExportButton).toBeEnabled();
+		fireEvent.click(exportButton);
+
+		expect(printMock).toHaveBeenCalledTimes(1);
+		expect(document.title).toBe("birdclaw");
+		expect(document.body.dataset.todayPrintMode).toBeUndefined();
+	});
+
+	it("exports cited discussion sources as a complete reference PDF without rerunning the discussion", async () => {
+		document.title = "birdclaw";
+		const discussionRequests: URL[] = [];
+		const printMock = vi.spyOn(window, "print").mockImplementation(() => {
+			try {
+				expect(document.title).toBe(
+					"BirdClaw ChatGPT discussion reference collection",
+				);
+				expect(document.body.dataset.todayPrintMode).toBe("reference");
+				const referencePdf = screen.getByTestId("discuss-reference-pdf");
+				expect(
+					within(referencePdf).getByRole("heading", {
+						name: "BirdClaw Discuss 参考内容合集",
+						level: 1,
+					}),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getByText(
+						"People discuss practical AI workflows.",
+					),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getAllByText("Practical workflows"),
+				).not.toHaveLength(0);
+				expect(
+					within(referencePdf).getByText("Summaries stay readable and useful."),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getByText("ChatGPT is useful for summaries."),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getByText(
+						"A Markdown-only source is still complete.",
+					),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getAllByText("Alice (@alice)"),
+				).not.toHaveLength(0);
+				expect(within(referencePdf).getAllByText("S01")).not.toHaveLength(0);
+				expect(within(referencePdf).getAllByText("S02")).not.toHaveLength(0);
+				expect(
+					within(referencePdf).getByRole("link", { name: "S01 所在页" }),
+				).toHaveAttribute("href", "#reference-source-S01");
+				expect(within(referencePdf).getByText("tweet_1")).toBeInTheDocument();
+				expect(
+					within(referencePdf).getAllByText("2026-05-23"),
+				).not.toHaveLength(0);
+				expect(within(referencePdf).queryByText(/4 likes|4 赞/)).toBeNull();
+				expect(
+					within(referencePdf).queryByText(
+						"https://x.com/alice/status/tweet_1",
+					),
+				).toBeNull();
+				expect(within(referencePdf).getAllByText("DM")).toHaveLength(9);
+				expect(
+					within(referencePdf).getByText("Private cited context 9."),
+				).toBeInTheDocument();
+				expect(
+					screen.getByRole("button", { name: "Export PDF" }),
+				).toBeDisabled();
+				expect(
+					screen.getByRole("button", { name: "导出完整 PDF" }),
+				).toBeDisabled();
+				expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+				expect(screen.getByRole("button", { name: "Discuss" })).toBeDisabled();
+			} finally {
+				window.dispatchEvent(new Event("afterprint"));
+			}
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				discussionRequests.push(url);
+				const markdown =
+					"# ChatGPT\n\n## Themes\n\n- Practical workflows stay readable (tweet_1).\n- A Markdown-only source is still complete (tweet_2).\n- Private context adds nuance (dm_friend).";
+				const baseResult = discussionResult(markdown);
+				const citedDms = Array.from({ length: 9 }, (_, index) => ({
+					id: index === 8 ? "dm:friend" : `dm_${String(index + 1)}`,
+					participant: `participant_${String(index + 1)}`,
+					name: `Private participant ${String(index + 1)}`,
+					lastMessageAt: "2026-05-23T08:19:00.000Z",
+					text: `Private cited context ${String(index + 1)}.`,
+					needsReply: false,
+					influenceScore: 0,
+				}));
+				const exportResult = {
+					...baseResult,
+					context: {
+						...baseResult.context,
+						includeDms: true,
+						counts: { ...baseResult.context.counts, dms: citedDms.length },
+						tweets: [
+							...baseResult.context.tweets,
+							{
+								...baseResult.context.tweets[0],
+								id: "tweet_2",
+								url: "https://x.com/alice/status/tweet_2",
+								text: "A Markdown-only source is still complete.",
+							},
+						],
+						dms: citedDms,
+					},
+					discussion: {
+						...baseResult.discussion,
+						themes: baseResult.discussion.themes.map((theme) => ({
+							...theme,
+							tweetIds: ["tweet_1", "1"],
+							dmConversationIds: [],
+						})),
+						sourceTweetIds: [],
+						sourceDmConversationIds: citedDms.slice(0, 8).map((dm) => dm.id),
+					},
+				};
+				return ndjsonResponse([
+					{
+						type: "start",
+						context: exportResult.context,
+						cached: false,
+					},
+					{ type: "delta", delta: markdown },
+					{ type: "done", result: exportResult },
+				]);
+			}),
+		);
+
+		render(<DiscussRoute />);
+		fireEvent.change(screen.getByPlaceholderText("Keywords"), {
+			target: { value: "ChatGPT" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+
+		await screen.findByRole("heading", { name: "ChatGPT", level: 1 });
+		expect(discussionRequests).toHaveLength(1);
+		fireEvent.click(screen.getByRole("button", { name: "导出完整 PDF" }));
+
+		expect(printMock).toHaveBeenCalledTimes(1);
+		expect(discussionRequests).toHaveLength(1);
+		expect(document.title).toBe("birdclaw");
+		expect(document.body.dataset.todayPrintMode).toBeUndefined();
 	});
 
 	it("applies a custom local date-time range to the submitted discussion", async () => {
