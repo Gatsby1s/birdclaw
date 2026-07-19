@@ -46,4 +46,31 @@ describe("route search schemas", () => {
 			q: "sam",
 		});
 	});
+
+	it("keeps valid custom ranges and rejects incomplete ones", () => {
+		const range = {
+			since: "2026-07-10T09:15:00.000Z",
+			until: "2026-07-10T11:45:00.000Z",
+		};
+		expect(validateTodaySearch({ period: "custom", ...range })).toMatchObject({
+			period: "custom",
+			...range,
+		});
+		expect(validateDiscussSearch({ range: "custom", ...range })).toMatchObject({
+			range: "custom",
+			...range,
+		});
+		expect(
+			validateTodaySearch({ period: "custom", since: range.since }),
+		).toMatchObject({
+			period: "today",
+			since: "",
+			until: "",
+		});
+		expect(validateDiscussSearch({ range: "custom" })).toMatchObject({
+			range: "all",
+			since: "",
+			until: "",
+		});
+	});
 });

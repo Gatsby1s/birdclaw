@@ -31,4 +31,17 @@ describe("discuss date range", () => {
 			new Date(yesterday.until ?? "").getTime(),
 		);
 	});
+
+	it("uses an explicit custom range", () => {
+		expect(
+			resolveDiscussDateRange("custom", now, {
+				since: "2026-07-10T09:15:00.000Z",
+				until: "2026-07-10T11:45:00.000Z",
+			}),
+		).toEqual({
+			since: "2026-07-10T09:15:00.000Z",
+			until: "2026-07-10T11:45:00.000Z",
+		});
+		expect(resolveDiscussDateRange("custom", now, {})).toEqual({});
+	});
 });

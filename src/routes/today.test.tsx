@@ -7,6 +7,7 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { validateTodaySearch } from "#/lib/route-search";
 import { ndjsonResponse } from "#/test/ndjson";
 import { renderWithQueryClient as render } from "#/test/render";
 import { TodayRouteView as TodayRoute } from "./today";
@@ -248,6 +249,116 @@ describe("today route", () => {
 					url.searchParams.get("liveSync") === "false",
 			),
 		).toBe(true);
+	});
+
+	it("runs a digest only after applying a valid custom date-time range", async () => {
+		const digestUrls: URL[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return new Response(JSON.stringify({ ok: true, results: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				digestUrls.push(url);
+				const markdown = "# Today\n\nDone.";
+				return ndjsonResponse([
+					{ type: "done", result: digestResult("Today", markdown) },
+				]);
+			}),
+		);
+
+		render(<TodayRoute />);
+		await waitFor(() => expect(digestUrls).toHaveLength(1));
+		fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+		expect(
+			screen.getByRole("group", { name: "Custom date range" }),
+		).toBeVisible();
+
+		const sinceLocal = "2026-07-10T09:15";
+		const untilLocal = "2026-07-10T11:45";
+		fireEvent.change(screen.getByLabelText("From"), {
+			target: { value: untilLocal },
+		});
+		fireEvent.change(screen.getByLabelText("To"), {
+			target: { value: sinceLocal },
+		});
+		expect(screen.getByText("From must be earlier than To.")).toBeVisible();
+		expect(
+			screen.getByRole("button", { name: "Apply custom range" }),
+		).toBeDisabled();
+
+		fireEvent.change(screen.getByLabelText("From"), {
+			target: { value: sinceLocal },
+		});
+		fireEvent.change(screen.getByLabelText("To"), {
+			target: { value: untilLocal },
+		});
+		expect(digestUrls).toHaveLength(1);
+		fireEvent.click(screen.getByRole("button", { name: "Apply custom range" }));
+
+		await waitFor(() => expect(digestUrls).toHaveLength(2));
+		const customUrl = digestUrls[1];
+		expect(customUrl?.searchParams.get("period")).toBe("custom");
+		expect(customUrl?.searchParams.get("since")).toBe(
+			new Date(sinceLocal).toISOString(),
+		);
+		expect(customUrl?.searchParams.get("until")).toBe(
+			new Date(untilLocal).toISOString(),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+		await waitFor(() => expect(digestUrls).toHaveLength(3));
+		expect(digestUrls[2]?.searchParams.get("since")).toBe(
+			customUrl?.searchParams.get("since"),
+		);
+		expect(digestUrls[2]?.searchParams.get("until")).toBe(
+			customUrl?.searchParams.get("until"),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Today" }));
+		await waitFor(() => expect(digestUrls).toHaveLength(4));
+		expect(digestUrls[3]?.searchParams.has("since")).toBe(false);
+		expect(digestUrls[3]?.searchParams.has("until")).toBe(false);
+	});
+
+	it("closes a restored custom picker when navigation returns to Today", () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				const markdown = "# Today\n\nDone.";
+				return ndjsonResponse([
+					{ type: "done", result: digestResult("Today", markdown) },
+				]);
+			}),
+		);
+		const onSearchChange = vi.fn();
+		const customSearch = validateTodaySearch({
+			period: "custom",
+			since: "2026-07-10T09:15:00.000Z",
+			until: "2026-07-10T11:45:00.000Z",
+		});
+		const { rerender } = render(
+			<TodayRoute searchState={customSearch} onSearchChange={onSearchChange} />,
+		);
+		expect(
+			screen.getByRole("group", { name: "Custom date range" }),
+		).toBeVisible();
+
+		rerender(
+			<TodayRoute
+				searchState={validateTodaySearch({ period: "today" })}
+				onSearchChange={onSearchChange}
+			/>,
+		);
+		expect(
+			screen.queryByRole("group", { name: "Custom date range" }),
+		).toBeNull();
+		expect(screen.getByRole("button", { name: "Today" })).toHaveClass(
+			"!bg-[var(--accent)]",
+		);
 	});
 
 	it("keeps structured topic headings when the model markdown is flat", async () => {

@@ -191,6 +191,100 @@ describe("discuss route", () => {
 		expect(urls[2]?.searchParams.has("until")).toBe(false);
 	});
 
+	it("applies a custom local date-time range to the submitted discussion", async () => {
+		const urls: URL[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				urls.push(url);
+				const markdown = "# Custom range\n\nDone.";
+				return ndjsonResponse([
+					{
+						type: "done",
+						result: discussionResult(markdown),
+					},
+				]);
+			}),
+		);
+
+		render(<DiscussRoute />);
+		fireEvent.change(screen.getByPlaceholderText("Keywords"), {
+			target: { value: "BirdClaw" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+		expect(
+			screen.getByRole("group", { name: "Custom date range" }),
+		).toBeVisible();
+
+		const sinceLocal = "2026-07-10T09:15";
+		const untilLocal = "2026-07-10T11:45";
+		fireEvent.change(screen.getByLabelText("From"), {
+			target: { value: sinceLocal },
+		});
+		fireEvent.change(screen.getByLabelText("To"), {
+			target: { value: untilLocal },
+		});
+		expect(urls).toHaveLength(0);
+
+		fireEvent.click(screen.getByRole("button", { name: "Apply custom range" }));
+		expect(urls).toHaveLength(0);
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+		await waitFor(() => expect(urls).toHaveLength(1));
+		expect(urls[0]?.searchParams.get("since")).toBe(
+			new Date(sinceLocal).toISOString(),
+		);
+		expect(urls[0]?.searchParams.get("until")).toBe(
+			new Date(untilLocal).toISOString(),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+		await waitFor(() => expect(urls).toHaveLength(2));
+		expect(urls[1]?.searchParams.get("since")).toBe(
+			urls[0]?.searchParams.get("since"),
+		);
+		expect(urls[1]?.searchParams.get("until")).toBe(
+			urls[0]?.searchParams.get("until"),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "All" }));
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+		await waitFor(() => expect(urls).toHaveLength(3));
+		expect(urls[2]?.searchParams.has("since")).toBe(false);
+		expect(urls[2]?.searchParams.has("until")).toBe(false);
+	});
+
+	it("closes a restored custom picker when navigation returns to All", () => {
+		const onSearchChange = vi.fn();
+		const customSearch = validateDiscussSearch({
+			range: "custom",
+			since: "2026-07-10T09:15:00.000Z",
+			until: "2026-07-10T11:45:00.000Z",
+		});
+		const { rerender } = render(
+			<DiscussRoute
+				searchState={customSearch}
+				onSearchChange={onSearchChange}
+			/>,
+		);
+		expect(
+			screen.getByRole("group", { name: "Custom date range" }),
+		).toBeVisible();
+
+		rerender(
+			<DiscussRoute
+				searchState={validateDiscussSearch({ range: "all" })}
+				onSearchChange={onSearchChange}
+			/>,
+		);
+		expect(
+			screen.queryByRole("group", { name: "Custom date range" }),
+		).toBeNull();
+		expect(screen.getByRole("button", { name: "All" })).toHaveClass(
+			"!bg-[var(--accent)]",
+		);
+	});
+
 	it("preserves Chinese IME composition before syncing route search", () => {
 		const onSearchChange = vi.fn();
 		const searchState = validateDiscussSearch({});

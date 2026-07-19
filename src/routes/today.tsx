@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { CustomDateRangePicker } from "#/components/CustomDateRangePicker";
 import { MarkdownViewer } from "#/components/MarkdownViewer";
 import { useNdjsonRun } from "#/components/useNdjsonRun";
 import {
@@ -76,6 +77,7 @@ const periods: Array<{ value: PeriodOption; label: string }> = [
 	{ value: "24h", label: "24h" },
 	{ value: "yesterday", label: "Yesterday" },
 	{ value: "week", label: "Week" },
+	{ value: "custom", label: "Custom" },
 ];
 
 const referenceSectionLabels: Record<string, string> = {
@@ -286,6 +288,8 @@ function digestUrl(
 	period: PeriodOption,
 	includeDms: boolean,
 	refresh: boolean,
+	since: string,
+	until: string,
 ) {
 	const url = new URL("/api/period-digest", window.location.origin);
 	url.searchParams.set("period", period);
@@ -294,6 +298,10 @@ function digestUrl(
 	url.searchParams.set("maxLinks", "20");
 	// Cloudflare caps proxied requests; live timeline sync remains a separate job/UI action.
 	url.searchParams.set("liveSync", "false");
+	if (period === "custom" && since && until) {
+		url.searchParams.set("since", since);
+		url.searchParams.set("until", until);
+	}
 	if (refresh) {
 		url.searchParams.set("refresh", "true");
 	}
@@ -1098,7 +1106,12 @@ function applyHydratedProfilesToResult(
 	return context === result.context ? result : { ...result, context };
 }
 
-function useDigestStream(period: PeriodOption, includeDms: boolean) {
+function useDigestStream(
+	period: PeriodOption,
+	includeDms: boolean,
+	since: string,
+	until: string,
+) {
 	const queryClient = useQueryClient();
 	const [markdown, setMarkdown] = useState("");
 	const [context, setContext] = useState<PeriodDigestContext | null>(null);
@@ -1115,11 +1128,11 @@ function useDigestStream(period: PeriodOption, includeDms: boolean) {
 	}, []);
 	const request = useCallback(
 		(signal: AbortSignal, refresh: boolean) =>
-			fetch(digestUrl(period, includeDms, refresh), {
+			fetch(digestUrl(period, includeDms, refresh, since, until), {
 				cache: "no-store",
 				signal,
 			}),
-		[includeDms, period],
+		[includeDms, period, since, until],
 	);
 	const onEvent = useCallback((event: PeriodDigestStreamEvent) => {
 		if (event.type === "status") {
@@ -1252,9 +1265,16 @@ export function TodayRouteView({
 	const searchState = controlledSearch ?? localSearch;
 	const updateSearch: RouteSearchChange<TodayRouteSearch> = (next, options) =>
 		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
-	const { period, includeDms } = searchState;
+	const { period, since, until, includeDms } = searchState;
+	const [customRangeOpen, setCustomRangeOpen] = useState(
+		() => period === "custom",
+	);
 	const { context, error, loading, markdown, result, run, status } =
-		useDigestStream(period, includeDms);
+		useDigestStream(period, includeDms, since, until);
+
+	useEffect(() => {
+		setCustomRangeOpen(period === "custom");
+	}, [period]);
 	const sourceLabel = useMemo(
 		() => formatCounts(result?.context ?? context),
 		[context, result],
@@ -1311,12 +1331,17 @@ export function TodayRouteView({
 	return (
 		<div className="today-pdf-root flex min-h-screen flex-col">
 			<header className={cx("today-pdf-header", pageHeaderClass)}>
-				<div className={pageHeaderRowClass}>
-					<div className="min-w-0">
+				<div className={cx(pageHeaderRowClass, "flex-wrap")}>
+					<div className="min-w-0 max-sm:w-full">
 						<h1 className={pageTitleClass}>What happened</h1>
 						<p className={pageSubtitleClass}>{sourceLabel}</p>
 					</div>
-					<div className={cx("today-screen-only", pageHeaderActionsClass)}>
+					<div
+						className={cx(
+							"today-screen-only max-w-full overflow-x-auto max-sm:w-full [&>button]:shrink-0",
+							pageHeaderActionsClass,
+						)}
+					>
 						<button
 							type="button"
 							className={secondaryButtonClass}
@@ -1365,18 +1390,37 @@ export function TodayRouteView({
 					) : null}
 				</div>
 				<div className="today-screen-only flex flex-wrap items-center gap-2 px-4 pb-3">
-					<div className={segmentedClass} aria-label="Digest period">
+					<div
+						className={cx(
+							segmentedClass,
+							"max-w-full overflow-x-auto max-sm:grid max-sm:w-full max-sm:grid-cols-3 max-sm:overflow-visible max-sm:rounded-2xl",
+						)}
+						aria-label="Digest period"
+					>
 						{periods.map((item) => (
 							<button
 								key={item.value}
 								type="button"
 								className={cx(
 									segmentClass,
-									period === item.value && todayPeriodSegmentActiveClass,
+									(item.value === "custom"
+										? period === "custom" || customRangeOpen
+										: !customRangeOpen && period === item.value) &&
+										todayPeriodSegmentActiveClass,
 								)}
-								onClick={() =>
-									updateSearch({ ...searchState, period: item.value })
-								}
+								onClick={() => {
+									if (item.value === "custom") {
+										setCustomRangeOpen((open) => !open);
+										return;
+									}
+									setCustomRangeOpen(false);
+									updateSearch({
+										...searchState,
+										period: item.value,
+										since: "",
+										until: "",
+									});
+								}}
 							>
 								{item.label}
 							</button>
@@ -1395,6 +1439,18 @@ export function TodayRouteView({
 						/>
 						DMs
 					</label>
+					{customRangeOpen ? (
+						<CustomDateRangePicker
+							value={period === "custom" ? { since, until } : null}
+							onApply={(customRange) =>
+								updateSearch({
+									...searchState,
+									period: "custom",
+									...customRange,
+								})
+							}
+						/>
+					) : null}
 				</div>
 			</header>
 

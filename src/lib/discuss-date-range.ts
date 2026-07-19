@@ -1,4 +1,15 @@
-export type DiscussDateRange = "all" | "today" | "24h" | "yesterday" | "week";
+import {
+	type CustomDateRange,
+	normalizeCustomDateRange,
+} from "./custom-date-range";
+
+export type DiscussDateRange =
+	| "all"
+	| "today"
+	| "24h"
+	| "yesterday"
+	| "week"
+	| "custom";
 
 export interface ResolvedDiscussDateRange {
 	since?: string;
@@ -18,8 +29,14 @@ function addDays(date: Date, days: number) {
 export function resolveDiscussDateRange(
 	range: DiscussDateRange,
 	now = new Date(),
+	customRange?: Partial<CustomDateRange>,
 ): ResolvedDiscussDateRange {
 	if (range === "all") return {};
+	if (range === "custom") {
+		return (
+			normalizeCustomDateRange(customRange?.since, customRange?.until) ?? {}
+		);
+	}
 
 	if (range === "today") {
 		return {

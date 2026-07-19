@@ -1,4 +1,5 @@
 import type { DiscussDateRange } from "./discuss-date-range";
+import { normalizeCustomDateRange } from "./custom-date-range";
 import type { NetworkMapKind } from "./network-map";
 import type { SearchDiscussionSource } from "./search-discussion";
 import type { TweetSearchMode } from "./tweet-search-live";
@@ -114,12 +115,23 @@ export interface DiscussRouteSearch {
 	source: SearchDiscussionSource;
 	mode: TweetSearchMode;
 	range: DiscussDateRange;
+	since: string;
+	until: string;
 	includeDms: boolean;
 }
 
 export function validateDiscussSearch(
 	search: Record<string, unknown>,
 ): DiscussRouteSearch {
+	const requestedRange = enumValue(
+		search.range,
+		["all", "today", "24h", "yesterday", "week", "custom"],
+		"all",
+	);
+	const customRange = normalizeCustomDateRange(
+		stringValue(search.since),
+		stringValue(search.until),
+	);
 	return {
 		q: stringValue(search.q),
 		question: stringValue(search.question),
@@ -129,31 +141,44 @@ export function validateDiscussSearch(
 			"search",
 		),
 		mode: enumValue(search.mode, ["auto", "bird", "xurl", "local"], "xurl"),
-		range: enumValue(
-			search.range,
-			["all", "today", "24h", "yesterday", "week"],
-			"all",
-		),
+		range: requestedRange === "custom" && !customRange ? "all" : requestedRange,
+		since: customRange?.since ?? "",
+		until: customRange?.until ?? "",
 		includeDms: booleanValue(search.includeDms),
 	};
 }
 
-export type PeriodRouteSearch = "today" | "24h" | "yesterday" | "week";
+export type PeriodRouteSearch =
+	| "today"
+	| "24h"
+	| "yesterday"
+	| "week"
+	| "custom";
 
 export interface TodayRouteSearch {
 	period: PeriodRouteSearch;
+	since: string;
+	until: string;
 	includeDms: boolean;
 }
 
 export function validateTodaySearch(
 	search: Record<string, unknown>,
 ): TodayRouteSearch {
+	const requestedPeriod = enumValue(
+		search.period,
+		["today", "24h", "yesterday", "week", "custom"],
+		"today",
+	);
+	const customRange = normalizeCustomDateRange(
+		stringValue(search.since),
+		stringValue(search.until),
+	);
 	return {
-		period: enumValue(
-			search.period,
-			["today", "24h", "yesterday", "week"],
-			"today",
-		),
+		period:
+			requestedPeriod === "custom" && !customRange ? "today" : requestedPeriod,
+		since: customRange?.since ?? "",
+		until: customRange?.until ?? "",
 		includeDms: booleanValue(search.includeDms),
 	};
 }
