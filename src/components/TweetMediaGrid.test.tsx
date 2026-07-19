@@ -72,7 +72,70 @@ describe("TweetMediaGrid", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
 
-		expect(screen.getByRole("dialog")).toBeInTheDocument();
+		expect(
+			screen.getByRole("dialog", { name: "Tweet media viewer" }),
+		).toHaveClass("fixed", "inset-0", "bg-black");
+		expect(screen.getByRole("img", { name: "Tweet media" })).toHaveAttribute(
+			"src",
+			"https://example.com/one.jpg",
+		);
+		expect(
+			screen.getByRole("link", { name: "Open original media" }),
+		).toHaveAttribute("href", "https://example.com/one.jpg");
+	});
+
+	it("zooms images from controls and direct image clicks", () => {
+		render(
+			<TweetMediaGrid
+				items={[
+					{
+						url: "https://example.com/detail.jpg",
+						type: "image",
+					},
+				]}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
+
+		const image = screen.getByRole("img", { name: "Tweet media" });
+		expect(image).toHaveStyle({
+			transform: "translate3d(0px, 0px, 0) scale(1)",
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+		expect(screen.getByText("150%")).toBeInTheDocument();
+		expect(image).toHaveStyle({
+			transform: "translate3d(0px, 0px, 0) scale(1.5)",
+		});
+
+		fireEvent.click(image);
+		expect(screen.getByText("100%")).toBeInTheDocument();
+		fireEvent.click(image);
+		expect(screen.getByText("200%")).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Reset zoom" }));
+		expect(screen.getByText("100%")).toBeInTheDocument();
+	});
+
+	it("navigates multi-image tweets with X-style arrows and the keyboard", () => {
+		render(
+			<TweetMediaGrid
+				items={[
+					{ url: "https://example.com/one.jpg", type: "image" },
+					{ url: "https://example.com/two.jpg", type: "image" },
+				]}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
+		expect(screen.getByText("1 / 2")).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Next media" }));
+		expect(screen.getByRole("img", { name: "Tweet media" })).toHaveAttribute(
+			"src",
+			"https://example.com/two.jpg",
+		);
+		expect(screen.getByText("2 / 2")).toBeInTheDocument();
+
+		fireEvent.keyDown(window, { key: "ArrowLeft" });
 		expect(screen.getByRole("img", { name: "Tweet media" })).toHaveAttribute(
 			"src",
 			"https://example.com/one.jpg",
@@ -103,7 +166,7 @@ describe("TweetMediaGrid", () => {
 	});
 
 	it("opens video media inline", () => {
-		const { container } = render(
+		render(
 			<TweetMediaGrid
 				items={[
 					{
@@ -123,7 +186,7 @@ describe("TweetMediaGrid", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
 
-		const video = container.querySelector("video");
+		const video = document.querySelector("video");
 		expect(video).toHaveAttribute("src", "https://video.twimg.com/clip.mp4");
 		expect(video).toHaveAttribute(
 			"poster",
@@ -132,7 +195,7 @@ describe("TweetMediaGrid", () => {
 	});
 
 	it("opens direct video CDN URLs inline without a variant", () => {
-		const { container } = render(
+		render(
 			<TweetMediaGrid
 				items={[
 					{
@@ -145,14 +208,14 @@ describe("TweetMediaGrid", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
 
-		expect(container.querySelector("video")).toHaveAttribute(
+		expect(document.querySelector("video")).toHaveAttribute(
 			"src",
 			"https://video.twimg.com/ext_tw_video/clip.mp4",
 		);
 	});
 
 	it("opens gif mp4 fallbacks inline as looping muted video", () => {
-		const { container } = render(
+		render(
 			<TweetMediaGrid
 				items={[
 					{
@@ -165,14 +228,14 @@ describe("TweetMediaGrid", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
 
-		const video = container.querySelector("video");
+		const video = document.querySelector("video");
 		expect(video).toHaveAttribute("src", "/media/demo.mp4");
 		expect(video).toHaveAttribute("loop");
 		expect(video?.muted).toBe(true);
 	});
 
 	it("does not treat variant-less video thumbnails as playable video", () => {
-		const { container } = render(
+		render(
 			<TweetMediaGrid
 				items={[
 					{
@@ -186,7 +249,7 @@ describe("TweetMediaGrid", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
 
-		expect(container.querySelector("video")).toBeNull();
+		expect(document.querySelector("video")).toBeNull();
 		expect(screen.getByRole("link", { name: "Open media" })).toHaveAttribute(
 			"href",
 			"https://pbs.twimg.com/ext_tw_video_thumb/video.jpg",
@@ -213,6 +276,38 @@ describe("TweetMediaGrid", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Close media viewer" }));
 
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+	});
+
+	it("locks page scrolling and closes from Escape", () => {
+		document.body.style.overflow = "auto";
+		document.documentElement.style.scrollbarGutter = "stable";
+		render(
+			<TweetMediaGrid
+				items={[
+					{
+						url: "https://example.com/one.jpg",
+						type: "image",
+					},
+				]}
+			/>,
+		);
+
+		const trigger = screen.getByRole("button", { name: "Open tweet media 1" });
+		trigger.focus();
+		fireEvent.click(trigger);
+		expect(document.body.style.overflow).toBe("hidden");
+		expect(document.documentElement.style.scrollbarGutter).toBe("auto");
+		expect(
+			screen.getByRole("dialog", { name: "Tweet media viewer" }),
+		).toHaveFocus();
+		fireEvent.keyDown(window, { key: "Escape" });
+
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		expect(document.body.style.overflow).toBe("auto");
+		expect(document.documentElement.style.scrollbarGutter).toBe("stable");
+		expect(trigger).toHaveFocus();
+		document.body.style.overflow = "";
+		document.documentElement.style.scrollbarGutter = "";
 	});
 
 	it("keeps a fallback open path for unknown media", () => {
