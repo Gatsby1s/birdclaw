@@ -347,6 +347,40 @@ describe("link insights", () => {
 		]);
 	});
 
+	it("preserves Chinese comments adjacent to t.co links", () => {
+		const db = insertAccountFixture();
+		insertTweet(db, {
+			id: "tweet_cjk_comment",
+			authorProfileId: "profile_a",
+			text: "参见https://t.co/cjk，市场转暖；值得继续观察。",
+			createdAt: "2026-05-10T10:00:00.000Z",
+		});
+		insertExpansion(db, {
+			shortUrl: "https://t.co/cjk",
+			finalUrl: "https://example.com/cjk-report",
+		});
+		insertOccurrence(db, {
+			sourceKind: "tweet",
+			sourceId: "tweet_cjk_comment",
+			shortUrl: "https://t.co/cjk",
+			createdAt: "2026-05-10T10:00:00.000Z",
+		});
+
+		const insights = getLinkInsights({
+			kind: "links",
+			range: "week",
+			now: new Date("2026-05-11T12:00:00.000Z"),
+		});
+		const mention = insights.items[0]?.mentions[0];
+
+		expect(mention).toMatchObject({
+			hasComment: true,
+			isPureShare: false,
+		});
+		expect(mention?.commentText).toContain("市场转暖；值得继续观察。");
+		expect(mention?.commentText).not.toContain("https://t.co/cjk");
+	});
+
 	it("derives readable titles from long slug URLs when metadata is missing", () => {
 		const db = insertAccountFixture();
 		insertTweet(db, {

@@ -12,12 +12,12 @@ import {
 	normalizeUrlExpansionForIndex,
 	upsertUrlExpansion,
 } from "./url-expansion-store";
+import { extractRawHttpUrls } from "./raw-url";
 
 const SUCCESS_CACHE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const FAILURE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 4;
-const URL_REGEX = /https?:\/\/[^\s<>"')\]]+/g;
 
 interface CachedUrlExpansion {
 	expandedUrl: string;
@@ -45,10 +45,6 @@ function isFresh(updatedAt: string, maxAgeMs: number) {
 	return Date.now() - new Date(updatedAt).getTime() <= maxAgeMs;
 }
 
-function trimTrailingPunctuation(url: string) {
-	return url.replace(/[.,;:!?]+$/g, "");
-}
-
 function toError(error: unknown) {
 	return error instanceof Error ? error : new Error(String(error));
 }
@@ -67,13 +63,7 @@ function cancelBodyEffect(response: Response) {
 }
 
 export function extractUrls(text: string) {
-	return Array.from(
-		new Set(
-			Array.from(text.matchAll(URL_REGEX), (match) =>
-				trimTrailingPunctuation(match[0]),
-			),
-		),
-	).filter((url) => url.length > 0);
+	return Array.from(new Set(extractRawHttpUrls(text)));
 }
 
 function toExpansionItem(
@@ -339,5 +329,4 @@ export function expandUrlsFromTexts(
 
 export const __test__ = {
 	cacheKeyForUrl,
-	trimTrailingPunctuation,
 };

@@ -36,6 +36,15 @@ describe("URL expansion cache", () => {
 		expect(
 			extractUrls("See https://t.co/uEKD3k4vep, and https://example.com/x."),
 		).toEqual(["https://t.co/uEKD3k4vep", "https://example.com/x"]);
+		expect(
+			extractUrls(
+				"参见https://t.co/fx3GCU2zF8，市场转暖；这里https://t.co/QVugYmhuPc有聊。阅读https://example.com/report？",
+			),
+		).toEqual([
+			"https://t.co/fx3GCU2zF8",
+			"https://t.co/QVugYmhuPc",
+			"https://example.com/report",
+		]);
 
 		await expect(
 			expandUrlsFromTexts(["See https://t.co/uEKD3k4vep"], {

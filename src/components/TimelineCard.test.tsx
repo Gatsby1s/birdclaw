@@ -149,6 +149,34 @@ describe("TimelineCard", () => {
 		expect(onReply).toHaveBeenCalledWith("tweet_1");
 	});
 
+	it("keeps Chinese prose outside adjacent fallback t.co links", () => {
+		const text =
+			"参见https://t.co/fx3GCU2zF8，市场转暖；这里https://t.co/QVugYmhuPc有聊。";
+		const { container } = render(
+			<TimelineCard
+				item={{
+					...item,
+					text,
+					entities: {},
+					media: [],
+					mediaCount: 0,
+					replyToTweet: null,
+					quotedTweet: null,
+				}}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		expect(
+			screen.getByRole("link", { name: "t.co/fx3GCU2zF8" }),
+		).toHaveAttribute("href", "https://t.co/fx3GCU2zF8");
+		expect(
+			screen.getByRole("link", { name: "t.co/QVugYmhuPc" }),
+		).toHaveAttribute("href", "https://t.co/QVugYmhuPc");
+		expect(container).toHaveTextContent("，市场转暖；这里");
+		expect(container.textContent).not.toContain("%EF%BC");
+	});
+
 	it("renders an imported X Remark annotation for the displayed author", () => {
 		render(
 			<TimelineCard

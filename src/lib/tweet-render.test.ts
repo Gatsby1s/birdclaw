@@ -153,6 +153,30 @@ describe("tweet render helpers", () => {
 		]);
 	});
 
+	it("stops fallback t.co links before adjacent Chinese prose", () => {
+		const text =
+			"参见https://t.co/fx3GCU2zF8，市场转暖；这里https://t.co/QVugYmhuPc有聊。";
+		const entities = enrichFallbackUrlEntities(text, {});
+
+		expect(entities.urls).toEqual([
+			{
+				url: "https://t.co/fx3GCU2zF8",
+				expandedUrl: "https://t.co/fx3GCU2zF8",
+				displayUrl: "t.co/fx3GCU2zF8",
+				start: 2,
+				end: 25,
+			},
+			{
+				url: "https://t.co/QVugYmhuPc",
+				expandedUrl: "https://t.co/QVugYmhuPc",
+				displayUrl: "t.co/QVugYmhuPc",
+				start: 33,
+				end: 56,
+			},
+		]);
+		expect(renderTweetPlainText(text, entities)).toBe(text);
+	});
+
 	it("keeps existing url entities over fallback raw matches", () => {
 		const entities = enrichFallbackUrlEntities(
 			"Check it: https://t.co/demo",
