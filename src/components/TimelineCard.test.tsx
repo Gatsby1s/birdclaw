@@ -343,6 +343,165 @@ describe("TimelineCard", () => {
 		);
 	});
 
+	it("expands a truncated manual repost in place and collapses it again", async () => {
+		const shortText = "A long repost starts here and then stops…";
+		const fullText =
+			"A long repost starts here and then stops being truncated.\n\nThis is the complete long-form post, shown inside BirdClaw.";
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				ok: true,
+				tweetId: "tweet_manual_long",
+				sourceTweetId: "tweet_original_long",
+				text: fullText,
+			}),
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		const { container } = render(
+			<TimelineCard
+				item={{
+					...item,
+					id: "tweet_manual_long",
+					text: `RT @ava: ${shortText}`,
+					entities: {},
+					media: [],
+					mediaCount: 0,
+					replyToTweet: null,
+					quotedTweet: null,
+					retweetedTweet: {
+						id: "tweet_manual_long:retweeted",
+						text: shortText,
+						createdAt: "2026-03-08T11:55:00.000Z",
+						author: {
+							id: "profile_3",
+							handle: "ava",
+							displayName: "Ava",
+							bio: "Reporter",
+							followersCount: 400,
+							avatarHue: 120,
+							createdAt: "2026-03-08T09:00:00.000Z",
+						},
+						entities: {},
+						media: [],
+					},
+				}}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		expect(screen.getByText(shortText)).toBeInTheDocument();
+		expect(screen.getByText("Show more")).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Show full repost" }));
+
+		expect(
+			await screen.findByText(
+				(_content, node) =>
+					node?.tagName === "P" && node.textContent === fullText,
+			),
+		).toBeInTheDocument();
+		expect(fetchMock.mock.calls[0]?.[0]).toBe(
+			"/api/tweet-expand?tweetId=tweet_manual_long",
+		);
+		expect(
+			screen.getByRole("button", { name: "Collapse repost" }),
+		).toHaveTextContent("Show less");
+		expect(screen.getByRole("link", { name: "Reply open" })).toHaveAttribute(
+			"href",
+			"https://x.com/ava/status/tweet_original_long",
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Collapse repost" }));
+		expect(screen.getByText(shortText)).toBeInTheDocument();
+		expect(screen.queryByText(fullText)).toBeNull();
+		const row = container.querySelector("[data-perf='timeline-card']");
+		if (!row) throw new Error("timeline card missing");
+		expect(
+			within(row as HTMLElement).getByRole("button", {
+				name: "Show full repost",
+			}),
+		).toHaveAttribute("aria-expanded", "false");
+	});
+
+	it("does not offer expansion for a complete native repost", () => {
+		render(
+			<TimelineCard
+				item={{
+					...item,
+					id: "tweet_native_complete",
+					retweetedTweet: {
+						id: "tweet_original_complete",
+						text: "This native repost is already complete.",
+						createdAt: "2026-03-08T11:55:00.000Z",
+						author: item.author,
+						entities: {},
+						media: [],
+					},
+				}}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		expect(
+			screen.queryByRole("button", { name: "Show full repost" }),
+		).toBeNull();
+	});
+
+	it("keeps the repost in place when expansion fails and can retry", async () => {
+		const shortText = "A truncated repost that can be retried…";
+		const fullText = "A truncated repost that can be retried successfully.";
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce({
+				ok: false,
+				status: 502,
+				json: async () => ({ ok: false, error: "Full repost unavailable" }),
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({
+					ok: true,
+					tweetId: "2077304879635411112",
+					sourceTweetId: "2076981334246138273",
+					text: fullText,
+				}),
+			});
+		vi.stubGlobal("fetch", fetchMock);
+		render(
+			<TimelineCard
+				item={{
+					...item,
+					id: "2077304879635411112",
+					text: `RT @ava: ${shortText}`,
+					entities: {},
+					media: [],
+					mediaCount: 0,
+					retweetedTweet: {
+						id: "2077304879635411112:retweeted",
+						text: shortText,
+						createdAt: "2026-07-15T08:10:52.000Z",
+						author: item.author,
+						entities: {},
+						media: [],
+					},
+				}}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Show full repost" }));
+		expect(
+			await screen.findByText("Couldn’t load the full post."),
+		).toBeInTheDocument();
+		expect(screen.getByText(shortText)).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Show conversation" }),
+		).toHaveAttribute("aria-expanded", "false");
+
+		fireEvent.click(screen.getByRole("button", { name: "Retry full repost" }));
+		expect(await screen.findByText(fullText)).toBeInTheDocument();
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
 	it("keeps duplicate retweet rows independently expandable", async () => {
 		const fetchMock = vi.fn().mockResolvedValue({
 			ok: true,

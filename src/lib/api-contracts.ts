@@ -381,6 +381,16 @@ export const tweetConversationResponseSchema = z.object({
 	items: z.array(embeddedTweetSchema),
 });
 
+export const expandedTweetTextResponseSchema = z.object({
+	ok: z.literal(true),
+	tweetId: z.string(),
+	sourceTweetId: z.string(),
+	text: z.string(),
+});
+export type ExpandedTweetTextResponse = z.infer<
+	typeof expandedTweetTextResponseSchema
+>;
+
 const blockItemSchema = z.object({
 	accountId: z.string(),
 	accountHandle: z.string(),

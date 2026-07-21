@@ -27,6 +27,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ProfilesHandleRouteImport } from './routes/profiles.$handle'
 import { Route as ApiXurlRateLimitsRouteImport } from './routes/api/xurl-rate-limits'
 import { Route as ApiXremarkRouteImport } from './routes/api/xremark'
+import { Route as ApiTweetExpandRouteImport } from './routes/api/tweet-expand'
 import { Route as ApiSyncRouteImport } from './routes/api/sync'
 import { Route as ApiStatusRouteImport } from './routes/api/status'
 import { Route as ApiSettingsRouteImport } from './routes/api/settings'
@@ -136,6 +137,11 @@ const ApiXurlRateLimitsRoute = ApiXurlRateLimitsRouteImport.update({
 const ApiXremarkRoute = ApiXremarkRouteImport.update({
   id: '/api/xremark',
   path: '/api/xremark',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTweetExpandRoute = ApiTweetExpandRouteImport.update({
+  id: '/api/tweet-expand',
+  path: '/api/tweet-expand',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSyncRoute = ApiSyncRouteImport.update({
@@ -274,6 +280,7 @@ export interface FileRoutesByFullPath {
   '/api/settings': typeof ApiSettingsRoute
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
+  '/api/tweet-expand': typeof ApiTweetExpandRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
@@ -314,6 +321,7 @@ export interface FileRoutesByTo {
   '/api/settings': typeof ApiSettingsRoute
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
+  '/api/tweet-expand': typeof ApiTweetExpandRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
@@ -355,6 +363,7 @@ export interface FileRoutesById {
   '/api/settings': typeof ApiSettingsRoute
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
+  '/api/tweet-expand': typeof ApiTweetExpandRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
@@ -397,6 +406,7 @@ export interface FileRouteTypes {
     | '/api/settings'
     | '/api/status'
     | '/api/sync'
+    | '/api/tweet-expand'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/profiles/$handle'
@@ -437,6 +447,7 @@ export interface FileRouteTypes {
     | '/api/settings'
     | '/api/status'
     | '/api/sync'
+    | '/api/tweet-expand'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/profiles/$handle'
@@ -477,6 +488,7 @@ export interface FileRouteTypes {
     | '/api/settings'
     | '/api/status'
     | '/api/sync'
+    | '/api/tweet-expand'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/profiles/$handle'
@@ -518,6 +530,7 @@ export interface RootRouteChildren {
   ApiSettingsRoute: typeof ApiSettingsRoute
   ApiStatusRoute: typeof ApiStatusRoute
   ApiSyncRoute: typeof ApiSyncRoute
+  ApiTweetExpandRoute: typeof ApiTweetExpandRoute
   ApiXremarkRoute: typeof ApiXremarkRoute
   ApiXurlRateLimitsRoute: typeof ApiXurlRateLimitsRoute
   ProfilesHandleRoute: typeof ProfilesHandleRoute
@@ -650,6 +663,13 @@ declare module '@tanstack/react-router' {
       path: '/api/xremark'
       fullPath: '/api/xremark'
       preLoaderRoute: typeof ApiXremarkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/tweet-expand': {
+      id: '/api/tweet-expand'
+      path: '/api/tweet-expand'
+      fullPath: '/api/tweet-expand'
+      preLoaderRoute: typeof ApiTweetExpandRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/sync': {
@@ -843,6 +863,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSettingsRoute: ApiSettingsRoute,
   ApiStatusRoute: ApiStatusRoute,
   ApiSyncRoute: ApiSyncRoute,
+  ApiTweetExpandRoute: ApiTweetExpandRoute,
   ApiXremarkRoute: ApiXremarkRoute,
   ApiXurlRateLimitsRoute: ApiXurlRateLimitsRoute,
   ProfilesHandleRoute: ProfilesHandleRoute,
