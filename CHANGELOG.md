@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.39 - 2026-07-22
+
+### Added
+
+- Play single tweet videos directly in the timeline with native controls, inline playback, responsive sizing, and the existing expanded media viewer.
+- Preserve Bird video and animated-GIF URLs, posters, dimensions, duration, and media attachments during timeline synchronization.
+
+### Fixed
+
+- Keep GIF playback user-controlled and ensure expanding media leaves only one active player while restoring keyboard focus on close.
+
 ## 0.8.38 - 2026-07-22
 
 ### Fixed
