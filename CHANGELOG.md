@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.38 - 2026-07-22
+
+### Fixed
+
+- Treat fallback `t.co` links as opaque short codes so adjacent Chinese prose stays readable instead of becoming a percent-encoded blue URL.
+- Reuse the same URL boundaries for background expansion, Links insights, and research exports to prevent malformed links from spreading beyond the timeline.
+
 ## 0.8.37 - 2026-07-20
 
 ### Added
