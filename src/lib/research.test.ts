@@ -394,6 +394,15 @@ describe("research mode", () => {
 		expect(__test__.collectExternalLinks([node])).toEqual([
 			"https://example.com",
 		]);
+		expect(
+			__test__.collectExternalLinks([
+				{
+					...node,
+					plainText:
+						"参见https://t.co/fx3GCU2zF8，市场转暖；这里https://t.co/QVugYmhuPc有聊。",
+				},
+			]),
+		).toEqual(["https://t.co/fx3GCU2zF8", "https://t.co/QVugYmhuPc"]);
 		expect(__test__.collectHandles([node])).toEqual([
 			"@researchsam",
 			"@someone",

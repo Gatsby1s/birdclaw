@@ -6,6 +6,7 @@ import { runEffectPromise } from "./effect-runtime";
 import { listTimelineItems } from "./timeline-read-model";
 import { lookupTweetsByIdsEffect } from "./tweet-lookup";
 import { renderTweetMarkdown, renderTweetPlainText } from "./tweet-render";
+import { extractRawHttpUrls } from "./raw-url";
 import type { TweetEntities, XurlMentionUser } from "./types";
 
 type ResearchNodeSource = "local" | "live";
@@ -460,8 +461,8 @@ function orderThreadNodes(rootId: string, nodes: ResearchNode[]) {
 function collectExternalLinks(nodes: ResearchNode[]) {
 	const links = new Set<string>();
 	for (const node of nodes) {
-		for (const match of node.plainText.matchAll(/https?:\/\/[^\s<>\])"]+/g)) {
-			links.add(match[0]);
+		for (const url of extractRawHttpUrls(node.plainText)) {
+			links.add(url);
 		}
 	}
 	return Array.from(links);

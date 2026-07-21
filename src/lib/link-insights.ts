@@ -4,6 +4,7 @@ import {
 	normalizeProfileHandle,
 	nullableProfileFromDbRow,
 } from "./profile-row";
+import { extractRawHttpUrls } from "./raw-url";
 import type {
 	LinkInsightItem,
 	LinkInsightKind,
@@ -44,7 +45,6 @@ const VIDEO_EXACT_HOSTS = new Set([
 const EXCLUDED_HOST_SUFFIXES = ["x.com", "twitter.com"];
 const EXCLUDED_EXACT_HOSTS = new Set(["t.co"]);
 const URL_WHITESPACE = /\s+/g;
-const RAW_URL_PATTERN = /https?:\/\/[^\s<>"'`]+/g;
 const SQL_URL_EXPRESSION =
 	"lower(coalesce(nullif(e.final_url, ''), nullif(e.expanded_url, ''), e.short_url))";
 
@@ -483,7 +483,7 @@ function buildMention(row: LinkInsightRow, normalized: NormalizedUrl) {
 		row.final_url,
 		normalized.url,
 		normalized.displayUrl,
-		...(rawText.match(RAW_URL_PATTERN) ?? []),
+		...extractRawHttpUrls(rawText),
 	]);
 	const sharedContentText =
 		row.linked_text && row.linked_text !== rawText ? row.linked_text : null;
@@ -538,7 +538,7 @@ function rankRowHasComment(row: LinkInsightRankRow, normalized: NormalizedUrl) {
 			row.final_url,
 			normalized.url,
 			normalized.displayUrl,
-			...(rawText.match(RAW_URL_PATTERN) ?? []),
+			...extractRawHttpUrls(rawText),
 		]).length > 0
 	);
 }

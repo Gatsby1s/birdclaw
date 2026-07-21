@@ -5,6 +5,7 @@ import type {
 	TweetMentionEntity,
 	TweetUrlEntity,
 } from "./types";
+import { findRawHttpUrls } from "./raw-url";
 
 type TweetSegment =
 	| ({ kind: "mention" } & TweetMentionEntity)
@@ -15,9 +16,6 @@ type UrlExpansion = Pick<TweetUrlEntity, "expandedUrl" | "displayUrl"> &
 	Partial<
 		Pick<TweetUrlEntity, "title" | "description" | "imageUrl" | "siteName">
 	>;
-
-const RAW_URL_PATTERN = /https?:\/\/[^\s<>"'`]+/g;
-const TRAILING_URL_PUNCTUATION = /[),.;:!?]+$/;
 
 const MARKDOWN_ESCAPE_CHARACTERS = new Set([
 	"\\",
@@ -302,14 +300,7 @@ export function enrichFallbackUrlEntities(
 	});
 	const fallbackUrls: TweetUrlEntity[] = [];
 
-	for (const match of text.matchAll(RAW_URL_PATTERN)) {
-		const rawMatch = match[0];
-		const url = rawMatch.replace(TRAILING_URL_PUNCTUATION, "");
-		const start = match.index ?? 0;
-		const end = start + url.length;
-		if (!url) {
-			continue;
-		}
+	for (const { url, start, end } of findRawHttpUrls(text)) {
 		if (
 			enrichedExistingUrls.some((entry) =>
 				spansOverlap(start, end, entry.start, entry.end),
