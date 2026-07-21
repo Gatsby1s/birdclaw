@@ -1052,6 +1052,40 @@ describe("TimelineCard", () => {
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
 
+	it("does not toggle the conversation when inline video controls are used", () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		render(
+			<TimelineCard
+				item={{
+					...item,
+					id: "tweet_video",
+					entities: {},
+					media: [
+						{
+							url: "https://pbs.twimg.com/video-thumb.jpg",
+							type: "video",
+							thumbnailUrl: "https://pbs.twimg.com/video-thumb.jpg",
+							variants: [
+								{
+									url: "https://video.twimg.com/clip.mp4",
+									contentType: "video/mp4",
+								},
+							],
+						},
+					],
+					replyToTweet: null,
+					quotedTweet: null,
+				}}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		fireEvent.click(screen.getByLabelText("Play tweet video 1"));
+
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	it("expands the archived conversation when the tweet row is clicked", async () => {
 		const fetchMock = vi.fn().mockResolvedValue({
 			ok: true,

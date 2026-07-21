@@ -208,7 +208,7 @@ describe("TweetMediaGrid", () => {
 		);
 	});
 
-	it("opens video media inline", () => {
+	it("plays video media directly and keeps an expanded viewer", () => {
 		render(
 			<TweetMediaGrid
 				items={[
@@ -218,8 +218,14 @@ describe("TweetMediaGrid", () => {
 						thumbnailUrl: "https://pbs.twimg.com/video-thumb.jpg",
 						variants: [
 							{
-								url: "https://video.twimg.com/clip.mp4",
+								url: "https://video.twimg.com/clip-low.mp4",
 								contentType: "video/mp4",
+								bitRate: 256_000,
+							},
+							{
+								url: "https://video.twimg.com/clip-high.mp4",
+								contentType: "video/mp4",
+								bitRate: 2_176_000,
 							},
 						],
 					},
@@ -227,17 +233,38 @@ describe("TweetMediaGrid", () => {
 			/>,
 		);
 
-		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
-
-		const video = document.querySelector("video");
-		expect(video).toHaveAttribute("src", "https://video.twimg.com/clip.mp4");
+		const video = screen.getByLabelText("Play tweet video 1");
+		expect(video).toHaveAttribute(
+			"src",
+			"https://video.twimg.com/clip-high.mp4",
+		);
 		expect(video).toHaveAttribute(
 			"poster",
 			"https://pbs.twimg.com/video-thumb.jpg",
 		);
+		expect(video).toHaveAttribute("controls");
+		expect(video).toHaveAttribute("playsinline");
+		expect(video).toHaveAttribute("preload", "none");
+		expect(video).not.toHaveAttribute("autoplay");
+
+		const expandButton = screen.getByRole("button", {
+			name: "Expand tweet media 1",
+		});
+		expandButton.focus();
+		fireEvent.click(expandButton);
+		expect(
+			screen.getByRole("dialog", { name: "Tweet media viewer" }),
+		).toBeInTheDocument();
+		expect(document.querySelectorAll("video")).toHaveLength(1);
+		expect(
+			screen.queryByLabelText("Play tweet video 1"),
+		).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "Close media viewer" }));
+		expect(expandButton).toHaveFocus();
 	});
 
-	it("opens direct video CDN URLs inline without a variant", () => {
+	it("plays direct video CDN URLs without a variant", () => {
 		render(
 			<TweetMediaGrid
 				items={[
@@ -249,15 +276,13 @@ describe("TweetMediaGrid", () => {
 			/>,
 		);
 
-		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
-
-		expect(document.querySelector("video")).toHaveAttribute(
+		expect(screen.getByLabelText("Play tweet video 1")).toHaveAttribute(
 			"src",
 			"https://video.twimg.com/ext_tw_video/clip.mp4",
 		);
 	});
 
-	it("opens gif mp4 fallbacks inline as looping muted video", () => {
+	it("keeps gif mp4 fallbacks user-controlled until expanded", () => {
 		render(
 			<TweetMediaGrid
 				items={[
@@ -269,11 +294,11 @@ describe("TweetMediaGrid", () => {
 			/>,
 		);
 
-		fireEvent.click(screen.getByRole("button", { name: "Open tweet media 1" }));
-
-		const video = document.querySelector("video");
+		const video = screen.getByLabelText("Play tweet GIF 1") as HTMLVideoElement;
 		expect(video).toHaveAttribute("src", "/media/demo.mp4");
 		expect(video).toHaveAttribute("loop");
+		expect(video).toHaveAttribute("controls");
+		expect(video).not.toHaveAttribute("autoplay");
 		expect(video?.muted).toBe(true);
 	});
 

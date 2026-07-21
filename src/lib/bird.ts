@@ -9,6 +9,7 @@ import { runEffectPromise } from "./effect-runtime";
 import type {
 	XurlMentionData,
 	XurlFollowUsersResponse,
+	XurlMediaItem,
 	XurlMentionsResponse,
 	XurlMentionUser,
 	XurlReferencedTweet,
@@ -23,6 +24,12 @@ const BIRD_STDOUT_REDIRECT_SCRIPT = 'out="$1"; shift; exec "$@" > "$out"';
 interface BirdTweetMedia {
 	type?: string;
 	url?: string;
+	previewUrl?: string;
+	videoUrl?: string;
+	width?: number;
+	height?: number;
+	durationMs?: number;
+	altText?: string;
 }
 
 interface BirdTweetAuthor {
@@ -391,27 +398,91 @@ function getBirdTweetItem(payload: unknown, command: string) {
 	throw new Error(`bird ${command} returned unexpected JSON`);
 }
 
-function toMediaEntities(media: BirdTweetMedia[] | undefined) {
-	if (!Array.isArray(media) || media.length === 0) {
+function validBirdMedia(media: BirdTweetMedia[] | undefined) {
+	return Array.isArray(media)
+		? media.filter(
+				(item) => typeof item?.url === "string" && item.url.trim().length > 0,
+			)
+		: [];
+}
+
+function birdMediaKey(tweetId: string, index: number) {
+	return `bird_media_${tweetId}_${String(index)}`;
+}
+
+function toMediaEntities(item: Pick<BirdTweetItem, "id" | "media">) {
+	const media = validBirdMedia(item.media);
+	if (media.length === 0) {
 		return undefined;
 	}
 
 	return {
-		urls: media
-			.filter((item) => typeof item?.url === "string" && item.url.length > 0)
-			.map((item, index) => ({
-				start: index,
-				end: index,
-				url: item.url as string,
-				expanded_url: item.url as string,
-				display_url: item.url as string,
-				media_key: `bird_media_${index}`,
-			})),
+		urls: media.map((mediaItem, index) => ({
+			start: index,
+			end: index,
+			url: mediaItem.url as string,
+			expanded_url: mediaItem.url as string,
+			display_url: mediaItem.url as string,
+			media_key: birdMediaKey(item.id, index),
+		})),
 	};
 }
 
+function toMediaAttachments(item: Pick<BirdTweetItem, "id" | "media">) {
+	const media = validBirdMedia(item.media);
+	return media.length > 0
+		? { media_keys: media.map((_, index) => birdMediaKey(item.id, index)) }
+		: undefined;
+}
+
+function toXurlMediaItems(item: Pick<BirdTweetItem, "id" | "media">) {
+	return validBirdMedia(item.media).map((media, index) => {
+		const type =
+			media.type === "photo" || media.type === "image"
+				? "photo"
+				: media.type === "gif" || media.type === "animated_gif"
+					? "animated_gif"
+					: media.type === "video"
+						? "video"
+						: (media.type ?? (media.videoUrl ? "video" : "photo"));
+		const previewUrl =
+			type === "photo" ? undefined : (media.url ?? media.previewUrl);
+		const imageUrl = type === "photo" ? media.url : undefined;
+		const videoUrl =
+			type === "video" || type === "animated_gif" ? media.videoUrl : undefined;
+
+		return {
+			media_key: birdMediaKey(item.id, index),
+			type,
+			...(imageUrl ? { url: imageUrl } : {}),
+			...(previewUrl ? { preview_image_url: previewUrl } : {}),
+			...(typeof media.width === "number" && Number.isFinite(media.width)
+				? { width: media.width }
+				: {}),
+			...(typeof media.height === "number" && Number.isFinite(media.height)
+				? { height: media.height }
+				: {}),
+			...(typeof media.durationMs === "number" &&
+			Number.isFinite(media.durationMs)
+				? { duration_ms: media.durationMs }
+				: {}),
+			...(media.altText ? { alt_text: media.altText } : {}),
+			...(videoUrl
+				? {
+						variants: [
+							{
+								url: videoUrl,
+								content_type: "video/mp4",
+							},
+						],
+					}
+				: {}),
+		} satisfies XurlMediaItem;
+	});
+}
+
 function toTweetEntities(item: BirdTweetItem) {
-	const mediaEntities = toMediaEntities(item.media);
+	const mediaEntities = toMediaEntities(item);
 	const title = item.article?.title?.trim();
 	if (!title) return mediaEntities;
 	const handle = item.author?.username?.replace(/^@/, "");
@@ -470,6 +541,7 @@ function toTweetData(item: BirdTweetItem): XurlTweetData {
 		text: item.text,
 		created_at: toIsoTimestamp(item.createdAt),
 		conversation_id: item.conversationId ?? item.id,
+		attachments: toMediaAttachments(item),
 		entities: toTweetEntities(item),
 		referenced_tweets: toReferencedTweets(item),
 		public_metrics: {
@@ -610,13 +682,21 @@ function isFullBirdTweetItem(
 function normalizeBirdTweets(items: BirdTweetItem[]): XurlMentionsResponse {
 	const users = new Map<string, XurlMentionUser>();
 	const includedTweets = new Map<string, XurlTweetData>();
+	const includedMedia = new Map<string, XurlMediaItem>();
+	const addMedia = (item: BirdTweetItem) => {
+		for (const media of toXurlMediaItems(item)) {
+			includedMedia.set(media.media_key, media);
+		}
+	};
 	const data = items.map((item): XurlMentionData => {
 		addBirdUser(users, item);
+		addMedia(item);
 		for (const included of [item.quotedTweet, item.retweetedTweet]) {
 			if (!isFullBirdTweetItem(included)) {
 				continue;
 			}
 			addBirdUser(users, included);
+			addMedia(included);
 			includedTweets.set(included.id, toTweetData(included));
 		}
 		return toTweetData(item);
@@ -625,11 +705,14 @@ function normalizeBirdTweets(items: BirdTweetItem[]): XurlMentionsResponse {
 	return {
 		data,
 		includes:
-			users.size > 0 || includedTweets.size > 0
+			users.size > 0 || includedTweets.size > 0 || includedMedia.size > 0
 				? {
 						...(users.size > 0 ? { users: Array.from(users.values()) } : {}),
 						...(includedTweets.size > 0
 							? { tweets: Array.from(includedTweets.values()) }
+							: {}),
+						...(includedMedia.size > 0
+							? { media: Array.from(includedMedia.values()) }
 							: {}),
 					}
 				: undefined,
@@ -1478,6 +1561,8 @@ export const __test__ = {
 	getBirdTweetItems,
 	getBirdTweetItem,
 	toMediaEntities,
+	toMediaAttachments,
+	toXurlMediaItems,
 	toTweetEntities,
 	toReferencedTweets,
 	normalizeBirdTweets,

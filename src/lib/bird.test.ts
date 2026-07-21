@@ -125,13 +125,21 @@ describe("bird transport wrapper", () => {
 						urls: [
 							expect.objectContaining({
 								url: "https://pbs.twimg.com/media/demo.jpg",
-								media_key: "bird_media_0",
+								media_key: "bird_media_tweet_1_0",
 							}),
 						],
 					}),
+					attachments: { media_keys: ["bird_media_tweet_1_0"] },
 				}),
 			],
 			includes: {
+				media: [
+					{
+						media_key: "bird_media_tweet_1_0",
+						type: "photo",
+						url: "https://pbs.twimg.com/media/demo.jpg",
+					},
+				],
 				users: [
 					{
 						id: "42",
@@ -267,10 +275,11 @@ describe("bird transport wrapper", () => {
 								url: "https://pbs.twimg.com/media/other.jpg",
 								expanded_url: "https://pbs.twimg.com/media/other.jpg",
 								display_url: "https://pbs.twimg.com/media/other.jpg",
-								media_key: "bird_media_0",
+								media_key: "bird_media_tweet_3_0",
 							},
 						],
 					},
+					attachments: { media_keys: ["bird_media_tweet_3_0"] },
 					public_metrics: {
 						reply_count: 4,
 						retweet_count: 5,
@@ -279,6 +288,13 @@ describe("bird transport wrapper", () => {
 				}),
 			],
 			includes: {
+				media: [
+					{
+						media_key: "bird_media_tweet_3_0",
+						type: "photo",
+						url: "https://pbs.twimg.com/media/other.jpg",
+					},
+				],
 				users: [
 					{ id: "unknown", username: "user_unknown", name: "user_unknown" },
 					{ id: "max", username: "max", name: "max" },
@@ -573,6 +589,111 @@ describe("bird transport wrapper", () => {
 		});
 		expectBirdCommandCall(1, ["home", "-n", "9", "--json", "--following"]);
 		expectBirdCommandCall(2, ["profiles", "riley", "--json"]);
+	});
+
+	it("preserves playable Bird video and GIF media", async () => {
+		const { __test__ } = await import("./bird");
+		const { buildMediaJsonFromIncludes } = await import("./media-includes");
+		const payload = __test__.normalizeBirdTweets([
+			{
+				id: "home_video",
+				text: "video",
+				createdAt: "2026-07-22T00:00:00.000Z",
+				authorId: "45",
+				author: { username: "riley", name: "Riley" },
+				media: [
+					{
+						type: "video",
+						url: "https://pbs.twimg.com/amplify_video_thumb/full.jpg",
+						previewUrl:
+							"https://pbs.twimg.com/amplify_video_thumb/full.jpg:small",
+						videoUrl: "https://video.twimg.com/amplify_video/clip.mp4",
+						width: 720,
+						height: 1280,
+						durationMs: 19_100,
+					},
+				],
+			},
+			{
+				id: "home_gif",
+				text: "gif",
+				createdAt: "2026-07-22T00:01:00.000Z",
+				authorId: "46",
+				author: { username: "lee", name: "Lee" },
+				media: [
+					{
+						type: "animated_gif",
+						url: "https://pbs.twimg.com/tweet_video_thumb/full.jpg",
+						previewUrl:
+							"https://pbs.twimg.com/tweet_video_thumb/full.jpg:small",
+						videoUrl: "https://video.twimg.com/tweet_video/loop.mp4",
+						width: 640,
+						height: 360,
+					},
+				],
+			},
+		]);
+
+		expect(payload.data).toEqual([
+			expect.objectContaining({
+				id: "home_video",
+				attachments: { media_keys: ["bird_media_home_video_0"] },
+			}),
+			expect.objectContaining({
+				id: "home_gif",
+				attachments: { media_keys: ["bird_media_home_gif_0"] },
+			}),
+		]);
+		expect(payload.includes?.media).toEqual([
+			{
+				media_key: "bird_media_home_video_0",
+				type: "video",
+				preview_image_url: "https://pbs.twimg.com/amplify_video_thumb/full.jpg",
+				width: 720,
+				height: 1280,
+				duration_ms: 19_100,
+				variants: [
+					{
+						url: "https://video.twimg.com/amplify_video/clip.mp4",
+						content_type: "video/mp4",
+					},
+				],
+			},
+			{
+				media_key: "bird_media_home_gif_0",
+				type: "animated_gif",
+				preview_image_url: "https://pbs.twimg.com/tweet_video_thumb/full.jpg",
+				width: 640,
+				height: 360,
+				variants: [
+					{
+						url: "https://video.twimg.com/tweet_video/loop.mp4",
+						content_type: "video/mp4",
+					},
+				],
+			},
+		]);
+		expect(
+			JSON.parse(
+				buildMediaJsonFromIncludes(
+					payload.data[0] ?? {},
+					payload.includes?.media,
+				),
+			),
+		).toEqual([
+			expect.objectContaining({
+				type: "video",
+				url: "https://pbs.twimg.com/amplify_video_thumb/full.jpg",
+				thumbnailUrl: "https://pbs.twimg.com/amplify_video_thumb/full.jpg",
+				durationMs: 19_100,
+				variants: [
+					{
+						url: "https://video.twimg.com/amplify_video/clip.mp4",
+						contentType: "video/mp4",
+					},
+				],
+			}),
+		]);
 	});
 
 	it("keeps nested bird quoted and retweeted tweets as included tweets", async () => {
@@ -1287,8 +1408,10 @@ describe("bird transport wrapper", () => {
 		expect(() => __test__.getBirdTweetItem({}, "read")).toThrow(
 			"bird read returned unexpected JSON",
 		);
-		expect(__test__.toMediaEntities(undefined)).toBeUndefined();
-		expect(__test__.toMediaEntities([{ type: "photo" }])).toEqual({ urls: [] });
+		expect(__test__.toMediaEntities({ id: "1" })).toBeUndefined();
+		expect(
+			__test__.toMediaEntities({ id: "1", media: [{ type: "photo" }] }),
+		).toBeUndefined();
 		expect(
 			__test__.toReferencedTweets({
 				id: "1",
