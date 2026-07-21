@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 0.8.40 - 2026-07-22
+
+### Added
+
+- Expand truncated repost text directly inside the timeline card, with loading, retry, collapse, and original-post access after the full text resolves.
+
+### Fixed
+
+- Resolve long repost note text on demand without opening X, while preserving complete posts that intentionally end with an ellipsis and bounding the upstream lookup time.
+
 ## 0.8.39 - 2026-07-22
 
 ### Added
