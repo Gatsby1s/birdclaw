@@ -20,6 +20,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { formatCompactNumber, formatExactTimestamp } from "#/lib/present";
+import { playableTweetVideoUrl } from "#/lib/tweet-media";
 import type { EmbeddedTweet, TweetMediaItem } from "#/lib/types";
 import { cx } from "#/lib/ui";
 import { AvatarChip } from "./AvatarChip";
@@ -78,10 +79,9 @@ export function TweetMediaViewer({
 
 	const selectedItem = items[selectedIndex] ?? items[0];
 	const isImage = selectedItem?.type === "image";
-	const selectedVideoUrl =
-		selectedItem?.type === "video" || selectedItem?.type === "gif"
-			? (selectedItem.variants?.[0]?.url ?? playableVideoUrl(selectedItem.url))
-			: null;
+	const selectedVideoUrl = selectedItem
+		? playableTweetVideoUrl(selectedItem)
+		: null;
 
 	const resetView = useCallback(() => {
 		setZoom(MIN_ZOOM);
@@ -531,14 +531,4 @@ function formatMediaViewerTimestamp(value: string) {
 		year: "numeric",
 	}).format(date);
 	return `${time} · ${calendarDate}`;
-}
-
-function playableVideoUrl(url: string) {
-	try {
-		const parsed = new URL(url);
-		if (parsed.hostname === "video.twimg.com") return url;
-		return /\.(?:mp4|m3u8)(?:$|[?#])/i.test(parsed.pathname) ? url : undefined;
-	} catch {
-		return /\.(?:mp4|m3u8)(?:$|[?#])/i.test(url) ? url : undefined;
-	}
 }

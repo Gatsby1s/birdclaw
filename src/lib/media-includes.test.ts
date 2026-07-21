@@ -213,17 +213,22 @@ describe("media includes mapping", () => {
 	});
 
 	it("serializes bird-normalized entity media URLs", () => {
-		const tweet = birdTest.normalizeBirdTweets([
+		const payload = birdTest.normalizeBirdTweets([
 			{
 				id: "bird_1",
 				text: "bird photo",
 				createdAt: "2026-05-01T00:00:00.000Z",
 				media: [{ url: "https://pbs.twimg.com/media/bird_photo.jpg" }],
 			},
-		]).data[0];
+		]);
+		const tweet = payload.data[0];
 
 		expect(countTweetMedia(tweet)).toBe(1);
-		expect(JSON.parse(buildMediaJsonFromIncludes(tweet, []))).toEqual([
+		expect(
+			JSON.parse(
+				buildMediaJsonFromIncludes(tweet, payload.includes?.media ?? []),
+			),
+		).toEqual([
 			{
 				url: "https://pbs.twimg.com/media/bird_photo.jpg",
 				type: "image",
