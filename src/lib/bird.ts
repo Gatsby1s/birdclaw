@@ -18,6 +18,7 @@ import type {
 
 const execFileAsync = promisify(execFile);
 const BIRD_JSON_MAX_BUFFER_BYTES = 512 * 1024 * 1024;
+const BIRD_EXPAND_TIMEOUT_MS = 30_000;
 const BIRD_STDOUT_REDIRECT_SCRIPT = 'out="$1"; shift; exec "$@" > "$out"';
 
 interface BirdTweetMedia {
@@ -58,6 +59,12 @@ interface BirdTweetItem {
 	media?: BirdTweetMedia[];
 	article?: BirdTweetArticle | null;
 	_raw?: unknown;
+}
+
+export interface ExpandedRetweetedText {
+	tweetId: string;
+	sourceTweetId: string;
+	text: string;
 }
 
 export interface BirdDmUser {
@@ -487,6 +494,16 @@ function asRecord(value: unknown) {
 		: undefined;
 }
 
+function nonEmptyStringField(
+	record: Record<string, unknown> | undefined,
+	key: string,
+) {
+	const value = record?.[key];
+	return typeof value === "string" && value.trim().length > 0
+		? value
+		: undefined;
+}
+
 function stringField(record: Record<string, unknown> | undefined, key: string) {
 	const value = record?.[key];
 	return typeof value === "string" && value.trim().length > 0
@@ -746,6 +763,78 @@ function normalizeBirdTweetItemEffect(payload: unknown, command: string) {
 	});
 }
 
+function unwrapBirdTweetResult(
+	value: unknown,
+	depth = 0,
+): Record<string, unknown> | undefined {
+	if (depth > 8) return undefined;
+	const record = asRecord(value);
+	if (!record) return undefined;
+
+	if (
+		asRecord(record.note_tweet) ||
+		asRecord(record.legacy) ||
+		nonEmptyStringField(record, "rest_id")
+	) {
+		return record;
+	}
+
+	const tweetResults = asRecord(record.tweet_results);
+	for (const nested of [record.tweet, record.result, tweetResults?.result]) {
+		const tweet = unwrapBirdTweetResult(nested, depth + 1);
+		if (tweet) return tweet;
+	}
+	return undefined;
+}
+
+function rawRetweetedTweetFromBirdItem(item: BirdTweetItem) {
+	const raw = asRecord(item._raw);
+	const legacy = asRecord(raw?.legacy);
+	const retweetedStatusResult = asRecord(legacy?.retweeted_status_result);
+	return unwrapBirdTweetResult(retweetedStatusResult?.result);
+}
+
+function likelyTruncatedBirdText(value: string) {
+	const trimmed = value.trimEnd();
+	return trimmed.endsWith("…") || trimmed.endsWith("...");
+}
+
+function expandedRetweetedTextFromBirdItem(
+	item: BirdTweetItem,
+	tweetId: string,
+): ExpandedRetweetedText {
+	const rawRetweetedTweet = rawRetweetedTweetFromBirdItem(item);
+	const rawLegacy = asRecord(rawRetweetedTweet?.legacy);
+	const noteTweet = asRecord(rawRetweetedTweet?.note_tweet);
+	const noteTweetResults = asRecord(noteTweet?.note_tweet_results);
+	const noteTweetResult = asRecord(noteTweetResults?.result);
+	const normalizedRetweetedTweet = asRecord(item.retweetedTweet);
+	const sourceTweetId =
+		nonEmptyStringField(rawRetweetedTweet, "rest_id") ??
+		nonEmptyStringField(rawLegacy, "id_str") ??
+		nonEmptyStringField(normalizedRetweetedTweet, "id");
+	const noteText = nonEmptyStringField(noteTweetResult, "text");
+	const legacyText = nonEmptyStringField(rawLegacy, "full_text");
+	const normalizedText = nonEmptyStringField(normalizedRetweetedTweet, "text");
+	const rawLegacyIsComplete = booleanField(rawLegacy, "truncated") === false;
+	const text =
+		noteText ??
+		(legacyText && (rawLegacyIsComplete || !likelyTruncatedBirdText(legacyText))
+			? legacyText
+			: undefined) ??
+		(normalizedText && !likelyTruncatedBirdText(normalizedText)
+			? normalizedText
+			: undefined);
+
+	if (!sourceTweetId || sourceTweetId === tweetId || !text) {
+		throw new Error(
+			`bird read ${tweetId} did not return expanded repost content`,
+		);
+	}
+
+	return { tweetId, sourceTweetId, text };
+}
+
 export function listMentionsViaBirdEffect({
 	maxResults,
 }: {
@@ -895,6 +984,29 @@ export function lookupTweetsByIdsViaBird(
 	ids: string[],
 ): Promise<XurlTweetsResponse> {
 	return runEffectPromise(lookupTweetsByIdsViaBirdEffect(ids));
+}
+
+export function expandRetweetedTextViaBirdEffect(
+	tweetId: string,
+): Effect.Effect<ExpandedRetweetedText, unknown> {
+	return Effect.gen(function* () {
+		const stdout = yield* runBirdJsonCommandEffect(
+			["read", tweetId, "--json-full"],
+			BIRD_EXPAND_TIMEOUT_MS,
+		);
+		const payload = yield* parseBirdJsonEffect(stdout);
+		const item = yield* normalizeBirdTweetItemEffect(payload, "read");
+		return yield* Effect.try({
+			try: () => expandedRetweetedTextFromBirdItem(item, tweetId),
+			catch: (error) => error,
+		});
+	});
+}
+
+export function expandRetweetedTextViaBird(
+	tweetId: string,
+): Promise<ExpandedRetweetedText> {
+	return runEffectPromise(expandRetweetedTextViaBirdEffect(tweetId));
 }
 
 export function listHomeTimelineViaBirdEffect({

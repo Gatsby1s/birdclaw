@@ -922,6 +922,124 @@ describe("bird transport wrapper", () => {
 		expectBirdCommandCall(1, ["read", "tweet_1", "--json"]);
 	});
 
+	it("expands a repost from its full note tweet instead of legacy text", async () => {
+		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
+		const noteText = `${"长文".repeat(1140)}终`;
+		const legacyText = `${"x".repeat(277)}...`;
+		expect(noteText).toHaveLength(2281);
+		expect(legacyText).toHaveLength(280);
+		mockBirdStdoutOnce(
+			JSON.stringify({
+				id: "wrapper_1",
+				text: `RT @writer: ${legacyText}`,
+				createdAt: "Tue May 05 15:07:12 +0000 2026",
+				retweetedTweet: {
+					id: "source_1",
+					text: legacyText,
+				},
+				_raw: {
+					legacy: {
+						retweeted_status_result: {
+							result: {
+								__typename: "TweetWithVisibilityResults",
+								tweet: {
+									rest_id: "source_1",
+									legacy: { full_text: legacyText },
+									note_tweet: {
+										note_tweet_results: {
+											result: { text: noteText },
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}),
+		);
+		const { expandRetweetedTextViaBird } = await import("./bird");
+
+		await expect(expandRetweetedTextViaBird("wrapper_1")).resolves.toEqual({
+			tweetId: "wrapper_1",
+			sourceTweetId: "source_1",
+			text: noteText,
+		});
+		expectBirdCommandCall(1, ["read", "wrapper_1", "--json-full"]);
+	});
+
+	it("falls back to a complete normalized retweeted tweet", async () => {
+		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
+		mockBirdStdoutOnce(
+			JSON.stringify({
+				id: "wrapper_2",
+				text: "RT @writer: Complete short repost text",
+				createdAt: "Tue May 05 15:07:12 +0000 2026",
+				retweetedTweet: {
+					id: "source_2",
+					text: "Complete short repost text",
+				},
+			}),
+		);
+		const { expandRetweetedTextViaBird } = await import("./bird");
+
+		await expect(expandRetweetedTextViaBird("wrapper_2")).resolves.toEqual({
+			tweetId: "wrapper_2",
+			sourceTweetId: "source_2",
+			text: "Complete short repost text",
+		});
+	});
+
+	it("rejects bird read results that still contain truncated repost text", async () => {
+		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
+		mockBirdStdoutOnce(
+			JSON.stringify({
+				id: "wrapper_3",
+				text: "RT @writer: Still truncated...",
+				createdAt: "Tue May 05 15:07:12 +0000 2026",
+				retweetedTweet: {
+					id: "source_3",
+					text: "Still truncated...",
+				},
+			}),
+		);
+		const { expandRetweetedTextViaBird } = await import("./bird");
+
+		await expect(expandRetweetedTextViaBird("wrapper_3")).rejects.toThrow(
+			"bird read wrapper_3 did not return expanded repost content",
+		);
+	});
+
+	it("accepts complete legacy text that intentionally ends in an ellipsis", async () => {
+		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
+		mockBirdStdoutOnce(
+			JSON.stringify({
+				id: "wrapper_4",
+				text: "RT @writer: A deliberate pause…",
+				createdAt: "Tue May 05 15:07:12 +0000 2026",
+				_raw: {
+					legacy: {
+						retweeted_status_result: {
+							result: {
+								rest_id: "source_4",
+								legacy: {
+									full_text: "A deliberate pause…",
+									truncated: false,
+								},
+							},
+						},
+					},
+				},
+			}),
+		);
+		const { expandRetweetedTextViaBird } = await import("./bird");
+
+		await expect(expandRetweetedTextViaBird("wrapper_4")).resolves.toEqual({
+			tweetId: "wrapper_4",
+			sourceTweetId: "source_4",
+			text: "A deliberate pause…",
+		});
+	});
+
 	it("looks up profiles through bird user json", async () => {
 		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
 		mockBirdStdoutOnce(

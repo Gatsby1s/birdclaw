@@ -9,6 +9,10 @@ import {
 	Repeat2,
 	UserSearch,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
+import { fetchJson } from "#/lib/api-client";
+import { expandedTweetTextResponseSchema } from "#/lib/api-contracts";
 import { formatCompactNumber } from "#/lib/present";
 import {
 	isTweetArticleUrlEntity,
@@ -241,6 +245,11 @@ function tweetPermalink(handle: string | null | undefined, tweetId: string) {
 	return `https://x.com/${encodeURIComponent(cleanHandle)}/status/${encodeURIComponent(tweetId)}`;
 }
 
+function likelyTruncatedText(text: string) {
+	const value = text.trimEnd();
+	return value.endsWith("…") || value.endsWith("...");
+}
+
 function TweetPresentation({
 	tweet,
 	hiddenUrlRanges,
@@ -248,6 +257,7 @@ function TweetPresentation({
 	replyToTweet,
 	quotedTweet,
 	mediaViewerPermalink,
+	afterText,
 }: {
 	tweet: TimelineItem | EmbeddedTweet;
 	hiddenUrlRanges: Array<{ start: number; end: number }>;
@@ -255,6 +265,7 @@ function TweetPresentation({
 	replyToTweet?: EmbeddedTweet | null;
 	quotedTweet?: EmbeddedTweet | null;
 	mediaViewerPermalink?: string | null;
+	afterText?: ReactNode;
 }) {
 	return (
 		<>
@@ -264,6 +275,7 @@ function TweetPresentation({
 				hiddenUrlRanges={hiddenUrlRanges}
 				text={tweet.text}
 			/>
+			{afterText}
 			<TweetMediaGrid
 				items={tweet.media}
 				tweet={{
@@ -305,10 +317,39 @@ export function TimelineCard({
 	onReply: (tweetId: string) => void;
 	showReplyControls?: boolean;
 }) {
+	const [showFullRepost, setShowFullRepost] = useState(false);
 	const canReply =
 		showReplyControls && item.kind !== "like" && item.kind !== "bookmark";
 	const displayTweet = item.retweetedTweet ?? item;
 	const displayTweetId = displayTweet.id;
+	const isManualRepostFallback =
+		item.retweetedTweet != null && displayTweetId === `${item.id}:retweeted`;
+	const canExpandRepost =
+		isManualRepostFallback && likelyTruncatedText(displayTweet.text);
+	const expandedRepostQuery = useQuery({
+		queryKey: ["tweet-expand", item.id],
+		queryFn: ({ signal }) => {
+			const params = new URLSearchParams({ tweetId: item.id });
+			return fetchJson(
+				`/api/tweet-expand?${params.toString()}`,
+				{ signal },
+				expandedTweetTextResponseSchema,
+				"Full repost unavailable",
+			);
+		},
+		enabled: canExpandRepost && showFullRepost,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+	});
+	const expandedRepost = expandedRepostQuery.data;
+	const presentedTweet =
+		showFullRepost && expandedRepost
+			? {
+					...displayTweet,
+					id: expandedRepost.sourceTweetId,
+					text: expandedRepost.text,
+				}
+			: displayTweet;
 	const interactionTweetId =
 		item.retweetedTweet && displayTweetId === `${item.id}:retweeted`
 			? item.id
@@ -316,16 +357,16 @@ export function TimelineCard({
 	const displayAuthor = displayTweet.author;
 	const conversation = useConversationSurface(item.id, interactionTweetId);
 	const visibleEntities = getVisibleEntities(
-		displayTweet.entities,
-		displayTweet.media,
-		displayTweet.id,
-		displayTweet.text,
+		presentedTweet.entities,
+		presentedTweet.media,
+		presentedTweet.id,
+		presentedTweet.text,
 	);
 	const hiddenMediaUrlRanges = getHiddenMediaUrlRanges(
-		displayTweet.entities,
-		displayTweet.media,
-		displayTweet.id,
-		displayTweet.text,
+		presentedTweet.entities,
+		presentedTweet.media,
+		presentedTweet.id,
+		presentedTweet.text,
 	);
 	const visibleUrlCards = getVisibleUrlCards(
 		visibleEntities,
@@ -338,13 +379,13 @@ export function TimelineCard({
 	const displayLikeCount = displayTweet.likeCount ?? item.likeCount;
 	const displayBookmarked = displayTweet.bookmarked ?? item.bookmarked;
 	const displayLiked = displayTweet.liked ?? item.liked;
-	const openTweetIsManualRetweetFallback =
-		item.retweetedTweet != null && displayTweetId === `${item.id}:retweeted`;
 	const openTweetUrl = tweetPermalink(
-		openTweetIsManualRetweetFallback
+		isManualRepostFallback && !expandedRepost
 			? item.author.handle
 			: displayAuthor.handle,
-		openTweetIsManualRetweetFallback ? item.id : displayTweetId,
+		isManualRepostFallback && !expandedRepost
+			? item.id
+			: (expandedRepost?.sourceTweetId ?? displayTweetId),
 	);
 	const showLikeIndicator = displayLiked || displayLikeCount > 0;
 	const showMediaIndicator = displayMediaCount > 0;
@@ -462,11 +503,57 @@ export function TimelineCard({
 					/>
 				) : null}
 				<TweetPresentation
+					afterText={
+						canExpandRepost ? (
+							<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+								<button
+									aria-expanded={showFullRepost && Boolean(expandedRepost)}
+									aria-label={
+										showFullRepost && expandedRepost
+											? "Collapse repost"
+											: expandedRepostQuery.isError
+												? "Retry full repost"
+												: "Show full repost"
+									}
+									className="cursor-pointer border-0 bg-transparent p-0 text-[14px] font-semibold text-[var(--accent)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+									disabled={expandedRepostQuery.isFetching}
+									onClick={(event) => {
+										event.stopPropagation();
+										if (showFullRepost && expandedRepost) {
+											setShowFullRepost(false);
+											return;
+										}
+										setShowFullRepost(true);
+										if (expandedRepostQuery.isError) {
+											void expandedRepostQuery.refetch();
+										}
+									}}
+									type="button"
+								>
+									{expandedRepostQuery.isFetching
+										? "Loading full post…"
+										: showFullRepost && expandedRepost
+											? "Show less"
+											: expandedRepostQuery.isError
+												? "Try again"
+												: "Show more"}
+								</button>
+								{expandedRepostQuery.isError ? (
+									<span
+										className="text-[12px] text-[var(--alert)]"
+										role="status"
+									>
+										Couldn’t load the full post.
+									</span>
+								) : null}
+							</div>
+						) : null
+					}
 					hiddenUrlRanges={hiddenMediaUrlRanges}
 					mediaViewerPermalink={openTweetUrl}
 					quotedTweet={item.retweetedTweet ? null : item.quotedTweet}
 					replyToTweet={item.retweetedTweet ? null : item.replyToTweet}
-					tweet={displayTweet}
+					tweet={presentedTweet}
 					visibleUrlCards={visibleUrlCards}
 				/>
 				<footer className={feedRowActionsClass}>
