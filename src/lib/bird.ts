@@ -954,7 +954,7 @@ function listTweetsViaBirdCommandEffect({
 }): Effect.Effect<XurlMentionsResponse, unknown> {
 	return Effect.gen(function* () {
 		const args = [command, "-n", String(maxResults), "--json"];
-		if (all) {
+		if (all || maxPages !== undefined) {
 			args.push("--all");
 		}
 		if (maxPages !== undefined) {
