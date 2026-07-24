@@ -505,6 +505,7 @@ describe("bird transport wrapper", () => {
 				},
 			]),
 		);
+		mockBirdStdoutOnce(JSON.stringify([]));
 		const { listBookmarkedTweetsViaBird, listLikedTweetsViaBird } =
 			await import("./bird");
 
@@ -524,6 +525,16 @@ describe("bird transport wrapper", () => {
 			includes: { users: [{ id: "43", username: "amelia", name: "Amelia" }] },
 			meta: expect.objectContaining({ result_count: 1 }),
 		});
+		await expect(
+			listLikedTweetsViaBird({
+				maxResults: 9,
+				maxPages: 3,
+			}),
+		).resolves.toEqual({
+			data: [],
+			includes: undefined,
+			meta: expect.objectContaining({ result_count: 0 }),
+		});
 		expectBirdCommandCall(1, ["likes", "-n", "5", "--json"]);
 		expectBirdCommandCall(2, [
 			"bookmarks",
@@ -533,6 +544,15 @@ describe("bird transport wrapper", () => {
 			"--all",
 			"--max-pages",
 			"2",
+		]);
+		expectBirdCommandCall(3, [
+			"likes",
+			"-n",
+			"9",
+			"--json",
+			"--all",
+			"--max-pages",
+			"3",
 		]);
 	});
 
