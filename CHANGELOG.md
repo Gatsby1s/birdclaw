@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.41 - 2026-07-24
+
+### Fixed
+
+- Restore paged Likes and Bookmarks synchronization with Bird 0.8.0 by supplying the required `--all` flag whenever a maximum page count is requested.
+
 ## 0.8.40 - 2026-07-22
 
 ### Added
