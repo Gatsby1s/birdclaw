@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.43 - 2026-07-26
+
+### Fixed
+
+- Stream Twitter MP4 playback through BirdClaw's loopback server with strict CDN validation and byte-range support when the browser cannot reach the video CDN directly.
+- Add a reliable in-card play button, preserve expanded playback, and cancel upstream streams when the browser seeks or disconnects without truncating long videos.
+
 ## 0.8.42 - 2026-07-26
 
 ### Fixed
