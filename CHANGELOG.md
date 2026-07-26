@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.42 - 2026-07-26
+
+### Fixed
+
+- Retry transient OpenAI analysis failures with bounded backoff, server-directed delays, and cancellation support before failing Today or Discuss generation.
+- Replace raw OpenAI 408, 409, 429, and 5xx payloads on Today with a concise retry message after automatic recovery is exhausted.
+
 ## 0.8.41 - 2026-07-24
 
 ### Fixed
