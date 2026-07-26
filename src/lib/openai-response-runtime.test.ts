@@ -13,6 +13,7 @@ import {
 afterEach(() => {
 	delete process.env.OPENAI_API_KEY;
 	delete process.env.OPENAI_BASE_URL;
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 });
 
@@ -78,6 +79,173 @@ describe("OpenAI response runtime", () => {
 		await expect(
 			Effect.runPromise(requestOpenAIResponseEffect({ body: {} })),
 		).rejects.toThrow("400 bad request");
+	});
+
+	it("retries transient HTTP failures before returning a response", async () => {
+		process.env.OPENAI_API_KEY = "test";
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						error: { message: "Service temporarily unavailable" },
+					}),
+					{ status: 503 },
+				),
+			)
+			.mockResolvedValueOnce(new Response("ok"));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const response = await Effect.runPromise(
+			requestOpenAIResponseEffect({
+				body: {},
+				retryBaseDelayMs: 0,
+			}),
+		);
+
+		expect(await response.text()).toBe("ok");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("stops after bounded transient retries and simplifies JSON errors", async () => {
+		process.env.OPENAI_API_KEY = "test";
+		const fetchMock = vi.fn().mockImplementation(
+			async () =>
+				new Response(
+					JSON.stringify({
+						error: { message: "Service temporarily unavailable" },
+					}),
+					{ status: 503 },
+				),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(
+			Effect.runPromise(
+				requestOpenAIResponseEffect({
+					body: {},
+					retryBaseDelayMs: 0,
+				}),
+			),
+		).rejects.toThrow(
+			"OpenAI request failed: 503 Service temporarily unavailable (after 3 attempts)",
+		);
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+	});
+
+	it("honors explicit server retry directives", async () => {
+		process.env.OPENAI_API_KEY = "test";
+		const fetchMock = vi.fn(
+			async () =>
+				new Response("do not retry", {
+					status: 503,
+					headers: { "x-should-retry": "false" },
+				}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(
+			Effect.runPromise(
+				requestOpenAIResponseEffect({
+					body: {},
+					retryBaseDelayMs: 0,
+				}),
+			),
+		).rejects.toThrow("OpenAI request failed: 503 do not retry");
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+
+		fetchMock
+			.mockReset()
+			.mockResolvedValueOnce(
+				new Response("retry this", {
+					status: 400,
+					headers: { "x-should-retry": "true" },
+				}),
+			)
+			.mockResolvedValueOnce(new Response("ok"));
+
+		const response = await Effect.runPromise(
+			requestOpenAIResponseEffect({
+				body: {},
+				retryBaseDelayMs: 0,
+			}),
+		);
+		expect(await response.text()).toBe("ok");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("honors retry-after-ms independently of the backoff cap", async () => {
+		process.env.OPENAI_API_KEY = "test";
+		vi.useFakeTimers();
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response("wait", {
+					status: 503,
+					headers: { "retry-after-ms": "30000" },
+				}),
+			)
+			.mockResolvedValueOnce(new Response("ok"));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const promise = Effect.runPromise(
+			requestOpenAIResponseEffect({
+				body: {},
+				retryMaxDelayMs: 1,
+			}),
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(29_999);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(1);
+
+		expect(await (await promise).text()).toBe("ok");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it.each([408, 409, 529])(
+		"retries transient HTTP status %s",
+		async (status) => {
+			process.env.OPENAI_API_KEY = "test";
+			const fetchMock = vi
+				.fn()
+				.mockResolvedValueOnce(new Response("transient", { status }))
+				.mockResolvedValueOnce(new Response("ok"));
+			vi.stubGlobal("fetch", fetchMock);
+
+			const response = await Effect.runPromise(
+				requestOpenAIResponseEffect({
+					body: {},
+					retryBaseDelayMs: 0,
+				}),
+			);
+
+			expect(await response.text()).toBe("ok");
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		},
+	);
+
+	it("cancels a pending retry when the caller aborts", async () => {
+		process.env.OPENAI_API_KEY = "test";
+		const controller = new AbortController();
+		const fetchMock = vi.fn(
+			async () => new Response("unavailable", { status: 503 }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const promise = Effect.runPromise(
+			requestOpenAIResponseEffect({
+				body: {},
+				signal: controller.signal,
+				retryBaseDelayMs: 10_000,
+			}),
+		);
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+		controller.abort(new DOMException("aborted", "AbortError"));
+
+		await expect(promise).rejects.toThrow("aborted");
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("builds OpenAI-compatible URLs from custom base URLs", () => {

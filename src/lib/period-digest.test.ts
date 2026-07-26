@@ -741,10 +741,14 @@ describe("period digest", () => {
 	});
 
 	it("rejects non-ok OpenAI responses with the response body", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(new Response("rate limited", { status: 429 })),
+		const fetchMock = vi.fn(
+			async () =>
+				new Response("rate limited", {
+					status: 429,
+					headers: { "retry-after": "0" },
+				}),
 		);
+		vi.stubGlobal("fetch", fetchMock);
 
 		await expect(
 			streamPeriodDigest({
@@ -753,6 +757,7 @@ describe("period digest", () => {
 				refresh: true,
 			}),
 		).rejects.toThrow("OpenAI request failed: 429 rate limited");
+		expect(fetchMock).toHaveBeenCalledTimes(3);
 	});
 
 	it("passes abort signals to the OpenAI stream request", async () => {

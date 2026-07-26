@@ -920,4 +920,55 @@ describe("today route", () => {
 
 		expect(await screen.findByText("model failed")).toBeInTheDocument();
 	});
+
+	it("turns exhausted OpenAI transient failures into actionable copy", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				ndjsonResponse([
+					{
+						type: "error",
+						error:
+							"OpenAI request failed: 503 Service temporarily unavailable (after 3 attempts)",
+					},
+				]),
+			),
+		);
+
+		render(<TodayRoute />);
+
+		expect(
+			await screen.findByText(
+				"AI service is temporarily unavailable. BirdClaw retried automatically; retry again in a moment.",
+			),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByText(/Service temporarily unavailable/),
+		).not.toBeInTheDocument();
+	});
+
+	it("does not claim an automatic retry when the server forbids one", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				ndjsonResponse([
+					{
+						type: "error",
+						error: "OpenAI request failed: 503 do not retry",
+					},
+				]),
+			),
+		);
+
+		render(<TodayRoute />);
+
+		expect(
+			await screen.findByText(
+				"AI service is temporarily unavailable. Retry again in a moment.",
+			),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByText(/retried automatically/i),
+		).not.toBeInTheDocument();
+	});
 });
