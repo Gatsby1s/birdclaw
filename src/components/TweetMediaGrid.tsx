@@ -1,6 +1,6 @@
 import { Maximize2, Play } from "lucide-react";
-import { useState } from "react";
-import { playableTweetVideoUrl } from "#/lib/tweet-media";
+import { useRef, useState } from "react";
+import { tweetVideoPlaybackUrl } from "#/lib/tweet-media";
 import type { TweetMediaItem } from "#/lib/types";
 import { cx, tweetMediaGridClass, tweetMediaTileClass } from "#/lib/ui";
 import {
@@ -16,6 +16,10 @@ export function TweetMediaGrid({
 	tweet?: TweetMediaViewerTweet;
 }) {
 	const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+	const [inlinePlaybackState, setInlinePlaybackState] = useState<
+		"idle" | "playing" | "error"
+	>("idle");
+	const inlineVideoRef = useRef<HTMLVideoElement>(null);
 	if (items.length === 0) {
 		return null;
 	}
@@ -28,7 +32,7 @@ export function TweetMediaGrid({
 	const singleVideoItem =
 		visibleItems.length === 1 && visibleItems[0] ? visibleItems[0] : null;
 	const singleVideoUrl = singleVideoItem
-		? playableTweetVideoUrl(singleVideoItem)
+		? tweetVideoPlaybackUrl(singleVideoItem)
 		: null;
 
 	return (
@@ -75,31 +79,69 @@ export function TweetMediaGrid({
 					}
 				>
 					{selectedIndex === null ? (
-						<video
-							aria-label={`${singleVideoItem.type === "gif" ? "Play tweet GIF" : "Play tweet video"} 1`}
-							className="block size-full bg-black object-contain"
-							controls
-							loop={singleVideoItem.type === "gif"}
-							muted={singleVideoItem.type === "gif"}
-							onClick={(event) => event.stopPropagation()}
-							onFocus={(event) => event.stopPropagation()}
-							onPointerDown={(event) => event.stopPropagation()}
-							playsInline
-							poster={
-								singleVideoItem.thumbnailUrl ??
-								(singleVideoItem.url !== singleVideoUrl
-									? singleVideoItem.url
-									: undefined)
-							}
-							preload="none"
-							src={singleVideoUrl}
-						/>
+						<>
+							<video
+								aria-label={`${singleVideoItem.type === "gif" ? "Tweet GIF" : "Tweet video"} 1`}
+								className="block size-full bg-black object-contain"
+								controls
+								loop={singleVideoItem.type === "gif"}
+								muted={singleVideoItem.type === "gif"}
+								onClick={(event) => event.stopPropagation()}
+								onError={() => setInlinePlaybackState("error")}
+								onFocus={(event) => event.stopPropagation()}
+								onPause={() => setInlinePlaybackState("idle")}
+								onPlay={() => setInlinePlaybackState("playing")}
+								onPointerDown={(event) => event.stopPropagation()}
+								playsInline
+								poster={
+									singleVideoItem.thumbnailUrl ??
+									(singleVideoItem.url !== singleVideoUrl
+										? singleVideoItem.url
+										: undefined)
+								}
+								preload="none"
+								ref={inlineVideoRef}
+								src={singleVideoUrl}
+							/>
+							{inlinePlaybackState !== "playing" ? (
+								<button
+									aria-label={`${singleVideoItem.type === "gif" ? "Play tweet GIF" : "Play tweet video"} 1`}
+									className="absolute left-1/2 top-1/2 z-10 grid size-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/30 bg-black/70 text-white shadow-lg hover:bg-black/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+									onClick={(event) => {
+										event.stopPropagation();
+										const video = inlineVideoRef.current;
+										if (!video) return;
+										setInlinePlaybackState("idle");
+										try {
+											void Promise.resolve(video.play())
+												.then(() => setInlinePlaybackState("playing"))
+												.catch(() => setInlinePlaybackState("error"));
+										} catch {
+											setInlinePlaybackState("error");
+										}
+									}}
+									onPointerDown={(event) => event.stopPropagation()}
+									type="button"
+								>
+									<Play className="ml-1 size-6" fill="currentColor" />
+								</button>
+							) : null}
+							{inlinePlaybackState === "error" ? (
+								<span
+									className="pointer-events-none absolute bottom-12 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/75 px-3 py-1.5 text-center text-sm text-white"
+									role="status"
+								>
+									Video unavailable
+								</span>
+							) : null}
+						</>
 					) : null}
 					<button
 						aria-label="Expand tweet media 1"
 						className="absolute right-2 top-2 grid size-8 place-items-center rounded-full bg-black/65 text-white hover:bg-black/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
 						onClick={(event) => {
 							event.stopPropagation();
+							setInlinePlaybackState("idle");
 							setSelectedIndex(0);
 						}}
 						onFocus={(event) => event.stopPropagation()}

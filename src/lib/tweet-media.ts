@@ -1,4 +1,5 @@
 import type { TweetMediaItem } from "./types";
+import { tweetVideoPlaybackUrl as proxiedTweetVideoUrl } from "./tweet-video-url";
 
 function isMp4Url(value: string) {
 	try {
@@ -24,4 +25,9 @@ export function playableTweetVideoUrl(item: TweetMediaItem) {
 		)[0];
 	if (variant) return variant.url;
 	return isMp4Url(item.url) ? item.url : null;
+}
+
+export function tweetVideoPlaybackUrl(item: TweetMediaItem) {
+	const playableUrl = playableTweetVideoUrl(item);
+	return playableUrl ? proxiedTweetVideoUrl(playableUrl) : null;
 }

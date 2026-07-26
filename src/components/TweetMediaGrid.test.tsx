@@ -1,5 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TweetMediaGrid } from "./TweetMediaGrid";
 
 const viewerTweet = {
@@ -25,6 +31,7 @@ const viewerTweet = {
 describe("TweetMediaGrid", () => {
 	afterEach(() => {
 		cleanup();
+		vi.restoreAllMocks();
 	});
 
 	it("renders nothing without media", () => {
@@ -218,12 +225,12 @@ describe("TweetMediaGrid", () => {
 						thumbnailUrl: "https://pbs.twimg.com/video-thumb.jpg",
 						variants: [
 							{
-								url: "https://video.twimg.com/clip-low.mp4",
+								url: "https://video.twimg.com/ext_tw_video/clip-low.mp4",
 								contentType: "video/mp4",
 								bitRate: 256_000,
 							},
 							{
-								url: "https://video.twimg.com/clip-high.mp4",
+								url: "https://video.twimg.com/ext_tw_video/clip-high.mp4",
 								contentType: "video/mp4",
 								bitRate: 2_176_000,
 							},
@@ -233,10 +240,10 @@ describe("TweetMediaGrid", () => {
 			/>,
 		);
 
-		const video = screen.getByLabelText("Play tweet video 1");
+		const video = screen.getByLabelText("Tweet video 1");
 		expect(video).toHaveAttribute(
 			"src",
-			"https://video.twimg.com/clip-high.mp4",
+			"/api/tweet-video?url=https%3A%2F%2Fvideo.twimg.com%2Fext_tw_video%2Fclip-high.mp4",
 		);
 		expect(video).toHaveAttribute(
 			"poster",
@@ -246,6 +253,9 @@ describe("TweetMediaGrid", () => {
 		expect(video).toHaveAttribute("playsinline");
 		expect(video).toHaveAttribute("preload", "none");
 		expect(video).not.toHaveAttribute("autoplay");
+		expect(
+			screen.getByRole("button", { name: "Play tweet video 1" }),
+		).toBeInTheDocument();
 
 		const expandButton = screen.getByRole("button", {
 			name: "Expand tweet media 1",
@@ -256,12 +266,46 @@ describe("TweetMediaGrid", () => {
 			screen.getByRole("dialog", { name: "Tweet media viewer" }),
 		).toBeInTheDocument();
 		expect(document.querySelectorAll("video")).toHaveLength(1);
-		expect(
-			screen.queryByLabelText("Play tweet video 1"),
-		).not.toBeInTheDocument();
+		expect(document.querySelector("video")).toHaveAttribute(
+			"src",
+			"/api/tweet-video?url=https%3A%2F%2Fvideo.twimg.com%2Fext_tw_video%2Fclip-high.mp4",
+		);
+		expect(screen.queryByLabelText("Tweet video 1")).not.toBeInTheDocument();
 
 		fireEvent.click(screen.getByRole("button", { name: "Close media viewer" }));
 		expect(expandButton).toHaveFocus();
+	});
+
+	it("starts inline playback from the visible play button", async () => {
+		const play = vi
+			.spyOn(HTMLMediaElement.prototype, "play")
+			.mockResolvedValue();
+		render(
+			<TweetMediaGrid
+				items={[
+					{
+						url: "https://pbs.twimg.com/video-thumb.jpg",
+						type: "video",
+						thumbnailUrl: "https://pbs.twimg.com/video-thumb.jpg",
+						variants: [
+							{
+								url: "https://video.twimg.com/ext_tw_video/clip.mp4",
+								contentType: "video/mp4",
+							},
+						],
+					},
+				]}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Play tweet video 1" }));
+
+		expect(play).toHaveBeenCalledOnce();
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("button", { name: "Play tweet video 1" }),
+			).not.toBeInTheDocument(),
+		);
 	});
 
 	it("plays direct video CDN URLs without a variant", () => {
@@ -276,9 +320,9 @@ describe("TweetMediaGrid", () => {
 			/>,
 		);
 
-		expect(screen.getByLabelText("Play tweet video 1")).toHaveAttribute(
+		expect(screen.getByLabelText("Tweet video 1")).toHaveAttribute(
 			"src",
-			"https://video.twimg.com/ext_tw_video/clip.mp4",
+			"/api/tweet-video?url=https%3A%2F%2Fvideo.twimg.com%2Fext_tw_video%2Fclip.mp4",
 		);
 	});
 
@@ -294,7 +338,7 @@ describe("TweetMediaGrid", () => {
 			/>,
 		);
 
-		const video = screen.getByLabelText("Play tweet GIF 1") as HTMLVideoElement;
+		const video = screen.getByLabelText("Tweet GIF 1") as HTMLVideoElement;
 		expect(video).toHaveAttribute("src", "/media/demo.mp4");
 		expect(video).toHaveAttribute("loop");
 		expect(video).toHaveAttribute("controls");

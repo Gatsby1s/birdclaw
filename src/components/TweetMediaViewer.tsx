@@ -20,7 +20,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { formatCompactNumber, formatExactTimestamp } from "#/lib/present";
-import { playableTweetVideoUrl } from "#/lib/tweet-media";
+import { tweetVideoPlaybackUrl } from "#/lib/tweet-media";
 import type { EmbeddedTweet, TweetMediaItem } from "#/lib/types";
 import { cx } from "#/lib/ui";
 import { AvatarChip } from "./AvatarChip";
@@ -80,7 +80,7 @@ export function TweetMediaViewer({
 	const selectedItem = items[selectedIndex] ?? items[0];
 	const isImage = selectedItem?.type === "image";
 	const selectedVideoUrl = selectedItem
-		? playableTweetVideoUrl(selectedItem)
+		? tweetVideoPlaybackUrl(selectedItem)
 		: null;
 
 	const resetView = useCallback(() => {

@@ -115,6 +115,7 @@ const item = {
 describe("TimelineCard", () => {
 	afterEach(() => {
 		cleanup();
+		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
 	});
 
@@ -1213,6 +1214,9 @@ describe("TimelineCard", () => {
 
 	it("does not toggle the conversation when inline video controls are used", () => {
 		const fetchMock = vi.fn();
+		const play = vi
+			.spyOn(HTMLMediaElement.prototype, "play")
+			.mockResolvedValue();
 		vi.stubGlobal("fetch", fetchMock);
 		render(
 			<TimelineCard
@@ -1227,7 +1231,7 @@ describe("TimelineCard", () => {
 							thumbnailUrl: "https://pbs.twimg.com/video-thumb.jpg",
 							variants: [
 								{
-									url: "https://video.twimg.com/clip.mp4",
+									url: "https://video.twimg.com/ext_tw_video/clip.mp4",
 									contentType: "video/mp4",
 								},
 							],
@@ -1242,6 +1246,7 @@ describe("TimelineCard", () => {
 
 		fireEvent.click(screen.getByLabelText("Play tweet video 1"));
 
+		expect(play).toHaveBeenCalledOnce();
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 

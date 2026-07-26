@@ -63,13 +63,14 @@ function requestHeaders(request: IncomingMessage) {
 	return headers;
 }
 
-function toWebRequest(request: IncomingMessage) {
+function toWebRequest(request: IncomingMessage, signal: AbortSignal) {
 	const host = request.headers.host ?? "127.0.0.1";
 	const url = new URL(request.url ?? "/", `http://${host}`);
 	const method = request.method ?? "GET";
 	const init: RequestInit & { duplex?: "half" } = {
 		method,
 		headers: requestHeaders(request),
+		signal,
 	};
 	if (method !== "GET" && method !== "HEAD") {
 		init.body = Readable.toWeb(request) as ReadableStream;
@@ -92,9 +93,29 @@ async function sendWebResponse(response: Response, target: ServerResponse) {
 	}
 	await new Promise<void>((resolve, reject) => {
 		const body = Readable.fromWeb(response.body as never);
-		body.once("error", reject);
-		target.once("error", reject);
-		target.once("finish", resolve);
+		let settled = false;
+		const cleanup = () => {
+			body.off("error", fail);
+			target.off("error", fail);
+			target.off("finish", finish);
+			target.off("close", close);
+		};
+		const settle = (callback: () => void) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			callback();
+		};
+		const fail = (error: Error) => settle(() => reject(error));
+		const finish = () => settle(resolve);
+		const close = () => {
+			if (!target.writableFinished) body.destroy();
+			settle(resolve);
+		};
+		body.once("error", fail);
+		target.once("error", fail);
+		target.once("finish", finish);
+		target.once("close", close);
 		body.pipe(target);
 	});
 }
@@ -165,10 +186,17 @@ export async function startProductionServer({
 	}
 	const handler = loaded.default;
 	const server = createServer(async (request, response) => {
+		const requestAbort = new AbortController();
+		const abortRequest = () => requestAbort.abort();
+		const abortClosedResponse = () => {
+			if (!response.writableFinished) abortRequest();
+		};
+		request.once("aborted", abortRequest);
+		response.once("close", abortClosedResponse);
 		try {
 			if (await sendStaticFile(request, response, clientDir)) return;
 			await sendWebResponse(
-				await handler.fetch(toWebRequest(request)),
+				await handler.fetch(toWebRequest(request, requestAbort.signal)),
 				response,
 			);
 		} catch (error) {
@@ -178,6 +206,9 @@ export async function startProductionServer({
 			}
 			response.end("Internal server error");
 			console.error(error instanceof Error ? error.message : String(error));
+		} finally {
+			request.off("aborted", abortRequest);
+			response.off("close", abortClosedResponse);
 		}
 	});
 	await new Promise<void>((resolve, reject) => {
