@@ -469,15 +469,15 @@ describe("search discussion", () => {
 	});
 
 	it("surfaces OpenAI response failures", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
+		const fetchMock = vi.fn(
+			async () =>
 				new Response("rate limited", {
 					status: 429,
 					statusText: "Too Many Requests",
+					headers: { "retry-after": "0" },
 				}),
-			),
 		);
+		vi.stubGlobal("fetch", fetchMock);
 
 		await expect(
 			streamSearchDiscussion({
@@ -487,6 +487,7 @@ describe("search discussion", () => {
 				limit: 20,
 			}),
 		).rejects.toThrow("OpenAI request failed: 429 rate limited");
+		expect(fetchMock).toHaveBeenCalledTimes(3);
 	});
 
 	it("processes OpenAI stream event variants", () => {

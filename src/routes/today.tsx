@@ -144,6 +144,11 @@ function digestUrl(
 
 function digestStreamError(cause: unknown, phase: string) {
 	const message = cause instanceof Error ? cause.message : String(cause);
+	if (/OpenAI request failed: (?:408|409|429|5\d\d)\b/i.test(message)) {
+		return /\(after \d+ attempts\)$/i.test(message)
+			? "AI service is temporarily unavailable. BirdClaw retried automatically; retry again in a moment."
+			: "AI service is temporarily unavailable. Retry again in a moment.";
+	}
 	if (
 		cause instanceof TypeError &&
 		/network error|failed to fetch|load failed/i.test(message)
