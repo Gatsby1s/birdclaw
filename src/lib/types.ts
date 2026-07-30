@@ -178,6 +178,7 @@ export interface EmbeddedTweet {
 	likeCount?: number;
 	mediaCount?: number;
 	bookmarked?: boolean;
+	localBookmarked?: boolean;
 	liked?: boolean;
 	author: ProfileRecord;
 	entities: TweetEntities;
@@ -216,6 +217,7 @@ export interface TimelineItem {
 	likeCount: number;
 	mediaCount: number;
 	bookmarked: boolean;
+	localBookmarked?: boolean;
 	liked: boolean;
 	author: ProfileRecord;
 	entities: TweetEntities;
@@ -380,6 +382,8 @@ export interface DmConversationItem {
 export interface TimelineQuery {
 	resource: Exclude<ResourceKind, "dms">;
 	account?: string;
+	stateAccount?: string;
+	author?: string;
 	search?: string;
 	replyFilter?: ReplyFilter;
 	since?: string;

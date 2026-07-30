@@ -104,6 +104,7 @@ export class ImportRepository {
       delete from ai_scores;
       delete from tweet_actions;
       delete from tweet_account_edges;
+      delete from local_tweet_bookmarks;
       delete from tweet_collections;
       delete from link_occurrences;
       delete from url_expansions;

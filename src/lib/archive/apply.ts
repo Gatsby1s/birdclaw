@@ -311,12 +311,18 @@ export function applyArchiveImportPlanEffect({
 			        from tweet_collections collection
 		        where collection.tweet_id = tweets.id
 		      )
-		      and not exists (
-			        select 1
-				        from tweet_account_edges edge
-				        where edge.tweet_id = tweets.id
-				      )
-				      and not exists (
+			      and not exists (
+				        select 1
+					        from tweet_account_edges edge
+					        where edge.tweet_id = tweets.id
+					      )
+					      and not exists (
+					        select 1
+					        from local_tweet_bookmarks local_bookmark
+					        where local_bookmark.tweet_id = tweets.id
+					          and local_bookmark.is_bookmarked = 1
+					      )
+					      and not exists (
 				        select 1
 				        from tweets referencing_tweet
 				        where referencing_tweet.reply_to_id = tweets.id

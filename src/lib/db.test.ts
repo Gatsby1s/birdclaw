@@ -268,6 +268,19 @@ describe("database init", () => {
 			]),
 		);
 
+		const localBookmarkColumnNames = db
+			.prepare("pragma table_info(local_tweet_bookmarks)")
+			.all() as Array<{ name: string }>;
+		expect(localBookmarkColumnNames.map((column) => column.name)).toEqual(
+			expect.arrayContaining([
+				"account_id",
+				"tweet_id",
+				"is_bookmarked",
+				"created_at",
+				"updated_at",
+			]),
+		);
+
 		const timelineEdgeColumnNames = db
 			.prepare("pragma table_info(tweet_account_edges)")
 			.all() as Array<{
@@ -384,7 +397,7 @@ describe("database init", () => {
 				"deleted_at",
 			]),
 		);
-		expect(db.pragma("user_version", { simple: true })).toBe(6);
+		expect(db.pragma("user_version", { simple: true })).toBe(7);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -413,7 +426,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(6);
+		expect(db.pragma("user_version", { simple: true })).toBe(7);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import {
+	cleanup,
+	fireEvent,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { ConversationSurfaceScope } from "#/lib/conversation-surface";
@@ -150,6 +156,128 @@ describe("TimelineCard", () => {
 		expect(onReply).toHaveBeenCalledWith("tweet_1");
 	});
 
+	it("links the displayed avatar to a local author timeline without opening the thread", () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		render(<TimelineCard item={item} onReply={vi.fn()} />);
+
+		const avatarLink = screen.getByRole("link", {
+			name: "View @sam local posts",
+		});
+		expect(avatarLink).toHaveAttribute("href", "/authors/sam");
+		avatarLink.addEventListener("click", (event) => event.preventDefault(), {
+			once: true,
+		});
+		fireEvent.click(avatarLink);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("toggles a local bookmark without changing the imported bookmark marker", async () => {
+		const fetchMock = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				expect(String(input)).toBe("/api/bookmark");
+				expect(init?.method).toBe("POST");
+				expect(JSON.parse(String(init?.body))).toEqual({
+					accountId: "acct_primary",
+					tweetId: "tweet_1",
+					bookmarked: true,
+				});
+				return Response.json({
+					ok: true,
+					accountId: "acct_primary",
+					tweetId: "tweet_1",
+					bookmarked: true,
+				});
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		render(
+			<TimelineCard
+				item={{ ...item, localBookmarked: false }}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		expect(
+			screen.getByLabelText("Saved on X or in an imported archive"),
+		).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Bookmark locally" }));
+
+		expect(
+			await screen.findByRole("button", { name: "Remove local bookmark" }),
+		).toHaveAttribute("aria-pressed", "true");
+		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+	});
+
+	it("rolls back an optimistic local bookmark when persistence fails", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValue(
+					Response.json(
+						{ ok: false, message: "Database unavailable" },
+						{ status: 500 },
+					),
+				),
+		);
+		render(
+			<TimelineCard
+				item={{ ...item, bookmarked: false, localBookmarked: false }}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Bookmark locally" }));
+		expect(
+			await screen.findByText("Couldn’t update bookmark."),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Bookmark locally" }),
+		).toHaveAttribute("aria-pressed", "false");
+	});
+
+	it("rolls a failed second update back to the last successful bookmark state", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				Response.json({
+					ok: true,
+					accountId: "acct_primary",
+					tweetId: "tweet_1",
+					bookmarked: true,
+				}),
+			)
+			.mockResolvedValueOnce(
+				Response.json(
+					{ ok: false, message: "Database unavailable" },
+					{ status: 500 },
+				),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+		render(
+			<TimelineCard
+				item={{ ...item, bookmarked: false, localBookmarked: false }}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Bookmark locally" }));
+		const removeButton = await screen.findByRole("button", {
+			name: "Remove local bookmark",
+		});
+		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+		fireEvent.click(removeButton);
+		expect(
+			await screen.findByText("Couldn’t update bookmark."),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Remove local bookmark" }),
+		).toHaveAttribute("aria-pressed", "true");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
 	it("keeps Chinese prose outside adjacent fallback t.co links", () => {
 		const text =
 			"参见https://t.co/fx3GCU2zF8，市场转暖；这里https://t.co/QVugYmhuPc有聊。";
@@ -258,6 +386,9 @@ describe("TimelineCard", () => {
 			"src",
 			expect.stringContaining("/api/avatar?profileId=profile_3&v="),
 		);
+		expect(
+			screen.getByRole("link", { name: "View @ava local posts" }),
+		).toHaveAttribute("href", "/authors/ava");
 		expect(screen.getByText("Original app idea")).toBeInTheDocument();
 		expect(screen.getAllByText("@ava").length).toBeGreaterThan(0);
 		expect(screen.getByLabelText("We replied")).toBeInTheDocument();

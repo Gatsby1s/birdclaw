@@ -281,6 +281,9 @@ function buildEmbeddedTweet(
 		...(row[`${prefix}bookmarked`] === undefined
 			? {}
 			: { bookmarked: Boolean(row[`${prefix}bookmarked`]) }),
+		...(row[`${prefix}local_bookmarked`] === undefined
+			? {}
+			: { localBookmarked: Boolean(row[`${prefix}local_bookmarked`]) }),
 		...(row[`${prefix}liked`] === undefined
 			? {}
 			: { liked: Boolean(row[`${prefix}liked`]) }),
@@ -375,6 +378,7 @@ function buildRetweetedTweet(
 		likeCount: Number(row.like_count ?? 0),
 		mediaCount: 0,
 		bookmarked: Boolean(row.bookmarked),
+		localBookmarked: Boolean(row.local_bookmarked),
 		liked: Boolean(row.liked),
 		author,
 		entities: enrichTimelineEntities(
@@ -487,6 +491,8 @@ const RECENT_TIMELINE_EDGE_CANDIDATES = 5000;
 export function listTimelineItems({
 	resource,
 	account,
+	stateAccount,
+	author,
 	search,
 	replyFilter = "all",
 	since,
@@ -523,6 +529,7 @@ export function listTimelineItems({
 	const canUseRecentEdgeWindow =
 		!likedOnly &&
 		!bookmarkedOnly &&
+		!author?.trim() &&
 		!account &&
 		!search?.trim() &&
 		replyFilter === "all" &&
@@ -536,27 +543,161 @@ export function listTimelineItems({
 		// both passes on tweet lookups so SQLite cannot choose a quadratic kind scan.
 		if (likedOnly && bookmarkedOnly) {
 			timelineEdgesCte = `
-        with timeline_edges as (
+        with effective_bookmarks as (
+          select account_id, tweet_id
+          from tweet_collections
+          where kind = 'bookmarks'
+          union
+          select account_id, tweet_id
+          from local_tweet_bookmarks
+          where is_bookmarked = 1
+        ),
+        timeline_edges as (
           select likes.account_id, likes.tweet_id, 'home' as kind, likes.raw_json
-	          from tweet_collections likes indexed by idx_tweet_collections_tweet
-	          join tweet_collections bookmarks indexed by idx_tweet_collections_tweet
+          from tweet_collections likes indexed by idx_tweet_collections_tweet
+          join effective_bookmarks bookmarks
             on bookmarks.account_id = likes.account_id
             and bookmarks.tweet_id = likes.tweet_id
-	            and bookmarks.kind = 'bookmarks'
-	          where likes.kind = 'likes'
-	        )
+          where likes.kind = 'likes'
+        )
 	      `;
 		} else {
 			const collectionKind = likedOnly ? "likes" : "bookmarks";
-			timelineEdgesCte = `
-	        with timeline_edges as (
-	          select account_id, tweet_id, 'home' as kind, raw_json
-	          from tweet_collections indexed by idx_tweet_collections_tweet
-	          where kind = ?
-	        )
-				`;
-			params.push(collectionKind);
+			if (bookmarkedOnly) {
+				timelineEdgesCte = `
+          with timeline_edges as (
+            select account_id, tweet_id, 'home' as kind, raw_json
+            from tweet_collections indexed by idx_tweet_collections_tweet
+            where kind = 'bookmarks'
+            union all
+            select account_id, tweet_id, 'home' as kind, '{}' as raw_json
+            from local_tweet_bookmarks local_bookmark
+            where local_bookmark.is_bookmarked = 1
+              and not exists (
+                select 1
+                from tweet_collections collection
+                where collection.account_id = local_bookmark.account_id
+                  and collection.tweet_id = local_bookmark.tweet_id
+                  and collection.kind = 'bookmarks'
+              )
+          )
+        `;
+			} else {
+				timelineEdgesCte = `
+          with timeline_edges as (
+            select account_id, tweet_id, 'home' as kind, raw_json
+            from tweet_collections indexed by idx_tweet_collections_tweet
+            where kind = ?
+          )
+        `;
+				params.push(collectionKind);
+			}
 		}
+		where = "where 1 = 1";
+	} else if (author?.trim()) {
+		// A person's local history spans every ingestion surface: Home, mentions,
+		// authored/search results, profile/thread context, saved collections, and
+		// canonical tweets that no longer have an edge. Read interaction state for
+		// the account selected in the UI while choosing the richest raw payload
+		// available across accounts.
+		timelineEdgesCte = `
+      with matching_tweets as (
+        select t.id
+        from tweets t
+        join profiles author_profile on author_profile.id = t.author_profile_id
+        where lower(author_profile.handle) = lower(?)
+      ),
+      selected_state_account as (
+        select id
+        from accounts
+        order by
+          case
+            when id = ? then 0
+            when is_default = 1 then 1
+            else 2
+          end,
+          id
+        limit 1
+      ),
+      timeline_edges as (
+        select
+          selected_state_account.id as account_id,
+          matching.id as tweet_id,
+          'home' as kind,
+          coalesce(
+            (
+              select nullif(nullif(edge.raw_json, ''), '{}')
+              from tweet_account_edges edge
+              where edge.tweet_id = matching.id
+                and edge.raw_json not in ('', '{}', 'null')
+              order by
+                case
+                  when (
+                    instr(edge.raw_json, '"retweeted_tweet_id"') > 0
+                    or instr(edge.raw_json, '"retweetedTweetId"') > 0
+                    or instr(edge.raw_json, '"retweetedStatusId"') > 0
+                    or instr(edge.raw_json, '"retweeted_status_id_str"') > 0
+                    or instr(edge.raw_json, '"retweetedTweet"') > 0
+                    or instr(edge.raw_json, '"retweeted_status"') > 0
+                    or (
+                      (
+                        instr(edge.raw_json, '"referenced_tweets"') > 0
+                        or instr(edge.raw_json, '"referencedTweets"') > 0
+                      )
+                      and instr(edge.raw_json, '"retweeted"') > 0
+                    )
+                  ) then 0
+                  else 1
+                end,
+                case edge.kind
+                  when 'home' then 0
+                  when 'authored' then 1
+                  when 'profile' then 2
+                  when 'search' then 3
+                  when 'mention' then 4
+                  else 5
+                end,
+                length(edge.raw_json) desc,
+                edge.updated_at desc,
+                edge.account_id asc
+              limit 1
+            ),
+            (
+              select nullif(nullif(collection.raw_json, ''), '{}')
+              from tweet_collections collection
+              where collection.tweet_id = matching.id
+                and collection.raw_json not in ('', '{}', 'null')
+              order by
+                case
+                  when (
+                    instr(collection.raw_json, '"retweeted_tweet_id"') > 0
+                    or instr(collection.raw_json, '"retweetedTweetId"') > 0
+                    or instr(collection.raw_json, '"retweetedStatusId"') > 0
+                    or instr(collection.raw_json, '"retweeted_status_id_str"') > 0
+                    or instr(collection.raw_json, '"retweetedTweet"') > 0
+                    or instr(collection.raw_json, '"retweeted_status"') > 0
+                    or (
+                      (
+                        instr(collection.raw_json, '"referenced_tweets"') > 0
+                        or instr(collection.raw_json, '"referencedTweets"') > 0
+                      )
+                      and instr(collection.raw_json, '"retweeted"') > 0
+                    )
+                  ) then 0
+                  else 1
+                end,
+                length(collection.raw_json) desc,
+                collection.updated_at desc,
+                collection.account_id asc
+              limit 1
+            ),
+            '{}'
+          ) as raw_json
+        from matching_tweets matching
+        cross join selected_state_account
+      )
+    `;
+		params.push(author.trim().replace(/^@/, ""), stateAccount?.trim() ?? "");
 		where = "where 1 = 1";
 	} else if (canUseRecentEdgeWindow) {
 		usedRecentEdgeWindow = true;
@@ -686,8 +827,17 @@ export function listTimelineItems({
               and collection.kind = 'bookmarks'
           ) then 1
           else 0
-        end as bookmarked,
-        case
+	        end as bookmarked,
+	        case
+	          when exists (
+	            select 1 from local_tweet_bookmarks local_bookmark
+	            where local_bookmark.account_id = e.account_id
+	              and local_bookmark.tweet_id = t.id
+	              and local_bookmark.is_bookmarked = 1
+	          ) then 1
+	          else 0
+	        end as local_bookmarked,
+	        case
           when exists (
             select 1 from tweet_collections collection
             where collection.account_id = e.account_id
@@ -842,6 +992,7 @@ export function listTimelineItems({
 			likeCount: Number(row.like_count),
 			mediaCount: Number(row.media_count),
 			bookmarked: Boolean(row.bookmarked),
+			localBookmarked: Boolean(row.local_bookmarked),
 			liked: Boolean(row.liked),
 			author,
 			entities,
@@ -884,6 +1035,15 @@ function conversationTweetSelect(accountId?: string) {
 		? `
     case
       when exists (
+        select 1 from local_tweet_bookmarks local_bookmark
+        where local_bookmark.account_id = ?
+          and local_bookmark.tweet_id = t.id
+          and local_bookmark.is_bookmarked = 1
+      ) then 1
+      else 0
+    end as local_bookmarked,
+    case
+      when exists (
         select 1 from tweet_collections collection
         where collection.account_id = ?
           and collection.tweet_id = t.id
@@ -901,6 +1061,11 @@ function conversationTweetSelect(accountId?: string) {
       else 0
     end as liked,`
 		: `
+    exists (
+      select 1 from local_tweet_bookmarks local_bookmark
+      where local_bookmark.tweet_id = t.id
+        and local_bookmark.is_bookmarked = 1
+    ) as local_bookmarked,
     exists (
       select 1 from tweet_collections collection
       where collection.tweet_id = t.id and collection.kind = 'bookmarks'
@@ -942,7 +1107,7 @@ function getTweetById(
 	resolveProfileByHandle?: (handle: string) => ProfileRecord,
 	accountId?: string,
 ): EmbeddedTweet | null {
-	const stateParams = accountId ? [accountId, accountId] : [];
+	const stateParams = accountId ? [accountId, accountId, accountId] : [];
 	const row = db
 		.prepare(`${conversationTweetSelect(accountId)} where t.id = ?`)
 		.get(...stateParams, tweetId) as Record<string, unknown> | undefined;

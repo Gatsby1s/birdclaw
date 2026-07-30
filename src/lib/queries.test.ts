@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetBirdclawPathsForTests } from "./config";
 import { getNativeDb, resetDatabaseForTests } from "./db";
 import { listInboxItems } from "./inbox";
+import { setLocalBookmark } from "./local-bookmarks";
 import {
 	applyDmRequestMutationToLocalStore,
 	createDmReply,
@@ -751,6 +752,289 @@ describe("birdclaw queries", () => {
 		const items = listTimelineItems({ resource: "home", limit: 1 });
 
 		expect(items[0]).not.toHaveProperty("searchSnippet");
+	});
+
+	it("lists one author's complete local history across storage surfaces", () => {
+		setupTempHome();
+		const db = getNativeDb();
+		db.exec(`
+      delete from local_tweet_bookmarks;
+      delete from tweet_account_edges;
+      delete from tweet_collections;
+      delete from tweets_fts;
+      delete from tweets;
+      insert into profiles (
+        id, handle, display_name, bio, followers_count, following_count,
+        avatar_hue, created_at
+      ) values (
+        'profile_historian', 'Historian', 'Local Historian', 'Archive keeper',
+        100, 10, 33, '2020-01-01T00:00:00.000Z'
+      )
+      on conflict(id) do nothing;
+    `);
+		for (const [id, createdAt] of [
+			["author_home", "2026-07-01T00:00:00.000Z"],
+			["author_profile", "2026-07-02T00:00:00.000Z"],
+			["author_collection", "2026-07-03T00:00:00.000Z"],
+			["author_orphan", "2026-07-04T00:00:00.000Z"],
+		] as const) {
+			insertTestTweet(db, {
+				id,
+				text: id,
+				createdAt,
+				authorProfileId: "profile_historian",
+			});
+		}
+		insertTestTweet(db, {
+			id: "other_author",
+			text: "must not leak",
+			createdAt: "2026-07-05T00:00:00.000Z",
+		});
+		insertTestEdge(db, "author_home", "2026-07-01T00:00:00.000Z", "home");
+		insertTestEdge(db, "author_profile", "2026-07-02T00:00:00.000Z", "profile");
+		insertTestCollection(
+			db,
+			"author_collection",
+			"bookmarks",
+			"2026-07-03T00:00:00.000Z",
+		);
+
+		const items = listTimelineItems({
+			resource: "home",
+			author: "@historian",
+			limit: 20,
+		});
+
+		expect(items.map((item) => item.id)).toEqual([
+			"author_orphan",
+			"author_collection",
+			"author_profile",
+			"author_home",
+		]);
+		expect(items.every((item) => item.author.handle === "Historian")).toBe(
+			true,
+		);
+	});
+
+	it("preserves native retweet metadata in an author timeline", () => {
+		setupTempHome();
+		const db = getNativeDb();
+		db.exec(`
+      insert into profiles (
+        id, handle, display_name, bio, followers_count, following_count,
+        avatar_hue, created_at
+      ) values (
+        'profile_retweeter', 'Retweeter', 'Retweeter', '', 10, 1, 44,
+        '2020-01-01T00:00:00.000Z'
+      )
+      on conflict(id) do nothing;
+    `);
+		insertTestTweet(db, {
+			id: "tweet_original_local",
+			text: "Original local post",
+			createdAt: "2026-07-30T00:00:00.000Z",
+		});
+		insertTestTweet(db, {
+			id: "tweet_wrapper_local",
+			text: "Wrapper post",
+			createdAt: "2026-07-31T00:00:00.000Z",
+			authorProfileId: "profile_retweeter",
+		});
+		insertTestEdge(
+			db,
+			"tweet_wrapper_local",
+			"2026-07-31T00:00:00.000Z",
+			"home",
+			JSON.stringify({
+				referenced_tweets: [{ type: "retweeted", id: "tweet_original_local" }],
+			}),
+		);
+
+		const [wrapper] = listTimelineItems({
+			resource: "home",
+			author: "retweeter",
+			limit: 10,
+		});
+
+		expect(wrapper).toMatchObject({
+			id: "tweet_wrapper_local",
+			retweetedTweet: {
+				id: "tweet_original_local",
+				text: "Original local post",
+			},
+		});
+	});
+
+	it("keeps the richest retweet payload when author state belongs to another account", () => {
+		setupTempHome();
+		const db = getNativeDb();
+		db.exec(`
+      insert into profiles (
+        id, handle, display_name, bio, followers_count, following_count,
+        avatar_hue, created_at
+      ) values (
+        'profile_cross_account_retweeter', 'cross_retweeter',
+        'Cross Retweeter', '', 10, 1, 44, '2020-01-01T00:00:00.000Z'
+      )
+      on conflict(id) do nothing;
+    `);
+		insertTestTweet(db, {
+			id: "tweet_cross_account_original",
+			text: "Original across accounts",
+			createdAt: "2026-07-30T00:00:00.000Z",
+		});
+		insertTestTweet(db, {
+			id: "tweet_cross_account_wrapper",
+			text: "Wrapper across accounts",
+			createdAt: "2026-07-31T00:00:00.000Z",
+			authorProfileId: "profile_cross_account_retweeter",
+		});
+		insertTestEdge(
+			db,
+			"tweet_cross_account_wrapper",
+			"2026-07-31T00:00:00.000Z",
+			"home",
+			JSON.stringify({
+				referenced_tweets: [
+					{ type: "retweeted", id: "tweet_cross_account_original" },
+				],
+			}),
+		);
+		db.prepare(`
+      insert into tweet_account_edges (
+        account_id, tweet_id, kind, first_seen_at, last_seen_at, seen_count,
+        source, raw_json, updated_at
+      ) values (
+        'acct_studio', 'tweet_cross_account_wrapper', 'profile',
+        '2026-07-31T01:00:00.000Z', '2026-07-31T01:00:00.000Z', 1,
+        'test', '{"id":"tweet_cross_account_wrapper"}',
+        '2026-07-31T01:00:00.000Z'
+      )
+    `).run();
+
+		const [wrapper] = listTimelineItems({
+			resource: "home",
+			author: "cross_retweeter",
+			stateAccount: "acct_studio",
+			limit: 10,
+		});
+
+		expect(wrapper).toMatchObject({
+			id: "tweet_cross_account_wrapper",
+			accountId: "acct_studio",
+			retweetedTweet: {
+				id: "tweet_cross_account_original",
+				text: "Original across accounts",
+			},
+		});
+	});
+
+	it("reads and writes author-page bookmark state for the selected account", async () => {
+		setupTempHome();
+		const db = getNativeDb();
+		db.exec(`
+      insert into profiles (
+        id, handle, display_name, bio, followers_count, following_count,
+        avatar_hue, created_at
+      ) values (
+        'profile_multi_account_author', 'multi_author', 'Multi Author', '',
+        10, 1, 44, '2020-01-01T00:00:00.000Z'
+      )
+      on conflict(id) do nothing;
+    `);
+		insertTestTweet(db, {
+			id: "tweet_multi_account_author",
+			text: "Stored through the default account",
+			createdAt: "2026-07-31T00:00:00.000Z",
+			authorProfileId: "profile_multi_account_author",
+		});
+		insertTestEdge(
+			db,
+			"tweet_multi_account_author",
+			"2026-07-31T00:00:00.000Z",
+		);
+		await setLocalBookmark({
+			accountId: "acct_studio",
+			tweetId: "tweet_multi_account_author",
+			bookmarked: true,
+		});
+
+		const [item] = listTimelineItems({
+			resource: "home",
+			author: "multi_author",
+			stateAccount: "acct_studio",
+			limit: 10,
+		});
+
+		expect(item).toMatchObject({
+			id: "tweet_multi_account_author",
+			accountId: "acct_studio",
+			localBookmarked: true,
+		});
+	});
+
+	it("merges local bookmarks into Bookmarks without changing native state", async () => {
+		setupTempHome();
+		const db = getNativeDb();
+		insertTestTweet(db, {
+			id: "tweet_local_bookmark",
+			text: "local bookmark only",
+			createdAt: "2026-07-31T00:00:00.000Z",
+		});
+		await setLocalBookmark({
+			accountId: "acct_primary",
+			tweetId: "tweet_local_bookmark",
+			bookmarked: true,
+		});
+
+		const bookmarked = listTimelineItems({
+			resource: "home",
+			bookmarkedOnly: true,
+			limit: 100,
+		});
+		const localItem = bookmarked.find(
+			(item) => item.id === "tweet_local_bookmark",
+		);
+		expect(localItem).toMatchObject({
+			bookmarked: false,
+			localBookmarked: true,
+		});
+	});
+
+	it("shows one Bookmarks card when native and local bookmark state overlap", async () => {
+		setupTempHome();
+		const db = getNativeDb();
+		insertTestTweet(db, {
+			id: "tweet_overlapping_bookmark",
+			text: "saved in both places",
+			createdAt: "2026-07-31T00:00:00.000Z",
+		});
+		db.prepare(`
+      insert into tweet_collections (
+        account_id, tweet_id, kind, collected_at, source, raw_json, updated_at
+      ) values (
+        'acct_primary', 'tweet_overlapping_bookmark', 'bookmarks',
+        '2026-07-31T00:00:00.000Z', 'archive', '{"source":"native"}',
+        '2026-07-31T00:00:00.000Z'
+      )
+    `).run();
+		await setLocalBookmark({
+			accountId: "acct_primary",
+			tweetId: "tweet_overlapping_bookmark",
+			bookmarked: true,
+		});
+
+		const matches = listTimelineItems({
+			resource: "home",
+			bookmarkedOnly: true,
+			limit: 100,
+		}).filter((item) => item.id === "tweet_overlapping_bookmark");
+
+		expect(matches).toHaveLength(1);
+		expect(matches[0]).toMatchObject({
+			bookmarked: true,
+			localBookmarked: true,
+		});
 	});
 
 	it("falls back when recent non-timeline tweets fill the fast window", () => {
