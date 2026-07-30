@@ -191,6 +191,7 @@ export const embeddedTweetSchema: z.ZodType<EmbeddedTweet> = z.object({
 	likeCount: z.number().optional(),
 	mediaCount: z.number().optional(),
 	bookmarked: z.boolean().optional(),
+	localBookmarked: z.boolean().optional(),
 	liked: z.boolean().optional(),
 	author: profileRecordSchema.default(unknownProfile),
 	entities: tweetEntitiesSchema.default({}),
@@ -212,6 +213,7 @@ export const timelineItemSchema: z.ZodType<TimelineItem> = z.object({
 	likeCount: z.number().default(0),
 	mediaCount: z.number().default(0),
 	bookmarked: z.boolean().default(false),
+	localBookmarked: z.boolean().default(false),
 	liked: z.boolean().default(false),
 	author: profileRecordSchema.default(unknownProfile),
 	entities: tweetEntitiesSchema.default({}),
@@ -221,6 +223,22 @@ export const timelineItemSchema: z.ZodType<TimelineItem> = z.object({
 	retweetedTweet: embeddedTweetSchema.nullable().optional(),
 	qualityReason: z.string().nullable().optional(),
 });
+
+export const localBookmarkRequestSchema = z.object({
+	accountId: z.string().trim().min(1).max(128),
+	tweetId: z.string().trim().min(1).max(128),
+	bookmarked: z.boolean(),
+});
+
+export const localBookmarkResponseSchema = z.object({
+	ok: z.literal(true),
+	accountId: z.string(),
+	tweetId: z.string(),
+	bookmarked: z.boolean(),
+});
+
+export type LocalBookmarkRequest = z.infer<typeof localBookmarkRequestSchema>;
+export type LocalBookmarkResponse = z.infer<typeof localBookmarkResponseSchema>;
 
 export const dmMessageSchema: z.ZodType<DmMessageItem> = z.object({
 	id: z.string(),

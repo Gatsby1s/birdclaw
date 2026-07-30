@@ -60,6 +60,8 @@ export const Route = createFileRoute("/api/query")({
 							"home") as ResourceKind;
 						const baseFilters = {
 							account: url.searchParams.get("account") ?? undefined,
+							stateAccount: url.searchParams.get("stateAccount") ?? undefined,
+							author: url.searchParams.get("author") ?? undefined,
 							search: url.searchParams.get("search") ?? undefined,
 							replyFilter: parseReplyFilter(
 								url.searchParams.get("replyFilter"),

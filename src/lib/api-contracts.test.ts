@@ -7,6 +7,8 @@ import {
 	linkInsightResponseSchema,
 	linkPreviewResponseSchema,
 	liveDataSourcesResponseSchema,
+	localBookmarkRequestSchema,
+	localBookmarkResponseSchema,
 	networkMapResponseSchema,
 	profileHydrationResponseSchema,
 	queryResponseSchema,
@@ -17,6 +19,35 @@ import {
 } from "./api-contracts";
 
 describe("API contracts", () => {
+	it("validates local bookmark mutations", () => {
+		expect(
+			localBookmarkRequestSchema.parse({
+				accountId: "acct_primary",
+				tweetId: "tweet_1",
+				bookmarked: true,
+			}),
+		).toEqual({
+			accountId: "acct_primary",
+			tweetId: "tweet_1",
+			bookmarked: true,
+		});
+		expect(
+			localBookmarkResponseSchema.parse({
+				ok: true,
+				accountId: "acct_primary",
+				tweetId: "tweet_1",
+				bookmarked: false,
+			}),
+		).toMatchObject({ ok: true, bookmarked: false });
+		expect(
+			localBookmarkRequestSchema.safeParse({
+				accountId: "",
+				tweetId: "tweet_1",
+				bookmarked: true,
+			}).success,
+		).toBe(false);
+	});
+
 	it("accepts search timeline responses", () => {
 		const result = queryResponseSchema.safeParse({
 			resource: "search",

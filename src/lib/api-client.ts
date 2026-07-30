@@ -4,6 +4,8 @@ import {
 	actionResponseSchemaFor,
 	type ActionRequest,
 	type ActionResponseFor,
+	localBookmarkResponseSchema,
+	type LocalBookmarkRequest,
 	queryEnvelopeSchema,
 	queryResponseSchema,
 	webSyncJobSchema,
@@ -135,6 +137,19 @@ export function fetchQueryResponseEffect(
 	init?: RequestInit,
 ) {
 	return fetchJsonEffect(input, init, queryResponseSchema, "Query unavailable");
+}
+
+export function setLocalBookmark(input: LocalBookmarkRequest) {
+	return fetchJson(
+		"/api/bookmark",
+		{
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(input),
+		},
+		localBookmarkResponseSchema,
+		"Bookmark update failed",
+	);
 }
 
 export function postAction<K extends ActionRequest["kind"]>(

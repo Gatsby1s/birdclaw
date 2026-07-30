@@ -632,7 +632,7 @@ describe("text backup", () => {
 		const first = await exportBackup({ repoPath: firstRepoPath });
 		const second = await exportBackup({ repoPath: secondRepoPath });
 
-		expect(first.manifest.schemaVersion).toBe(3);
+		expect(first.manifest.schemaVersion).toBe(4);
 		expect(first.manifest.backupHash).toBe(
 			"61f28f03fe0c721815512bd2e4828ad1ae02f87eb4811b1a0549c97a35be0faf",
 		);

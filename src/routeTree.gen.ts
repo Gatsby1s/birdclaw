@@ -25,6 +25,7 @@ import { Route as BookmarksRouteImport } from './routes/bookmarks'
 import { Route as BlocksRouteImport } from './routes/blocks'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ProfilesHandleRouteImport } from './routes/profiles.$handle'
+import { Route as AuthorsHandleRouteImport } from './routes/authors.$handle'
 import { Route as ApiXurlRateLimitsRouteImport } from './routes/api/xurl-rate-limits'
 import { Route as ApiXremarkRouteImport } from './routes/api/xremark'
 import { Route as ApiTweetVideoRouteImport } from './routes/api/tweet-video'
@@ -44,6 +45,7 @@ import { Route as ApiInboxRouteImport } from './routes/api/inbox'
 import { Route as ApiDiscussionHistoryRouteImport } from './routes/api/discussion-history'
 import { Route as ApiDataSourcesRouteImport } from './routes/api/data-sources'
 import { Route as ApiConversationRouteImport } from './routes/api/conversation'
+import { Route as ApiBookmarkRouteImport } from './routes/api/bookmark'
 import { Route as ApiBlocksRouteImport } from './routes/api/blocks'
 import { Route as ApiAvatarRouteImport } from './routes/api/avatar'
 import { Route as ApiActionRouteImport } from './routes/api/action'
@@ -128,6 +130,11 @@ const IndexRoute = IndexRouteImport.update({
 const ProfilesHandleRoute = ProfilesHandleRouteImport.update({
   id: '/profiles/$handle',
   path: '/profiles/$handle',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthorsHandleRoute = AuthorsHandleRouteImport.update({
+  id: '/authors/$handle',
+  path: '/authors/$handle',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiXurlRateLimitsRoute = ApiXurlRateLimitsRouteImport.update({
@@ -225,6 +232,11 @@ const ApiConversationRoute = ApiConversationRouteImport.update({
   path: '/api/conversation',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiBookmarkRoute = ApiBookmarkRouteImport.update({
+  id: '/api/bookmark',
+  path: '/api/bookmark',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiBlocksRoute = ApiBlocksRouteImport.update({
   id: '/api/blocks',
   path: '/api/blocks',
@@ -271,6 +283,7 @@ export interface FileRoutesByFullPath {
   '/api/action': typeof ApiActionRoute
   '/api/avatar': typeof ApiAvatarRoute
   '/api/blocks': typeof ApiBlocksRoute
+  '/api/bookmark': typeof ApiBookmarkRoute
   '/api/conversation': typeof ApiConversationRoute
   '/api/data-sources': typeof ApiDataSourcesRoute
   '/api/discussion-history': typeof ApiDiscussionHistoryRoute
@@ -290,6 +303,7 @@ export interface FileRoutesByFullPath {
   '/api/tweet-video': typeof ApiTweetVideoRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
+  '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
@@ -313,6 +327,7 @@ export interface FileRoutesByTo {
   '/api/action': typeof ApiActionRoute
   '/api/avatar': typeof ApiAvatarRoute
   '/api/blocks': typeof ApiBlocksRoute
+  '/api/bookmark': typeof ApiBookmarkRoute
   '/api/conversation': typeof ApiConversationRoute
   '/api/data-sources': typeof ApiDataSourcesRoute
   '/api/discussion-history': typeof ApiDiscussionHistoryRoute
@@ -332,6 +347,7 @@ export interface FileRoutesByTo {
   '/api/tweet-video': typeof ApiTweetVideoRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
+  '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
@@ -356,6 +372,7 @@ export interface FileRoutesById {
   '/api/action': typeof ApiActionRoute
   '/api/avatar': typeof ApiAvatarRoute
   '/api/blocks': typeof ApiBlocksRoute
+  '/api/bookmark': typeof ApiBookmarkRoute
   '/api/conversation': typeof ApiConversationRoute
   '/api/data-sources': typeof ApiDataSourcesRoute
   '/api/discussion-history': typeof ApiDiscussionHistoryRoute
@@ -375,6 +392,7 @@ export interface FileRoutesById {
   '/api/tweet-video': typeof ApiTweetVideoRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
+  '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
@@ -400,6 +418,7 @@ export interface FileRouteTypes {
     | '/api/action'
     | '/api/avatar'
     | '/api/blocks'
+    | '/api/bookmark'
     | '/api/conversation'
     | '/api/data-sources'
     | '/api/discussion-history'
@@ -419,6 +438,7 @@ export interface FileRouteTypes {
     | '/api/tweet-video'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
+    | '/authors/$handle'
     | '/profiles/$handle'
     | '/api/integrations/xremark'
     | '/api/integrations/xremark/snapshot'
@@ -442,6 +462,7 @@ export interface FileRouteTypes {
     | '/api/action'
     | '/api/avatar'
     | '/api/blocks'
+    | '/api/bookmark'
     | '/api/conversation'
     | '/api/data-sources'
     | '/api/discussion-history'
@@ -461,6 +482,7 @@ export interface FileRouteTypes {
     | '/api/tweet-video'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
+    | '/authors/$handle'
     | '/profiles/$handle'
     | '/api/integrations/xremark'
     | '/api/integrations/xremark/snapshot'
@@ -484,6 +506,7 @@ export interface FileRouteTypes {
     | '/api/action'
     | '/api/avatar'
     | '/api/blocks'
+    | '/api/bookmark'
     | '/api/conversation'
     | '/api/data-sources'
     | '/api/discussion-history'
@@ -503,6 +526,7 @@ export interface FileRouteTypes {
     | '/api/tweet-video'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
+    | '/authors/$handle'
     | '/profiles/$handle'
     | '/api/integrations/xremark'
     | '/api/integrations/xremark/snapshot'
@@ -527,6 +551,7 @@ export interface RootRouteChildren {
   ApiActionRoute: typeof ApiActionRoute
   ApiAvatarRoute: typeof ApiAvatarRoute
   ApiBlocksRoute: typeof ApiBlocksRoute
+  ApiBookmarkRoute: typeof ApiBookmarkRoute
   ApiConversationRoute: typeof ApiConversationRoute
   ApiDataSourcesRoute: typeof ApiDataSourcesRoute
   ApiDiscussionHistoryRoute: typeof ApiDiscussionHistoryRoute
@@ -546,6 +571,7 @@ export interface RootRouteChildren {
   ApiTweetVideoRoute: typeof ApiTweetVideoRoute
   ApiXremarkRoute: typeof ApiXremarkRoute
   ApiXurlRateLimitsRoute: typeof ApiXurlRateLimitsRoute
+  AuthorsHandleRoute: typeof AuthorsHandleRoute
   ProfilesHandleRoute: typeof ProfilesHandleRoute
   ApiIntegrationsXremarkRoute: typeof ApiIntegrationsXremarkRouteWithChildren
 }
@@ -662,6 +688,13 @@ declare module '@tanstack/react-router' {
       path: '/profiles/$handle'
       fullPath: '/profiles/$handle'
       preLoaderRoute: typeof ProfilesHandleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/authors/$handle': {
+      id: '/authors/$handle'
+      path: '/authors/$handle'
+      fullPath: '/authors/$handle'
+      preLoaderRoute: typeof AuthorsHandleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/xurl-rate-limits': {
@@ -797,6 +830,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiConversationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/bookmark': {
+      id: '/api/bookmark'
+      path: '/api/bookmark'
+      fullPath: '/api/bookmark'
+      preLoaderRoute: typeof ApiBookmarkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/blocks': {
       id: '/api/blocks'
       path: '/api/blocks'
@@ -868,6 +908,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiActionRoute: ApiActionRoute,
   ApiAvatarRoute: ApiAvatarRoute,
   ApiBlocksRoute: ApiBlocksRoute,
+  ApiBookmarkRoute: ApiBookmarkRoute,
   ApiConversationRoute: ApiConversationRoute,
   ApiDataSourcesRoute: ApiDataSourcesRoute,
   ApiDiscussionHistoryRoute: ApiDiscussionHistoryRoute,
@@ -887,6 +928,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTweetVideoRoute: ApiTweetVideoRoute,
   ApiXremarkRoute: ApiXremarkRoute,
   ApiXurlRateLimitsRoute: ApiXurlRateLimitsRoute,
+  AuthorsHandleRoute: AuthorsHandleRoute,
   ProfilesHandleRoute: ProfilesHandleRoute,
   ApiIntegrationsXremarkRoute: ApiIntegrationsXremarkRouteWithChildren,
 }

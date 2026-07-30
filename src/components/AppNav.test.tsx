@@ -58,6 +58,10 @@ describe("AppNav", () => {
 			"Inbox",
 		);
 		expect(screen.getByRole("link", { name: "Blocks" })).toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "Bookmarks" })).toHaveAttribute(
+			"href",
+			"/bookmarks",
+		);
 		expect(
 			screen.getByRole("link", { name: "Rate Limits" }),
 		).toBeInTheDocument();

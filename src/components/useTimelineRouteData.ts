@@ -22,6 +22,8 @@ interface UseTimelineRouteDataOptions {
 	resource: Exclude<ResourceKind, "dms">;
 	search: string;
 	errorFallback: string;
+	author?: string;
+	allAccounts?: boolean;
 	replyFilter?: ReplyFilter;
 	likedOnly?: boolean;
 	bookmarkedOnly?: boolean;
@@ -36,27 +38,37 @@ interface TimelinePageParam {
 function buildTimelineQueryUrl({
 	resource,
 	search,
+	author,
 	replyFilter,
 	likedOnly,
 	bookmarkedOnly,
 	includeRepliesToOthers,
 	selectedAccountId,
+	allAccounts,
 	pageParam,
 }: {
 	resource: Exclude<ResourceKind, "dms">;
 	search: string;
+	author?: string;
 	replyFilter?: ReplyFilter;
 	likedOnly: boolean;
 	bookmarkedOnly: boolean;
 	includeRepliesToOthers: boolean;
 	selectedAccountId?: string;
+	allAccounts: boolean;
 	pageParam?: TimelinePageParam;
 }) {
 	const params = new URLSearchParams({
 		resource,
 		limit: String(PAGE_SIZE),
 	});
-	if (selectedAccountId) params.set("account", selectedAccountId);
+	if (selectedAccountId && !allAccounts) {
+		params.set("account", selectedAccountId);
+	}
+	if (selectedAccountId && allAccounts) {
+		params.set("stateAccount", selectedAccountId);
+	}
+	if (author?.trim()) params.set("author", author.trim().replace(/^@/, ""));
 	if (replyFilter) params.set("replyFilter", replyFilter);
 	if (likedOnly) params.set("liked", "true");
 	if (bookmarkedOnly) params.set("bookmarked", "true");
@@ -78,6 +90,8 @@ export function useTimelineRouteData({
 	resource,
 	search,
 	errorFallback,
+	author,
+	allAccounts = false,
 	replyFilter,
 	likedOnly = false,
 	bookmarkedOnly = false,
@@ -95,11 +109,13 @@ export function useTimelineRouteData({
 		...queryKeys.timelines,
 		{
 			resource,
+			author: author?.trim().replace(/^@/, "").toLowerCase() ?? "",
 			search: debouncedSearch,
 			replyFilter: replyFilter ?? "all",
 			likedOnly,
 			bookmarkedOnly,
 			includeRepliesToOthers,
+			allAccounts,
 			selectedAccountId: selectedAccountId ?? null,
 		},
 	] as const;
@@ -110,12 +126,14 @@ export function useTimelineRouteData({
 			fetchQueryResponse(
 				buildTimelineQueryUrl({
 					resource,
+					author,
 					search: debouncedSearch,
 					replyFilter,
 					likedOnly,
 					bookmarkedOnly,
 					includeRepliesToOthers,
 					selectedAccountId,
+					allAccounts,
 					pageParam,
 				}),
 				{ signal },

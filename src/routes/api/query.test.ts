@@ -85,6 +85,25 @@ describe("api query route", () => {
 		);
 	});
 
+	it("passes a local author timeline filter through to the read model", async () => {
+		queryResourceMock.mockReturnValue({ resource: "home", items: [] });
+
+		await GET({
+			request: new Request(
+				"http://localhost/api/query?resource=home&author=%40Alice&stateAccount=acct_studio",
+			),
+		});
+
+		expect(queryResourceMock).toHaveBeenCalledWith(
+			"home",
+			expect.objectContaining({
+				resource: "home",
+				author: "@Alice",
+				stateAccount: "acct_studio",
+			}),
+		);
+	});
+
 	it("drops invalid numeric filters and defaults sort", async () => {
 		queryResourceMock.mockReturnValue({ resource: "dms", items: [] });
 		await GET({

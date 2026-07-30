@@ -1,4 +1,5 @@
 import {
+	Bookmark,
 	BookmarkCheck,
 	CheckCircle2,
 	Circle,
@@ -9,11 +10,12 @@ import {
 	Repeat2,
 	UserSearch,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
-import { fetchJson } from "#/lib/api-client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState, type ReactNode } from "react";
+import { fetchJson, setLocalBookmark } from "#/lib/api-client";
 import { expandedTweetTextResponseSchema } from "#/lib/api-contracts";
 import { formatCompactNumber } from "#/lib/present";
+import { queryKeys } from "#/lib/query-client";
 import {
 	isTweetArticleUrlEntity,
 	normalizeTweetUrlEntityRangeForText,
@@ -311,10 +313,12 @@ function TweetPresentation({
 export function TimelineCard({
 	item,
 	onReply,
+	bookmarkAccountId,
 	showReplyControls = true,
 }: {
 	item: TimelineItem;
 	onReply: (tweetId: string) => void;
+	bookmarkAccountId?: string;
 	showReplyControls?: boolean;
 }) {
 	const [showFullRepost, setShowFullRepost] = useState(false);
@@ -378,7 +382,36 @@ export function TimelineCard({
 	const displayIsReplied = displayTweet.isReplied ?? item.isReplied;
 	const displayLikeCount = displayTweet.likeCount ?? item.likeCount;
 	const displayBookmarked = displayTweet.bookmarked ?? item.bookmarked;
+	const displayLocalBookmarked =
+		displayTweet.localBookmarked ?? item.localBookmarked ?? false;
 	const displayLiked = displayTweet.liked ?? item.liked;
+	const queryClient = useQueryClient();
+	const [bookmarked, setBookmarked] = useState(displayLocalBookmarked);
+	const bookmarkMutation = useMutation({
+		mutationFn: (nextBookmarked: boolean) =>
+			setLocalBookmark({
+				accountId: bookmarkAccountId ?? item.accountId,
+				tweetId: interactionTweetId,
+				bookmarked: nextBookmarked,
+			}),
+		onMutate: (nextBookmarked) => {
+			const previousBookmarked = bookmarked;
+			setBookmarked(nextBookmarked);
+			return { previousBookmarked };
+		},
+		onSuccess: () => {
+			void Promise.all([
+				queryClient.invalidateQueries({ queryKey: queryKeys.timelines }),
+				queryClient.invalidateQueries({ queryKey: queryKeys.conversations }),
+				queryClient.invalidateQueries({ queryKey: queryKeys.status }),
+			]);
+		},
+		onError: (_error, _nextBookmarked, context) =>
+			setBookmarked(context?.previousBookmarked ?? displayLocalBookmarked),
+	});
+	useEffect(() => {
+		setBookmarked(displayLocalBookmarked);
+	}, [displayLocalBookmarked]);
 	const openTweetUrl = tweetPermalink(
 		isManualRepostFallback && !expandedRepost
 			? item.author.handle
@@ -409,12 +442,19 @@ export function TimelineCard({
 				conversation.toggle();
 			}}
 		>
-			<AvatarChip
-				avatarUrl={displayAuthor.avatarUrl}
-				hue={displayAuthor.avatarHue}
-				name={displayAuthor.displayName}
-				profileId={displayAuthor.id}
-			/>
+			<a
+				aria-label={`View @${displayAuthor.handle} local posts`}
+				className="h-fit rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+				href={`/authors/${encodeURIComponent(displayAuthor.handle)}`}
+				onClick={(event) => event.stopPropagation()}
+			>
+				<AvatarChip
+					avatarUrl={displayAuthor.avatarUrl}
+					hue={displayAuthor.avatarHue}
+					name={displayAuthor.displayName}
+					profileId={displayAuthor.id}
+				/>
+			</a>
 			<div className={feedRowBodyClass}>
 				{item.retweetedTweet ? (
 					<div className="inline-flex items-center gap-2 text-[13px] font-medium text-[var(--ink-soft)]">
@@ -630,11 +670,45 @@ export function TimelineCard({
 								<span>{formatCompactNumber(displayLikeCount)}</span>
 							</span>
 						) : null}
+						<button
+							aria-label={
+								bookmarked ? "Remove local bookmark" : "Bookmark locally"
+							}
+							aria-pressed={bookmarked}
+							className={cx(
+								feedActionButtonClass,
+								bookmarked && "text-[var(--accent)]",
+							)}
+							disabled={bookmarkMutation.isPending}
+							onClick={(event) => {
+								event.stopPropagation();
+								const nextBookmarked = !bookmarked;
+								bookmarkMutation.mutate(nextBookmarked);
+							}}
+							title={
+								bookmarked ? "Remove local bookmark" : "Save to local Bookmarks"
+							}
+							type="button"
+						>
+							<span className={feedActionIconWrapClass}>
+								{bookmarked ? (
+									<BookmarkCheck
+										className={feedActionIconClass}
+										strokeWidth={1.9}
+									/>
+								) : (
+									<Bookmark className={feedActionIconClass} strokeWidth={1.7} />
+								)}
+							</span>
+							<span className="text-[13px]">
+								{bookmarked ? "Saved" : "Save"}
+							</span>
+						</button>
 						{displayBookmarked ? (
 							<span
-								aria-label="Bookmarked"
-								className="inline-flex items-center px-2 py-1"
-								title="Bookmarked"
+								aria-label="Saved on X or in an imported archive"
+								className="inline-flex items-center px-2 py-1 text-[var(--ink-soft)]"
+								title="Saved on X or in an imported archive"
 							>
 								<BookmarkCheck
 									className={feedActionIconClass}
@@ -653,6 +727,11 @@ export function TimelineCard({
 							</span>
 						) : null}
 					</div>
+					{bookmarkMutation.isError ? (
+						<span className="text-[12px] text-[var(--alert)]" role="status">
+							Couldn’t update bookmark.
+						</span>
+					) : null}
 				</footer>
 				{conversation.isOpen ? (
 					<ConversationThread

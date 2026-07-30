@@ -140,6 +140,15 @@ const BASE_SCHEMA_SQL = `
     primary key (account_id, tweet_id, kind)
   );
 
+  create table if not exists local_tweet_bookmarks (
+    account_id text not null,
+    tweet_id text not null,
+    is_bookmarked integer not null check (is_bookmarked in (0, 1)),
+    created_at text not null,
+    updated_at text not null,
+    primary key (account_id, tweet_id)
+  );
+
   create table if not exists tweet_account_edges (
     account_id text not null,
     tweet_id text not null,
@@ -368,6 +377,8 @@ const INDEX_SQL = `
   create index if not exists idx_tweets_quoted on tweets(quoted_tweet_id);
   create index if not exists idx_tweet_collections_kind_account on tweet_collections(kind, account_id, collected_at desc, tweet_id);
   create index if not exists idx_tweet_collections_tweet on tweet_collections(tweet_id);
+  create index if not exists idx_local_tweet_bookmarks_active on local_tweet_bookmarks(account_id, is_bookmarked, updated_at desc, tweet_id);
+  create index if not exists idx_tweets_author_created on tweets(author_profile_id, created_at desc, id desc);
   create index if not exists idx_tweet_account_edges_kind_account on tweet_account_edges(kind, account_id, last_seen_at desc, tweet_id);
   create index if not exists idx_tweet_account_edges_kind_tweet on tweet_account_edges(kind, tweet_id, account_id);
   create index if not exists idx_tweet_account_edges_tweet on tweet_account_edges(tweet_id);
@@ -495,6 +506,26 @@ function ensureTweetCollectionsTable(db: Database) {
       primary key (account_id, tweet_id, kind)
     );
   `);
+}
+
+function ensureLocalTweetBookmarksTable(db: Database) {
+	db.exec(`
+    create table if not exists local_tweet_bookmarks (
+      account_id text not null,
+      tweet_id text not null,
+      is_bookmarked integer not null check (is_bookmarked in (0, 1)),
+      created_at text not null,
+      updated_at text not null,
+      primary key (account_id, tweet_id)
+    );
+    create index if not exists idx_local_tweet_bookmarks_active
+      on local_tweet_bookmarks(account_id, is_bookmarked, updated_at desc, tweet_id);
+  `);
+	if (getColumnNames(db, "tweets").has("author_profile_id")) {
+		db.exec(
+			"create index if not exists idx_tweets_author_created on tweets(author_profile_id, created_at desc, id desc)",
+		);
+	}
 }
 
 function ensureTweetAccountEdgesTable(db: Database) {
@@ -925,6 +956,7 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 			ensureTweetMetadataColumns(db);
 			ensureProfileAvatarColumns(db);
 			ensureTweetCollectionsTable(db);
+			ensureLocalTweetBookmarksTable(db);
 			ensureTweetAccountEdgesTable(db);
 			ensureProfileAffiliationsTable(db);
 			ensureProfileSnapshotsTable(db);
@@ -966,6 +998,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add X Remark live sync pairing",
 		up: (db) => {
 			ensureXRemarkLiveSyncTable(db);
+		},
+	},
+	{
+		version: 7,
+		name: "add local tweet bookmark overrides and author timeline index",
+		up: (db) => {
+			ensureLocalTweetBookmarksTable(db);
 		},
 	},
 ];
