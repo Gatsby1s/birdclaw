@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 0.8.44 - 2026-07-31
+
+### Added
+
+- Open a Twitter-style local author timeline from any timeline avatar, with profile context, search, pagination, and every canonical post BirdClaw has stored for that person.
+- Save or remove local bookmarks directly on tweet cards and see them immediately in the existing sidebar Bookmarks view without altering imported or X-native bookmark state.
+- Preserve local bookmark changes, including removals, across portable backups with account-aware conflict resolution.
+
 ## 0.8.43 - 2026-07-26
 
 ### Fixed
