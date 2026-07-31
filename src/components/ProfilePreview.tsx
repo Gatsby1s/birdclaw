@@ -89,7 +89,7 @@ export function ProfilePreview({
 				aria-controls={preview.open ? preview.floatingId : undefined}
 				aria-expanded={preview.open}
 				className={profilePreviewTriggerClass}
-				href={`/profiles/${encodeURIComponent(profile.handle)}`}
+				href={`/authors/${encodeURIComponent(profile.handle)}`}
 			>
 				{children}
 			</a>

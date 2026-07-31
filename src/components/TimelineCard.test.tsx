@@ -172,6 +172,18 @@ describe("TimelineCard", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	it("uses the author homepage for identity links and keeps explicit analysis links direct", () => {
+		render(<TimelineCard item={item} onReply={vi.fn()} />);
+
+		expect(
+			screen.getByRole("link", { name: "Sam Altman@sam" }),
+		).toHaveAttribute("href", "/authors/sam");
+		expect(screen.getByRole("link", { name: "Analyse @sam" })).toHaveAttribute(
+			"href",
+			"/profiles/sam",
+		);
+	});
+
 	it("toggles a local bookmark without changing the imported bookmark marker", async () => {
 		const fetchMock = vi.fn(
 			async (input: RequestInfo | URL, init?: RequestInit) => {

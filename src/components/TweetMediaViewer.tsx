@@ -436,7 +436,7 @@ function TweetMediaViewerDetails({ tweet }: { tweet: TweetMediaViewerTweet }) {
 					<div className="min-w-0">
 						<a
 							className="block truncate text-[15px] font-bold text-white hover:underline"
-							href={`/profiles/${encodeURIComponent(tweet.author.handle)}`}
+							href={`/authors/${encodeURIComponent(tweet.author.handle)}`}
 						>
 							{tweet.author.displayName}
 						</a>

@@ -201,7 +201,7 @@ describe("today route", () => {
 			topicHeading.compareDocumentPosition(aliceLink) &
 				Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
-		expect(aliceLink).toHaveAttribute("href", "/profiles/alice");
+		expect(aliceLink).toHaveAttribute("href", "/authors/alice");
 		expect(screen.getByRole("link", { name: "tweet_1" })).toHaveAttribute(
 			"href",
 			"https://x.com/alice/status/tweet_1",

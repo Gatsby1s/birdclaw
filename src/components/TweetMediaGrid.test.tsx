@@ -113,11 +113,18 @@ describe("TweetMediaGrid", () => {
 		const details = document.querySelector('aside[aria-label="Tweet details"]');
 		expect(details).toHaveTextContent("Viewer Author");
 		expect(details).toHaveTextContent("@viewer");
+		expect(screen.getByRole("link", { name: "Viewer Author" })).toHaveAttribute(
+			"href",
+			"/authors/viewer",
+		);
 		expect(details).toHaveTextContent("Read the full post beside the image.");
 		expect(details).toHaveTextContent("42 Likes");
 		expect(
 			screen.getByRole("link", { name: "Open @viewer on X" }),
 		).toHaveAttribute("href", "https://x.com/viewer/status/tweet_detail");
+		expect(
+			screen.getByRole("link", { name: "Analyse profile" }),
+		).toHaveAttribute("href", "/profiles/viewer");
 	});
 
 	it("keeps the viewer media-only when no tweet context is supplied", () => {

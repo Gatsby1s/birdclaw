@@ -113,7 +113,7 @@ export function TweetRichText({
 						<a
 							key={`segment-${String(index)}`}
 							className={tweetMentionClass}
-							href={`/profiles/${encodeURIComponent(segment.username)}`}
+							href={`/authors/${encodeURIComponent(segment.username)}`}
 						>
 							@{segment.username}
 						</a>
