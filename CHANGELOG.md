@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.53 - 2026-08-01
+
+### Fixed
+
+- Show each cited tweet's local posting time to the minute in complete Today, Yesterday, and Discuss PDF exports, including reply context and the source index.
+
 ## 0.8.52 - 2026-07-31
 
 ### Added
