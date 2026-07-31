@@ -784,7 +784,7 @@ function emptyStatus(): Twitter6551RuntimeStatus {
 	};
 }
 
-let runtimeStatus: Twitter6551RuntimeStatus = {
+const INITIAL_RUNTIME_STATUS: Twitter6551RuntimeStatus = {
 	enabled: false,
 	state: "disabled",
 	connected: false,
@@ -802,6 +802,18 @@ let runtimeStatus: Twitter6551RuntimeStatus = {
 	reconnectCount: 0,
 	ingestedCount: 0,
 };
+const RUNTIME_STATUS_KEY = Symbol.for("birdclaw.twitter6551.runtime-status");
+const runtimeGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
+let runtimeStatus =
+	(runtimeGlobal[RUNTIME_STATUS_KEY] as Twitter6551RuntimeStatus | undefined) ??
+	INITIAL_RUNTIME_STATUS;
+runtimeGlobal[RUNTIME_STATUS_KEY] = runtimeStatus;
+
+function assignRuntimeStatus(next: Twitter6551RuntimeStatus) {
+	runtimeStatus = next;
+	runtimeGlobal[RUNTIME_STATUS_KEY] = next;
+}
+
 let activeWorker: Twitter6551Worker | null = null;
 
 function errorMessage(error: unknown) {
@@ -841,12 +853,12 @@ export class Twitter6551Worker {
 
 	async start() {
 		if (!this.config.enabled || this.stopped) return;
-		runtimeStatus = {
+		assignRuntimeStatus({
 			...emptyStatus(),
 			enabled: true,
 			state: "starting",
 			activeSource: "6551",
-		};
+		});
 		await enqueueDatabaseWrite((db) => {
 			ensureTwitter6551Tables(db);
 			ensureTwitter6551Account(db, this.config.accountId);
@@ -874,22 +886,22 @@ export class Twitter6551Worker {
 		this.socket?.close(1000, "BirdClaw shutdown");
 		this.socket = null;
 		await this.drainInFlight();
-		runtimeStatus = {
+		assignRuntimeStatus({
 			...runtimeStatus,
 			state: "stopped",
 			connected: false,
-		};
+		});
 	}
 
 	private track(promise: Promise<void>) {
 		this.inFlight.add(promise);
 		void promise
 			.catch((error) => {
-				runtimeStatus = {
+				assignRuntimeStatus({
 					...runtimeStatus,
 					state: "degraded",
 					lastError: errorMessage(error),
-				};
+				});
 			})
 			.finally(() => this.inFlight.delete(promise));
 	}
@@ -945,7 +957,7 @@ export class Twitter6551Worker {
 			const ingested = await enqueueDatabaseWrite((db) =>
 				ingestTwitter6551Tweets(db, this.config.accountId, tweets, "home"),
 			);
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				state:
 					runtimeStatus.connected && !this.watchUnavailable
@@ -956,13 +968,13 @@ export class Twitter6551Worker {
 					? "6551 watch access is unavailable; REST recovery remains active"
 					: null,
 				ingestedCount: runtimeStatus.ingestedCount + ingested.length,
-			};
+			});
 		} catch (error) {
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				state: runtimeStatus.connected ? "degraded" : "error",
 				lastError: errorMessage(error),
-			};
+			});
 		} finally {
 			this.backfillRunning = false;
 		}
@@ -996,17 +1008,21 @@ export class Twitter6551Worker {
 		}
 		this.watchUnavailable = unavailable;
 		if (lastError) {
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				state: "degraded",
 				lastError,
-			};
+			});
 		}
 	}
 
 	private connect() {
 		if (this.stopped) return;
-		runtimeStatus = { ...runtimeStatus, state: "connecting", connected: false };
+		assignRuntimeStatus({
+			...runtimeStatus,
+			state: "connecting",
+			connected: false,
+		});
 		const socket = new WebSocket(
 			websocketUrl(this.config.baseUrl, this.config.token),
 		);
@@ -1021,20 +1037,20 @@ export class Twitter6551Worker {
 					method: "twitter.subscribe",
 				}),
 			);
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				state: "connecting",
 				connected: false,
-			};
+			});
 			if (this.subscriptionTimer) clearTimeout(this.subscriptionTimer);
 			this.subscriptionTimer = setTimeout(() => {
 				if (this.socket !== socket || this.stopped) return;
-				runtimeStatus = {
+				assignRuntimeStatus({
 					...runtimeStatus,
 					state: "degraded",
 					connected: false,
 					lastError: "6551 realtime subscription timed out",
-				};
+				});
 				socket.close(4001, "subscription timeout");
 			}, SUBSCRIPTION_TIMEOUT_MS);
 		});
@@ -1045,12 +1061,12 @@ export class Twitter6551Worker {
 		});
 		socket.addEventListener("error", () => {
 			if (this.socket !== socket || this.stopped) return;
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				state: "degraded",
 				connected: false,
 				lastError: "6551 realtime connection failed",
-			};
+			});
 		});
 		socket.addEventListener("close", (event) => {
 			if (this.socket !== socket) return;
@@ -1058,11 +1074,11 @@ export class Twitter6551Worker {
 			if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
 			if (this.subscriptionTimer) clearTimeout(this.subscriptionTimer);
 			this.subscriptionTimer = null;
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				state: this.stopped ? "stopped" : "degraded",
 				connected: false,
-			};
+			});
 			if (!this.stopped) {
 				this.scheduleReconnect(event.code === 1008);
 			}
@@ -1092,10 +1108,10 @@ export class Twitter6551Worker {
 				);
 		const delay = Math.floor(base * (0.85 + Math.random() * 0.3));
 		this.reconnectAttempt += 1;
-		runtimeStatus = {
+		assignRuntimeStatus({
 			...runtimeStatus,
 			reconnectCount: runtimeStatus.reconnectCount + 1,
-		};
+		});
 		this.reconnectTimer = setTimeout(() => {
 			this.reconnectTimer = null;
 			this.connect();
@@ -1123,19 +1139,19 @@ export class Twitter6551Worker {
 					"subscription was rejected";
 				if (this.subscriptionTimer) clearTimeout(this.subscriptionTimer);
 				this.subscriptionTimer = null;
-				runtimeStatus = {
+				assignRuntimeStatus({
 					...runtimeStatus,
 					state: "degraded",
 					connected: false,
 					lastError: `6551 realtime ${detail}`,
-				};
+				});
 				this.socket?.close(1008, "subscription rejected");
 				return;
 			}
 			if (this.subscriptionTimer) clearTimeout(this.subscriptionTimer);
 			this.subscriptionTimer = null;
 			this.reconnectAttempt = 0;
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				state: this.watchUnavailable ? "degraded" : "connected",
 				connected: true,
@@ -1143,7 +1159,7 @@ export class Twitter6551Worker {
 				lastError: this.watchUnavailable
 					? "6551 watch access is unavailable; REST recovery remains active"
 					: null,
-			};
+			});
 			this.startHeartbeat(this.socket as WebSocket);
 			if (this.hasSubscribedOnce) this.track(this.runBackfill());
 			this.hasSubscribedOnce = true;
@@ -1222,11 +1238,11 @@ export class Twitter6551Worker {
 					"update twitter6551_events set error = ? where event_id = ?",
 				).run(message, eventId);
 			});
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				state: "degraded",
 				lastError: message,
-			};
+			});
 			return;
 		}
 		try {
@@ -1240,22 +1256,22 @@ export class Twitter6551Worker {
 					"update twitter6551_events set processed_at = ?, error = null where event_id = ?",
 				).run(new Date().toISOString(), eventId);
 			});
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				lastEventAt: receivedAt,
 				ingestedCount: runtimeStatus.ingestedCount + ids.length,
-			};
+			});
 		} catch (error) {
 			await enqueueDatabaseWrite((db) => {
 				db.prepare(
 					"update twitter6551_events set error = ? where event_id = ?",
 				).run(errorMessage(error), eventId);
 			});
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				state: "degraded",
 				lastError: errorMessage(error),
-			};
+			});
 		}
 	}
 
@@ -1295,6 +1311,10 @@ export class Twitter6551Worker {
 }
 
 export function getTwitter6551RuntimeStatus() {
+	const shared = runtimeGlobal[RUNTIME_STATUS_KEY] as
+		| Twitter6551RuntimeStatus
+		| undefined;
+	if (shared) runtimeStatus = shared;
 	return { ...runtimeStatus };
 }
 
@@ -1312,18 +1332,18 @@ function localBridgeIsFresh(
 export async function startTwitter6551Worker() {
 	const config = getTwitter6551RuntimeConfig();
 	if (!config.enabled) {
-		runtimeStatus = emptyStatus();
+		assignRuntimeStatus(emptyStatus());
 		return null;
 	}
 	if (localBridgeIsFresh(config)) {
-		runtimeStatus = {
+		assignRuntimeStatus({
 			...runtimeStatus,
 			...emptyStatus(),
 			enabled: true,
 			state: "standby",
 			activeSource: "local",
 			lastError: null,
-		};
+		});
 		return null;
 	}
 	if (activeWorker) return activeWorker;
@@ -1333,12 +1353,12 @@ export async function startTwitter6551Worker() {
 		await worker.start();
 	} catch (error) {
 		activeWorker = null;
-		runtimeStatus = {
+		assignRuntimeStatus({
 			...runtimeStatus,
 			state: "error",
 			connected: false,
 			lastError: errorMessage(error),
-		};
+		});
 		throw error;
 	}
 	return worker;
@@ -1355,12 +1375,12 @@ let failoverStartedAtMs = 0;
 let failoverReconcile: Promise<void> | null = null;
 
 function recordTwitter6551FailoverError(error: unknown) {
-	runtimeStatus = {
+	assignRuntimeStatus({
 		...runtimeStatus,
 		state: "error",
 		connected: false,
 		lastError: errorMessage(error),
-	};
+	});
 }
 
 async function reconcileTwitter6551Failover() {
@@ -1369,7 +1389,7 @@ async function reconcileTwitter6551Failover() {
 		const config = getTwitter6551RuntimeConfig();
 		if (!config.enabled) {
 			await stopTwitter6551Worker();
-			runtimeStatus = emptyStatus();
+			assignRuntimeStatus(emptyStatus());
 			return;
 		}
 		if (!config.failoverMode) {
@@ -1379,7 +1399,7 @@ async function reconcileTwitter6551Failover() {
 		const now = Date.now();
 		if (localBridgeIsFresh(config, now)) {
 			await stopTwitter6551Worker();
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				enabled: true,
 				state: "standby",
@@ -1390,19 +1410,19 @@ async function reconcileTwitter6551Failover() {
 				localStaleSeconds: config.localStaleSeconds,
 				localBridgeIngestedCount,
 				lastError: null,
-			};
+			});
 			return;
 		}
 		const graceElapsed =
 			now - failoverStartedAtMs >= config.localStaleSeconds * 1000;
 		if (!graceElapsed) {
-			runtimeStatus = {
+			assignRuntimeStatus({
 				...runtimeStatus,
 				...emptyStatus(),
 				enabled: true,
 				state: "standby",
 				activeSource: "waiting",
-			};
+			});
 			return;
 		}
 		await startTwitter6551Worker();
@@ -1433,11 +1453,11 @@ export async function recordTwitter6551LocalHeartbeat(
 ) {
 	lastLocalHeartbeatAtMs = now.getTime();
 	localBridgeIngestedCount += Math.max(0, ingestedEdges);
-	runtimeStatus = {
+	assignRuntimeStatus({
 		...runtimeStatus,
 		lastLocalHeartbeatAt: now.toISOString(),
 		localBridgeIngestedCount,
-	};
+	});
 	await reconcileTwitter6551Failover();
 	return getTwitter6551RuntimeStatus();
 }

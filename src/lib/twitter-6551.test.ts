@@ -85,6 +85,36 @@ describe("6551 Twitter adapter", () => {
 		).toBeNull();
 	});
 
+	it("reads runtime status shared by another production bundle", () => {
+		const key = Symbol.for("birdclaw.twitter6551.runtime-status");
+		const runtimeGlobal = globalThis as typeof globalThis &
+			Record<symbol, unknown>;
+		const original = runtimeGlobal[key] as ReturnType<
+			typeof getTwitter6551RuntimeStatus
+		>;
+		const lastLocalHeartbeatAt = new Date().toISOString();
+		runtimeGlobal[key] = {
+			...original,
+			enabled: true,
+			state: "standby",
+			failoverMode: true,
+			activeSource: "local",
+			lastLocalHeartbeatAt,
+		};
+		try {
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				enabled: true,
+				state: "standby",
+				failoverMode: true,
+				activeSource: "local",
+				lastLocalHeartbeatAt,
+			});
+		} finally {
+			runtimeGlobal[key] = original;
+			getTwitter6551RuntimeStatus();
+		}
+	});
+
 	it("keeps 6551 on standby after a healthy local bridge heartbeat", async () => {
 		process.env.BIRDCLAW_6551_ENABLED = "1";
 		process.env.BIRDCLAW_6551_FAILOVER_MODE = "1";

@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.51 - 2026-07-31
+
+### Fixed
+
+- Share the live 6551/local failover status across the production server and SSR bundle so Settings reports `Local · 6551 standby` instead of a stale disabled state.
+
 ## 0.8.50 - 2026-07-31
 
 ### Fixed
