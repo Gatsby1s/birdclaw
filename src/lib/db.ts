@@ -260,6 +260,34 @@ const BASE_SCHEMA_SQL = `
     deleted_at text
   );
 
+  create table if not exists period_digest_history (
+    id text primary key,
+    digest_date text not null unique,
+    timezone text not null,
+    status text not null default 'pending',
+	claim_token text not null default '',
+    attempt_count integer not null default 0,
+    window_since text not null default '',
+    window_until text not null default '',
+    include_dms integer not null default 0,
+    provider text not null default '',
+    model text not null default '',
+    reasoning_effort text not null default '',
+    service_tier text not null default '',
+    context_hash text not null default '',
+    counts_json text not null default '{}',
+    digest_json text not null default '{}',
+    markdown text not null default '',
+    tweets_json text not null default '[]',
+    dms_json text not null default '[]',
+    links_json text not null default '[]',
+    error text,
+    started_at text not null,
+    finished_at text,
+    created_at text not null,
+    updated_at text not null
+  );
+
   create table if not exists url_expansions (
     short_url text primary key,
     expanded_url text not null,
@@ -401,6 +429,8 @@ const INDEX_SQL = `
   create index if not exists idx_discussion_history_list on discussion_history(deleted_at, pinned_at desc, created_at desc);
   create index if not exists idx_discussion_history_cache on discussion_history(cache_key, deleted_at, created_at desc);
   create index if not exists idx_discussion_history_root on discussion_history(root_id, deleted_at, created_at asc);
+  create index if not exists idx_period_digest_history_list on period_digest_history(digest_date desc);
+  create index if not exists idx_period_digest_history_status on period_digest_history(status, updated_at desc);
   create index if not exists idx_url_expansions_expanded on url_expansions(expanded_url);
   create index if not exists idx_url_expansions_tweet on url_expansions(expanded_tweet_id);
   create index if not exists idx_url_expansions_handle on url_expansions(expanded_handle);
@@ -755,6 +785,43 @@ function ensureDiscussionHistoryTable(db: Database) {
 	`);
 }
 
+function ensurePeriodDigestHistoryTable(db: Database) {
+	db.exec(`
+    create table if not exists period_digest_history (
+      id text primary key,
+      digest_date text not null unique,
+      timezone text not null,
+      status text not null default 'pending',
+	  claim_token text not null default '',
+      attempt_count integer not null default 0,
+      window_since text not null default '',
+      window_until text not null default '',
+      include_dms integer not null default 0,
+      provider text not null default '',
+      model text not null default '',
+      reasoning_effort text not null default '',
+      service_tier text not null default '',
+      context_hash text not null default '',
+      counts_json text not null default '{}',
+      digest_json text not null default '{}',
+      markdown text not null default '',
+      tweets_json text not null default '[]',
+      dms_json text not null default '[]',
+      links_json text not null default '[]',
+      error text,
+      started_at text not null,
+      finished_at text,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create index if not exists idx_period_digest_history_list
+      on period_digest_history(digest_date desc);
+    create index if not exists idx_period_digest_history_status
+      on period_digest_history(status, updated_at desc);
+	`);
+}
+
 function ensureXRemarkTables(db: Database) {
 	db.exec(`
     create table if not exists xremark_profile_notes (
@@ -1029,6 +1096,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add durable 6551 realtime event inbox",
 		up: (db) => {
 			ensureTwitter6551EventTable(db);
+		},
+	},
+	{
+		version: 9,
+		name: "add daily period digest history",
+		up: (db) => {
+			ensurePeriodDigestHistoryTable(db);
 		},
 	},
 ];

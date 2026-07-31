@@ -33,6 +33,8 @@ export interface HybridAnalysisResult<T> {
 	value: T;
 	markdown: string;
 	rawText: string;
+	provider?: string;
+	model?: string;
 	responseId?: string;
 	usage?: unknown;
 }

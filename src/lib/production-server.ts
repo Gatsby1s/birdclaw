@@ -27,6 +27,10 @@ import {
 	startLocalTwitterCollector,
 	stopLocalTwitterCollector,
 } from "./local-twitter-collector";
+import {
+	startPeriodDigestScheduler,
+	stopPeriodDigestScheduler,
+} from "./period-digest-scheduler";
 import { handleRagMcpHttpRequest } from "./rag-mcp-server";
 import {
 	getTwitter6551RuntimeStatus,
@@ -600,6 +604,7 @@ export async function startProductionServer({
 		}
 	});
 	server.once("close", () => {
+		stopPeriodDigestScheduler();
 		stopLocalCloudBridgeClient();
 		stopLocalTwitterCollector();
 		void stopTwitter6551WorkerManager();
@@ -609,6 +614,7 @@ export async function startProductionServer({
 		server.listen(port, host, resolve);
 	});
 	try {
+		startPeriodDigestScheduler();
 		startLocalTwitterCollector();
 		startLocalCloudBridgeClient();
 		void startTwitter6551WorkerManager().catch((error) => {
@@ -640,6 +646,7 @@ export async function runProductionServer(options: ProductionServerOptions) {
 		};
 		const stop = (signal: NodeJS.Signals) => {
 			removeHandlers();
+			stopPeriodDigestScheduler();
 			stopLocalCloudBridgeClient();
 			stopLocalTwitterCollector();
 			void stopTwitter6551WorkerManager().finally(() => {

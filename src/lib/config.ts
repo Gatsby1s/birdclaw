@@ -1,9 +1,15 @@
 import {
 	accessSync,
+	chmodSync,
+	closeSync,
 	constants,
 	existsSync,
+	fsyncSync,
 	mkdirSync,
+	openSync,
 	readFileSync,
+	renameSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -20,6 +26,11 @@ export interface BirdclawPaths {
 export type MentionsDataSource = "birdclaw" | "auto" | "xurl" | "bird";
 export type ActionsTransport = "auto" | "bird" | "xurl";
 export type ProfileAnalysisSource = "local" | "xurl" | "6551";
+export type SummaryModelProvider = "openai" | "deepseek";
+
+export const DEFAULT_OPENAI_SUMMARY_MODEL = "gpt-5.5";
+export const DEFAULT_DEEPSEEK_SUMMARY_MODEL = "deepseek-v4-flash";
+export const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 
 export interface BirdclawConfig {
 	mentions?: {
@@ -31,8 +42,20 @@ export interface BirdclawConfig {
 	};
 	analysis?: {
 		profileSource?: ProfileAnalysisSource;
+		summaryModels?: {
+			primary?: SummaryModelProvider;
+			backup?: SummaryModelProvider;
+		};
 	};
 	providers?: {
+		openai?: {
+			model?: string;
+		};
+		deepseek?: {
+			baseUrl?: string;
+			model?: string;
+			apiKey?: string;
+		};
 		twitter6551?: {
 			baseUrl?: string;
 			tokenEnv?: string;
@@ -104,9 +127,125 @@ function getConfigPath() {
 export function writeBirdclawConfig(config: BirdclawConfig) {
 	const configPath = getConfigPath();
 	mkdirSync(path.dirname(configPath), { recursive: true });
-	writeFileSync(configPath, `${JSON.stringify(config, null, "\t")}\n`, "utf8");
+	const temporaryPath = `${configPath}.${String(process.pid)}.${String(Date.now())}.tmp`;
+	let descriptor: number | undefined;
+	try {
+		descriptor = openSync(temporaryPath, "wx", 0o600);
+		writeFileSync(
+			descriptor,
+			`${JSON.stringify(config, null, "\t")}\n`,
+			"utf8",
+		);
+		fsyncSync(descriptor);
+		closeSync(descriptor);
+		descriptor = undefined;
+		renameSync(temporaryPath, configPath);
+	} catch (error) {
+		if (descriptor !== undefined) closeSync(descriptor);
+		if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+		throw error;
+	}
+	chmodSync(configPath, 0o600);
 	cachedConfig = config;
 	return configPath;
+}
+
+function isSummaryModelProvider(
+	value: string | undefined,
+): value is SummaryModelProvider {
+	return value === "openai" || value === "deepseek";
+}
+
+export function getSummaryModelConfig() {
+	const config = getBirdclawConfig();
+	const primary = isSummaryModelProvider(
+		config.analysis?.summaryModels?.primary,
+	)
+		? config.analysis.summaryModels.primary
+		: "openai";
+	const configuredBackup = config.analysis?.summaryModels?.backup;
+	const backup =
+		isSummaryModelProvider(configuredBackup) && configuredBackup !== primary
+			? configuredBackup
+			: primary === "openai"
+				? "deepseek"
+				: "openai";
+	return {
+		primary,
+		backup,
+		openai: {
+			model:
+				config.providers?.openai?.model?.trim() ||
+				process.env.BIRDCLAW_AI_MODEL?.trim() ||
+				DEFAULT_OPENAI_SUMMARY_MODEL,
+			tokenConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+		},
+		deepseek: {
+			baseUrl:
+				config.providers?.deepseek?.baseUrl?.trim() ||
+				process.env.DEEPSEEK_BASE_URL?.trim() ||
+				DEFAULT_DEEPSEEK_BASE_URL,
+			model:
+				config.providers?.deepseek?.model?.trim() ||
+				process.env.DEEPSEEK_MODEL?.trim() ||
+				DEFAULT_DEEPSEEK_SUMMARY_MODEL,
+			tokenConfigured: Boolean(
+				process.env.DEEPSEEK_API_KEY?.trim() ||
+				config.providers?.deepseek?.apiKey?.trim(),
+			),
+		},
+	};
+}
+
+export function getDeepSeekApiKey() {
+	return (
+		process.env.DEEPSEEK_API_KEY?.trim() ||
+		getBirdclawConfig().providers?.deepseek?.apiKey?.trim() ||
+		undefined
+	);
+}
+
+export function setSummaryModelConfig(input: {
+	primary?: SummaryModelProvider;
+	backup?: SummaryModelProvider;
+	deepSeekApiKey?: string;
+}) {
+	const config = parseConfigFile(getConfigPath());
+	const current = getSummaryModelConfig();
+	const primary = input.primary ?? current.primary;
+	const backup = input.backup ?? current.backup;
+	if (primary === backup) {
+		throw new Error("Primary and backup summary models must be different");
+	}
+	const deepSeekApiKey = input.deepSeekApiKey?.trim();
+	const nextConfig: BirdclawConfig = {
+		...config,
+		analysis: {
+			...config.analysis,
+			summaryModels: { primary, backup },
+		},
+		providers: {
+			...config.providers,
+			openai: {
+				...config.providers?.openai,
+				model:
+					config.providers?.openai?.model?.trim() ||
+					DEFAULT_OPENAI_SUMMARY_MODEL,
+			},
+			deepseek: {
+				...config.providers?.deepseek,
+				baseUrl:
+					config.providers?.deepseek?.baseUrl?.trim() ||
+					DEFAULT_DEEPSEEK_BASE_URL,
+				model:
+					config.providers?.deepseek?.model?.trim() ||
+					DEFAULT_DEEPSEEK_SUMMARY_MODEL,
+				...(deepSeekApiKey ? { apiKey: deepSeekApiKey } : {}),
+			},
+		},
+	};
+	const configPath = writeBirdclawConfig(nextConfig);
+	return { configPath, primary, backup };
 }
 
 export function setActionsTransport(transport: ActionsTransport) {

@@ -158,6 +158,7 @@ export type PeriodRouteSearch =
 	| "custom";
 
 export interface TodayRouteSearch {
+	run: string;
 	period: PeriodRouteSearch;
 	since: string;
 	until: string;
@@ -177,6 +178,7 @@ export function validateTodaySearch(
 		stringValue(search.until),
 	);
 	return {
+		run: stringValue(search.run),
 		period:
 			requestedPeriod === "custom" && !customRange ? "today" : requestedPeriod,
 		since: customRange?.since ?? "",

@@ -143,12 +143,14 @@ export function resolveOpenAIUrl(path: string, baseUrl?: string) {
 	return `${base}${path}`;
 }
 
-export function redactOpenAIError(text: string) {
+export function redactProviderError(text: string) {
 	return text.replace(/\bsk-[A-Za-z0-9_-]+\b/g, (key) => {
 		if (key.length <= 12) return "sk-...";
 		return `${key.slice(0, 7)}...${key.slice(-4)}`;
 	});
 }
+
+export const redactOpenAIError = redactProviderError;
 
 export function createOpenAIStreamState(): OpenAIStreamState {
 	return {
@@ -337,6 +339,10 @@ export function requestOpenAIResponseEffect({
 	body,
 	signal,
 	runtime = defaultRuntimeServices,
+	apiKey: configuredApiKey,
+	baseUrl,
+	path = "/v1/responses",
+	providerLabel = "OpenAI",
 	maxRetries = DEFAULT_OPENAI_MAX_RETRIES,
 	retryBaseDelayMs = DEFAULT_OPENAI_RETRY_BASE_DELAY_MS,
 	retryMaxDelayMs = DEFAULT_OPENAI_RETRY_MAX_DELAY_MS,
@@ -344,18 +350,28 @@ export function requestOpenAIResponseEffect({
 	body: unknown;
 	signal?: AbortSignal;
 	runtime?: RuntimeServices;
+	apiKey?: string;
+	baseUrl?: string;
+	path?: string;
+	providerLabel?: string;
 	maxRetries?: number;
 	retryBaseDelayMs?: number;
 	retryMaxDelayMs?: number;
 }): Effect.Effect<Response, Error> {
 	return Effect.gen(function* () {
-		const apiKey = runtime.env("OPENAI_API_KEY");
+		const apiKey = configuredApiKey ?? runtime.env("OPENAI_API_KEY");
 		if (!apiKey) {
-			return yield* Effect.fail(new Error("OPENAI_API_KEY is not set"));
+			return yield* Effect.fail(
+				new Error(
+					providerLabel === "OpenAI"
+						? "OPENAI_API_KEY is not set"
+						: `${providerLabel} API key is not configured`,
+				),
+			);
 		}
 		const url = resolveOpenAIUrl(
-			"/v1/responses",
-			runtime.env("OPENAI_BASE_URL"),
+			path,
+			baseUrl ?? runtime.env("OPENAI_BASE_URL"),
 		);
 		const retryCount = Math.max(0, Math.floor(maxRetries));
 		for (let attempt = 0; ; attempt += 1) {
@@ -397,7 +413,7 @@ export function requestOpenAIResponseEffect({
 				attempts > 1 ? ` (after ${String(attempts)} attempts)` : "";
 			return yield* Effect.fail(
 				new Error(
-					`OpenAI request failed: ${String(response.status)} ${openAIErrorDetail(text)}${suffix}`,
+					`${providerLabel} request failed: ${String(response.status)} ${openAIErrorDetail(text)}${suffix}`,
 				),
 			);
 		}

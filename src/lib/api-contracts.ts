@@ -574,8 +574,23 @@ export type Twitter6551RuntimeStatus = z.infer<
 export const birdclawSettingsSchema = z.object({
 	analysis: z.object({
 		profileSource: profileAnalysisSourceSchema,
+		summaryModels: z.object({
+			primary: z.enum(["openai", "deepseek"]),
+			backup: z.enum(["openai", "deepseek"]),
+		}),
 	}),
 	providers: z.object({
+		openai: z.object({
+			label: z.string(),
+			model: z.string(),
+			tokenConfigured: z.boolean(),
+		}),
+		deepseek: z.object({
+			label: z.string(),
+			baseUrl: z.string(),
+			model: z.string(),
+			tokenConfigured: z.boolean(),
+		}),
 		twitter6551: z.object({
 			baseUrl: z.string(),
 			tokenEnv: z.string(),
@@ -611,6 +626,22 @@ export const updateBirdclawSettingsSchema = z.object({
 	analysis: z
 		.object({
 			profileSource: profileAnalysisSourceSchema.optional(),
+			summaryModels: z
+				.object({
+					primary: z.enum(["openai", "deepseek"]),
+					backup: z.enum(["openai", "deepseek"]),
+				})
+				.refine((value) => value.primary !== value.backup)
+				.optional(),
+		})
+		.optional(),
+	providers: z
+		.object({
+			deepseek: z
+				.object({
+					apiKey: z.string().trim().min(8).max(512),
+				})
+				.optional(),
 		})
 		.optional(),
 });

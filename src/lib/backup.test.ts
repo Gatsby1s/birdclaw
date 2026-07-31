@@ -47,6 +47,7 @@ function switchHome(prefix: string) {
 function clearData() {
 	const db = getNativeDb();
 	db.exec(`
+	delete from period_digest_history;
     delete from discussion_history;
     delete from follow_events;
     delete from follow_edges;
@@ -231,6 +232,23 @@ function seedBackupFixture() {
       '[{"id":"tweet_2025","text":"Saved useful thing"}]',
       '[{"id":"dm:friend","text":"Backup this please"}]', null,
       '2025-01-09T01:00:00.000Z', '2025-01-09T01:00:00.000Z', null, null
+    );
+
+    insert into period_digest_history (
+      id, digest_date, timezone, status, attempt_count, window_since,
+      window_until, include_dms, provider, model, reasoning_effort,
+      service_tier, context_hash, counts_json, digest_json, markdown,
+      tweets_json, dms_json, links_json, started_at, finished_at,
+      created_at, updated_at
+    ) values (
+      'daily_2025_01_08', '2025-01-08', 'UTC', 'ready', 1,
+      '2025-01-08T00:00:00.000Z', '2025-01-09T00:00:00.000Z', 0,
+      'openai', 'gpt-5.5', 'medium', 'priority', 'daily_hash',
+      '{"home":1,"mentions":0,"authored":0,"likes":0,"bookmarks":0,"dms":0,"links":0}',
+      '{"title":"Daily backup","summary":"Saved daily report","keyTopics":[],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[]}',
+      '# Daily backup', '[]', '[]', '[]',
+      '2025-01-09T00:00:00.000Z', '2025-01-09T00:01:00.000Z',
+      '2025-01-09T00:00:00.000Z', '2025-01-09T00:01:00.000Z'
     );
 
     insert into follow_snapshots (
@@ -442,6 +460,7 @@ describe("text backup", () => {
 			tweet_actions: 1,
 			ai_scores: 1,
 			discussion_history: 1,
+			period_digest_history: 1,
 			follow_snapshots: 1,
 			follow_snapshot_members: 1,
 			follow_edges: 1,
@@ -618,12 +637,25 @@ describe("text backup", () => {
 				.prepare("select id, title from discussion_history order by id")
 				.all(),
 		).toEqual([{ id: "discussion_1", title: "Backup discussion" }]);
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare(
+					"select digest_date, status, markdown from period_digest_history",
+				)
+				.all(),
+		).toEqual([
+			{
+				digest_date: "2025-01-08",
+				status: "ready",
+				markdown: "# Daily backup",
+			},
+		]);
 
 		const validation = await validateBackup(repoPath);
 		expect(validation.ok).toBe(true);
 	}, 20000);
 
-	it("emits byte-identical schema-v3 data and still accepts schema v2", async () => {
+	it("emits byte-identical schema-v5 data and still accepts schema v2", async () => {
 		switchHome("birdclaw-backup-stable-src-");
 		seedBackupFixture();
 		const firstRepoPath = makeTempDir("birdclaw-backup-stable-first-");
@@ -632,9 +664,9 @@ describe("text backup", () => {
 		const first = await exportBackup({ repoPath: firstRepoPath });
 		const second = await exportBackup({ repoPath: secondRepoPath });
 
-		expect(first.manifest.schemaVersion).toBe(4);
+		expect(first.manifest.schemaVersion).toBe(5);
 		expect(first.manifest.backupHash).toBe(
-			"61f28f03fe0c721815512bd2e4828ad1ae02f87eb4811b1a0549c97a35be0faf",
+			"6674a724570a67aefe3c3a0d3caeca22cc6c03a19edd44b1ff149d4a080ca928",
 		);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);
@@ -774,6 +806,7 @@ describe("text backup", () => {
 			tweet_actions: 1,
 			ai_scores: 1,
 			discussion_history: 1,
+			period_digest_history: 1,
 			follow_snapshots: 1,
 			follow_snapshot_members: 1,
 			follow_edges: 1,

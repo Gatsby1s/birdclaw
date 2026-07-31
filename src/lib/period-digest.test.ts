@@ -621,7 +621,7 @@ describe("period digest", () => {
 				`
 				update sync_cache
 				set updated_at = '2020-01-01T00:00:00.000Z'
-				where cache_key like 'period-digest:v2:%'
+				where cache_key like 'period-digest:v3:%'
 				`,
 			)
 			.run();

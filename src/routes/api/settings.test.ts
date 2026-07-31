@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -63,6 +63,37 @@ describe("api settings route", () => {
 		const configPath = path.join(process.env.BIRDCLAW_HOME!, "config.json");
 		expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({
 			analysis: { profileSource: "xurl" },
+		});
+	});
+
+	it("stores the backup model token privately without returning it", async () => {
+		const apiKey = "sk-test-deepseek-private";
+		const response = await POST({
+			request: new Request("http://localhost/api/settings", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					analysis: {
+						summaryModels: { primary: "openai", backup: "deepseek" },
+					},
+					providers: { deepseek: { apiKey } },
+				}),
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		const payload = await response.json();
+		expect(payload).toMatchObject({
+			analysis: {
+				summaryModels: { primary: "openai", backup: "deepseek" },
+			},
+			providers: { deepseek: { tokenConfigured: true } },
+		});
+		expect(JSON.stringify(payload)).not.toContain(apiKey);
+		const configPath = path.join(process.env.BIRDCLAW_HOME!, "config.json");
+		expect(statSync(configPath).mode & 0o777).toBe(0o600);
+		expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({
+			providers: { deepseek: { apiKey } },
 		});
 	});
 

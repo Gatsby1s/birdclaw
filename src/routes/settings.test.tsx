@@ -9,8 +9,22 @@ const SettingsRoute = Route.options.component as ComponentType;
 
 function settingsPayload(profileSource: "local" | "xurl" | "6551") {
 	return {
-		analysis: { profileSource },
+		analysis: {
+			profileSource,
+			summaryModels: { primary: "openai", backup: "deepseek" },
+		},
 		providers: {
+			openai: {
+				label: "ChatGPT",
+				model: "gpt-5.5",
+				tokenConfigured: true,
+			},
+			deepseek: {
+				label: "DeepSeek V4 / Flash",
+				baseUrl: "https://api.deepseek.com",
+				model: "deepseek-v4-flash",
+				tokenConfigured: false,
+			},
 			twitter6551: {
 				baseUrl: "https://ai.6551.io",
 				tokenEnv: "TWITTER_TOKEN",

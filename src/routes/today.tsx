@@ -4,6 +4,7 @@ import {
 	FileText,
 	CheckCircle2,
 	FileDown,
+	History,
 	Loader2,
 	RefreshCw,
 	Sparkles,
@@ -11,6 +12,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { CustomDateRangePicker } from "#/components/CustomDateRangePicker";
+import {
+	DailyDigestHistoryPanel,
+	type DailyDigestHistoryListItem,
+} from "#/components/DailyDigestHistoryPanel";
 import { MarkdownViewer } from "#/components/MarkdownViewer";
 import { ReferencePrintMedia } from "#/components/ReferencePrintMedia";
 import { useNdjsonRun } from "#/components/useNdjsonRun";
@@ -967,6 +972,7 @@ function useDigestStream(
 	includeDms: boolean,
 	since: string,
 	until: string,
+	enabled = true,
 ) {
 	const queryClient = useQueryClient();
 	const [markdown, setMarkdown] = useState("");
@@ -1022,7 +1028,7 @@ function useDigestStream(
 		(cause: unknown) => digestStreamError(cause, latestStatusRef.current),
 		[],
 	);
-	const { error, loading, run } = useNdjsonRun({
+	const { cancel, error, loading, run, setError } = useNdjsonRun({
 		schema: periodDigestStreamEventSchema,
 		request,
 		onStart,
@@ -1037,8 +1043,9 @@ function useDigestStream(
 	});
 
 	useEffect(() => {
-		run(false);
-	}, [run]);
+		if (enabled) run(false);
+		else cancel();
+	}, [cancel, enabled, run]);
 
 	useEffect(() => {
 		if (!result) return;
@@ -1094,7 +1101,37 @@ function useDigestStream(
 		};
 	}, [queryClient, result]);
 
-	return { context, error, loading, markdown, result, run, status };
+	const restore = useCallback(
+		(savedResult: PeriodDigestRunResult) => {
+			cancel();
+			setError(null);
+			setContext(savedResult.context);
+			setMarkdown(savedResult.markdown);
+			setResult(savedResult);
+			setStatus("Restored from daily history · 0 token");
+		},
+		[cancel, setError],
+	);
+	const clear = useCallback(() => {
+		cancel();
+		setError(null);
+		setContext(null);
+		setMarkdown("");
+		setResult(null);
+		setStatus("Starting digest");
+	}, [cancel, setError]);
+
+	return {
+		clear,
+		context,
+		error,
+		loading,
+		markdown,
+		result,
+		restore,
+		run,
+		status,
+	};
 }
 
 function TodayRoute() {
@@ -1110,6 +1147,29 @@ function TodayRoute() {
 	);
 }
 
+interface DailyDigestHistoryListResponse {
+	items: DailyDigestHistoryListItem[];
+}
+
+interface DailyDigestHistoryDetailResponse {
+	item: {
+		metadata: DailyDigestHistoryListItem;
+		result: PeriodDigestRunResult;
+	};
+}
+
+async function dailyHistoryResponseError(response: Response) {
+	try {
+		const payload = (await response.json()) as { message?: unknown };
+		if (typeof payload.message === "string" && payload.message.trim()) {
+			return payload.message;
+		}
+	} catch {
+		// Fall through to a status-based message.
+	}
+	return `Daily history request failed (${String(response.status)})`;
+}
+
 export function TodayRouteView({
 	searchState: controlledSearch,
 	onSearchChange,
@@ -1121,12 +1181,128 @@ export function TodayRouteView({
 	const searchState = controlledSearch ?? localSearch;
 	const updateSearch: RouteSearchChange<TodayRouteSearch> = (next, options) =>
 		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
-	const { period, since, until, includeDms } = searchState;
+	const {
+		run: activeHistoryId,
+		period,
+		since,
+		until,
+		includeDms,
+	} = searchState;
+	const historyEnabled = Boolean(controlledSearch && onSearchChange);
 	const [customRangeOpen, setCustomRangeOpen] = useState(
 		() => period === "custom",
 	);
-	const { context, error, loading, markdown, result, run, status } =
-		useDigestStream(period, includeDms, since, until);
+	const [historyItems, setHistoryItems] = useState<
+		DailyDigestHistoryListItem[]
+	>([]);
+	const [historyFilter, setHistoryFilter] = useState("");
+	const [historyLoading, setHistoryLoading] = useState(historyEnabled);
+	const [historyError, setHistoryError] = useState<string | null>(null);
+	const [historyRestoreLoading, setHistoryRestoreLoading] = useState(false);
+	const [historyRestoreError, setHistoryRestoreError] = useState<string | null>(
+		null,
+	);
+	const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+	const historyButtonRef = useRef<HTMLButtonElement>(null);
+	const historyDialogRef = useRef<HTMLDivElement>(null);
+	const {
+		clear,
+		context,
+		error,
+		loading,
+		markdown,
+		result,
+		restore,
+		run,
+		status,
+	} = useDigestStream(period, includeDms, since, until, !activeHistoryId);
+	const loadHistory = useCallback(async () => {
+		if (!historyEnabled) return;
+		setHistoryLoading(true);
+		setHistoryError(null);
+		try {
+			const response = await fetch("/api/period-digest-history?limit=366", {
+				cache: "no-store",
+			});
+			if (!response.ok)
+				throw new Error(await dailyHistoryResponseError(response));
+			const payload = (await response.json()) as DailyDigestHistoryListResponse;
+			setHistoryItems(payload.items);
+		} catch (cause) {
+			setHistoryError(
+				cause instanceof Error ? cause.message : "Could not load daily history",
+			);
+		} finally {
+			setHistoryLoading(false);
+		}
+	}, [historyEnabled]);
+
+	useEffect(() => {
+		void loadHistory();
+		if (!historyEnabled) return;
+		const interval = window.setInterval(() => void loadHistory(), 60_000);
+		return () => window.clearInterval(interval);
+	}, [historyEnabled, loadHistory]);
+
+	useEffect(() => {
+		if (!historyEnabled || !activeHistoryId) return;
+		const controller = new AbortController();
+		setHistoryRestoreLoading(true);
+		setHistoryRestoreError(null);
+		void fetch(
+			`/api/period-digest-history?id=${encodeURIComponent(activeHistoryId)}`,
+			{ cache: "no-store", signal: controller.signal },
+		)
+			.then(async (response) => {
+				if (!response.ok) {
+					throw new Error(await dailyHistoryResponseError(response));
+				}
+				return (await response.json()) as DailyDigestHistoryDetailResponse;
+			})
+			.then(({ item }) => {
+				if (controller.signal.aborted) return;
+				restore(item.result);
+			})
+			.catch((cause: unknown) => {
+				if (controller.signal.aborted) return;
+				setHistoryRestoreError(
+					cause instanceof Error
+						? cause.message
+						: "Could not restore daily history",
+				);
+			})
+			.finally(() => {
+				if (!controller.signal.aborted) setHistoryRestoreLoading(false);
+			});
+		return () => controller.abort();
+	}, [activeHistoryId, historyEnabled, restore]);
+
+	const closeHistoryDrawer = useCallback(() => {
+		setHistoryDrawerOpen(false);
+		window.setTimeout(() => historyButtonRef.current?.focus(), 0);
+	}, []);
+
+	useEffect(() => {
+		if (!historyDrawerOpen) return;
+		historyDialogRef.current?.focus();
+		function closeOnEscape(event: KeyboardEvent) {
+			if (event.key === "Escape") closeHistoryDrawer();
+		}
+		window.addEventListener("keydown", closeOnEscape);
+		return () => window.removeEventListener("keydown", closeOnEscape);
+	}, [closeHistoryDrawer, historyDrawerOpen]);
+
+	function selectHistory(id: string) {
+		setHistoryDrawerOpen(false);
+		if (id === activeHistoryId) return;
+		clear();
+		updateSearch({ ...searchState, run: id });
+	}
+
+	function showLivePeriod(next: TodayRouteSearch) {
+		clear();
+		updateSearch({ ...next, run: "" });
+	}
 
 	useEffect(() => {
 		setCustomRangeOpen(period === "custom");
@@ -1162,6 +1338,7 @@ export function TodayRouteView({
 			})
 		: null;
 	const [referencePdfActive, setReferencePdfActive] = useState(false);
+	const refreshAfterHistoryRef = useRef(false);
 	const handleExportPdf = useCallback(() => {
 		if (!canExportPdf) return;
 		exportCurrentPdf(exportTitle);
@@ -1185,196 +1362,270 @@ export function TodayRouteView({
 			onCleanup: () => setReferencePdfActive(false),
 		});
 	}, [canExportReferencePdf, referenceExportTitle, referencePdfActive, result]);
+	const handleRefreshDigest = useCallback(() => {
+		if (activeHistoryId) {
+			refreshAfterHistoryRef.current = true;
+			clear();
+			updateSearch({ ...searchState, run: "" });
+			return;
+		}
+		run(true);
+	}, [activeHistoryId, clear, run, searchState, updateSearch]);
+
+	useEffect(() => {
+		if (activeHistoryId || !refreshAfterHistoryRef.current) return;
+		refreshAfterHistoryRef.current = false;
+		run(true);
+	}, [activeHistoryId, run]);
 
 	return (
-		<div className="today-pdf-root flex min-h-screen flex-col">
-			<header className={cx("today-pdf-header", pageHeaderClass)}>
-				<div className={cx(pageHeaderRowClass, "flex-wrap")}>
-					<div className="min-w-0 max-sm:w-full">
-						<h1 className={pageTitleClass}>What happened</h1>
-						<p className={pageSubtitleClass}>{sourceLabel}</p>
-					</div>
-					<div
-						className={cx(
-							"today-screen-only max-w-full overflow-x-auto max-sm:w-full [&>button]:shrink-0",
-							pageHeaderActionsClass,
-						)}
-					>
-						<button
-							type="button"
-							className={secondaryButtonClass}
-							onClick={handleExportPdf}
-							disabled={!canExportPdf}
-						>
-							<FileDown className="size-4" aria-hidden="true" />
-							Export PDF
-						</button>
-						<button
-							type="button"
-							className={secondaryButtonClass}
-							onClick={handleExportReferencePdf}
-							disabled={!canExportReferencePdf || referencePdfActive}
-						>
-							{referencePdfActive ? (
-								<Loader2 className="size-4 animate-spin" aria-hidden="true" />
-							) : (
-								<FileText className="size-4" aria-hidden="true" />
+		<div className="grid min-h-screen min-w-0 min-[1240px]:grid-cols-[minmax(0,680px)_minmax(280px,1fr)]">
+			<section className="today-pdf-root flex min-h-screen min-w-0 flex-col">
+				<header className={cx("today-pdf-header", pageHeaderClass)}>
+					<div className={cx(pageHeaderRowClass, "flex-wrap")}>
+						<div className="min-w-0 max-sm:w-full">
+							<h1 className={pageTitleClass}>What happened</h1>
+							<p className={pageSubtitleClass}>{sourceLabel}</p>
+						</div>
+						<div
+							className={cx(
+								"today-screen-only max-w-full overflow-x-auto max-sm:w-full [&>button]:shrink-0",
+								pageHeaderActionsClass,
 							)}
-							导出完整 PDF
-						</button>
-						<button
-							type="button"
-							className={secondaryButtonClass}
-							onClick={() => run(true)}
-							disabled={loading}
 						>
-							<RefreshCw
-								className={cx("size-4", loading && "animate-spin")}
-								aria-hidden="true"
-							/>
-							Refresh
-						</button>
+							<button
+								ref={historyButtonRef}
+								type="button"
+								className={cx(secondaryButtonClass, "min-[1240px]:hidden")}
+								onClick={() => setHistoryDrawerOpen(true)}
+							>
+								<History className="size-4" aria-hidden="true" />
+								History
+							</button>
+							<button
+								type="button"
+								className={secondaryButtonClass}
+								onClick={handleExportPdf}
+								disabled={!canExportPdf}
+							>
+								<FileDown className="size-4" aria-hidden="true" />
+								Export PDF
+							</button>
+							<button
+								type="button"
+								className={secondaryButtonClass}
+								onClick={handleExportReferencePdf}
+								disabled={!canExportReferencePdf || referencePdfActive}
+							>
+								{referencePdfActive ? (
+									<Loader2 className="size-4 animate-spin" aria-hidden="true" />
+								) : (
+									<FileText className="size-4" aria-hidden="true" />
+								)}
+								导出完整 PDF
+							</button>
+							<button
+								type="button"
+								className={secondaryButtonClass}
+								onClick={handleRefreshDigest}
+								disabled={loading || historyRestoreLoading}
+							>
+								<RefreshCw
+									className={cx("size-4", loading && "animate-spin")}
+									aria-hidden="true"
+								/>
+								Refresh
+							</button>
+						</div>
 					</div>
-				</div>
-				<div className="today-pdf-meta" aria-hidden="true">
-					<span>{digestLabel}</span>
-					<span>·</span>
-					<span>Sources: {sourceLabel}</span>
-					{exportUpdatedAt ? (
-						<>
-							<span>·</span>
-							<span>Generated {exportUpdatedAt}</span>
-						</>
-					) : null}
-				</div>
-				<div className="today-screen-only flex flex-wrap items-center gap-2 px-4 pb-3">
+					<div className="today-pdf-meta" aria-hidden="true">
+						<span>{digestLabel}</span>
+						<span>·</span>
+						<span>Sources: {sourceLabel}</span>
+						{exportUpdatedAt ? (
+							<>
+								<span>·</span>
+								<span>Generated {exportUpdatedAt}</span>
+							</>
+						) : null}
+					</div>
+					<div className="today-screen-only flex flex-wrap items-center gap-2 px-4 pb-3">
+						<div
+							className={cx(
+								segmentedClass,
+								"max-w-full overflow-x-auto max-sm:grid max-sm:w-full max-sm:grid-cols-3 max-sm:overflow-visible max-sm:rounded-2xl",
+							)}
+							aria-label="Digest period"
+						>
+							{periods.map((item) => (
+								<button
+									key={item.value}
+									type="button"
+									className={cx(
+										segmentClass,
+										(item.value === "custom"
+											? period === "custom" || customRangeOpen
+											: !customRangeOpen && period === item.value) &&
+											todayPeriodSegmentActiveClass,
+									)}
+									onClick={() => {
+										if (item.value === "custom") {
+											setCustomRangeOpen((open) => !open);
+											return;
+										}
+										setCustomRangeOpen(false);
+										showLivePeriod({
+											...searchState,
+											period: item.value,
+											since: "",
+											until: "",
+										});
+									}}
+								>
+									{item.label}
+								</button>
+							))}
+						</div>
+						<label className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-1 text-[13px] font-medium text-[var(--ink-soft)]">
+							<input
+								type="checkbox"
+								checked={includeDms}
+								onChange={(event) =>
+									showLivePeriod({
+										...searchState,
+										includeDms: event.currentTarget.checked,
+									})
+								}
+							/>
+							DMs
+						</label>
+						{customRangeOpen ? (
+							<CustomDateRangePicker
+								value={period === "custom" ? { since, until } : null}
+								onApply={(customRange) =>
+									showLivePeriod({
+										...searchState,
+										period: "custom",
+										...customRange,
+									})
+								}
+							/>
+						) : null}
+					</div>
+				</header>
+
+				{error || historyRestoreError ? (
 					<div
 						className={cx(
-							segmentedClass,
-							"max-w-full overflow-x-auto max-sm:grid max-sm:w-full max-sm:grid-cols-3 max-sm:overflow-visible max-sm:rounded-2xl",
+							errorCopyClass,
+							"flex items-center justify-between gap-3",
 						)}
-						aria-label="Digest period"
+						role="alert"
 					>
-						{periods.map((item) => (
-							<button
-								key={item.value}
-								type="button"
-								className={cx(
-									segmentClass,
-									(item.value === "custom"
-										? period === "custom" || customRangeOpen
-										: !customRangeOpen && period === item.value) &&
-										todayPeriodSegmentActiveClass,
-								)}
-								onClick={() => {
-									if (item.value === "custom") {
-										setCustomRangeOpen((open) => !open);
-										return;
-									}
-									setCustomRangeOpen(false);
-									updateSearch({
-										...searchState,
-										period: item.value,
-										since: "",
-										until: "",
-									});
-								}}
-							>
-								{item.label}
-							</button>
-						))}
+						<span>{error ?? historyRestoreError}</span>
+						<button
+							className="shrink-0 font-semibold underline underline-offset-2"
+							onClick={handleRefreshDigest}
+							type="button"
+						>
+							Retry
+						</button>
 					</div>
-					<label className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-1 text-[13px] font-medium text-[var(--ink-soft)]">
-						<input
-							type="checkbox"
-							checked={includeDms}
-							onChange={(event) =>
-								updateSearch({
-									...searchState,
-									includeDms: event.currentTarget.checked,
-								})
-							}
-						/>
-						DMs
-					</label>
-					{customRangeOpen ? (
-						<CustomDateRangePicker
-							value={period === "custom" ? { since, until } : null}
-							onApply={(customRange) =>
-								updateSearch({
-									...searchState,
-									period: "custom",
-									...customRange,
-								})
-							}
-						/>
-					) : null}
-				</div>
-			</header>
+				) : null}
 
-			{error ? (
-				<div
-					className={cx(
-						errorCopyClass,
-						"flex items-center justify-between gap-3",
-					)}
-					role="alert"
-				>
-					<span>{error}</span>
-					<button
-						className="shrink-0 font-semibold underline underline-offset-2"
-						onClick={() => run(true)}
-						type="button"
-					>
-						Retry
-					</button>
+				<div className="today-screen-only border-b border-[var(--line)] px-4 py-2 text-[13px] text-[var(--ink-soft)]">
+					<span className="inline-flex items-center gap-1">
+						{historyRestoreLoading ? (
+							<Loader2 className="size-4 animate-spin" aria-hidden="true" />
+						) : loading ? (
+							<Loader2 className="size-4 animate-spin" aria-hidden="true" />
+						) : markdown ? (
+							<CheckCircle2 className="size-4" aria-hidden="true" />
+						) : (
+							<Sparkles className="size-4" aria-hidden="true" />
+						)}
+						{historyRestoreLoading
+							? "Restoring daily history"
+							: loading
+								? status
+								: activeHistoryId && result
+									? "Restored from daily history · 0 token"
+									: result
+										? `${result.cached ? "Cached" : "Ready"} · ${result.context.window.label}`
+										: error
+											? "Digest failed"
+											: "Ready"}
+					</span>
 				</div>
-			) : null}
 
-			<div className="today-screen-only border-b border-[var(--line)] px-4 py-2 text-[13px] text-[var(--ink-soft)]">
-				<span className="inline-flex items-center gap-1">
-					{loading ? (
-						<Loader2 className="size-4 animate-spin" aria-hidden="true" />
-					) : markdown ? (
-						<CheckCircle2 className="size-4" aria-hidden="true" />
-					) : (
-						<Sparkles className="size-4" aria-hidden="true" />
-					)}
-					{loading
-						? status
-						: result
-							? `${result.cached ? "Cached" : "Ready"} · ${result.context.window.label}`
+				{referencePdfActive && result ? (
+					<ReferenceDigestPrint
+						generatedAt={referenceGeneratedAt}
+						markdown={displayMarkdown}
+						result={result}
+					/>
+				) : null}
+
+				{markdown ? (
+					<MarkdownViewer
+						className="today-digest-pdf"
+						context={result?.context ?? context}
+						markdownLinkClassName={todayMarkdownLinkClass}
+						markdown={displayMarkdown}
+						sourceOnlyCitations
+					/>
+				) : (
+					<div className="px-4 py-5 text-[14px] text-[var(--ink-soft)]">
+						{loading
+							? status
 							: error
-								? "Digest failed"
-								: "Ready"}
-				</span>
+								? "No digest was generated. Retry to start a new run."
+								: "Waiting for the first tokens..."}
+					</div>
+				)}
+			</section>
+
+			<div className="today-screen-only sticky top-0 hidden h-screen min-h-0 border-l border-[var(--line)] min-[1240px]:block">
+				<DailyDigestHistoryPanel
+					activeId={activeHistoryId}
+					error={historyError}
+					filter={historyFilter}
+					items={historyItems}
+					loading={historyLoading}
+					onFilterChange={setHistoryFilter}
+					onSelect={selectHistory}
+				/>
 			</div>
 
-			{referencePdfActive && result ? (
-				<ReferenceDigestPrint
-					generatedAt={referenceGeneratedAt}
-					markdown={displayMarkdown}
-					result={result}
-				/>
-			) : null}
-
-			{markdown ? (
-				<MarkdownViewer
-					className="today-digest-pdf"
-					context={result?.context ?? context}
-					markdownLinkClassName={todayMarkdownLinkClass}
-					markdown={displayMarkdown}
-					sourceOnlyCitations
-				/>
-			) : (
-				<div className="px-4 py-5 text-[14px] text-[var(--ink-soft)]">
-					{loading
-						? status
-						: error
-							? "No digest was generated. Retry to start a new run."
-							: "Waiting for the first tokens..."}
+			{historyDrawerOpen ? (
+				<div className="today-screen-only fixed inset-0 z-50 min-[1240px]:hidden">
+					<button
+						type="button"
+						aria-label="Close daily history overlay"
+						className="absolute inset-0 bg-black/40"
+						onClick={closeHistoryDrawer}
+					/>
+					<div
+						ref={historyDialogRef}
+						role="dialog"
+						aria-modal="true"
+						aria-label="Daily digest history"
+						className="absolute inset-y-0 right-0 h-full w-[min(360px,calc(100%-32px))] border-l border-[var(--line)] bg-[var(--bg)] shadow-[-12px_0_32px_rgba(0,0,0,0.18)] outline-none"
+						tabIndex={-1}
+					>
+						<DailyDigestHistoryPanel
+							activeId={activeHistoryId}
+							error={historyError}
+							filter={historyFilter}
+							items={historyItems}
+							loading={historyLoading}
+							onClose={closeHistoryDrawer}
+							onFilterChange={setHistoryFilter}
+							onSelect={selectHistory}
+						/>
+					</div>
 				</div>
-			)}
+			) : null}
 		</div>
 	);
 }
