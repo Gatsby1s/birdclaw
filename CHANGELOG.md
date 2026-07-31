@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.45 - 2026-07-31
+
+### Fixed
+
+- Open the same local author homepage from author names, handles, mentions, media details, and network-map rows as from timeline avatars.
+- Keep explicit Analyse and Analysis actions pointed at the profile analysis view while removing accidental analysis jumps from author identity links.
+
 ## 0.8.44 - 2026-07-31
 
 ### Added
