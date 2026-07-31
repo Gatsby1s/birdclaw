@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.50 - 2026-07-31
+
+### Fixed
+
+- Build the Railway container on current Node 26 images by installing the pinned pnpm release directly when Corepack is unavailable.
+
 ## 0.8.49 - 2026-07-31
 
 ### Added
