@@ -29,6 +29,7 @@ import { Route as AuthorsHandleRouteImport } from './routes/authors.$handle'
 import { Route as ApiXurlRateLimitsRouteImport } from './routes/api/xurl-rate-limits'
 import { Route as ApiXremarkRouteImport } from './routes/api/xremark'
 import { Route as ApiTweetVideoRouteImport } from './routes/api/tweet-video'
+import { Route as ApiTweetTranslationRouteImport } from './routes/api/tweet-translation'
 import { Route as ApiTweetExpandRouteImport } from './routes/api/tweet-expand'
 import { Route as ApiSyncRouteImport } from './routes/api/sync'
 import { Route as ApiStatusRouteImport } from './routes/api/status'
@@ -150,6 +151,11 @@ const ApiXremarkRoute = ApiXremarkRouteImport.update({
 const ApiTweetVideoRoute = ApiTweetVideoRouteImport.update({
   id: '/api/tweet-video',
   path: '/api/tweet-video',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTweetTranslationRoute = ApiTweetTranslationRouteImport.update({
+  id: '/api/tweet-translation',
+  path: '/api/tweet-translation',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTweetExpandRoute = ApiTweetExpandRouteImport.update({
@@ -300,6 +306,7 @@ export interface FileRoutesByFullPath {
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/tweet-expand': typeof ApiTweetExpandRoute
+  '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
@@ -344,6 +351,7 @@ export interface FileRoutesByTo {
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/tweet-expand': typeof ApiTweetExpandRoute
+  '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
@@ -389,6 +397,7 @@ export interface FileRoutesById {
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/tweet-expand': typeof ApiTweetExpandRoute
+  '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
@@ -435,6 +444,7 @@ export interface FileRouteTypes {
     | '/api/status'
     | '/api/sync'
     | '/api/tweet-expand'
+    | '/api/tweet-translation'
     | '/api/tweet-video'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
@@ -479,6 +489,7 @@ export interface FileRouteTypes {
     | '/api/status'
     | '/api/sync'
     | '/api/tweet-expand'
+    | '/api/tweet-translation'
     | '/api/tweet-video'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
@@ -523,6 +534,7 @@ export interface FileRouteTypes {
     | '/api/status'
     | '/api/sync'
     | '/api/tweet-expand'
+    | '/api/tweet-translation'
     | '/api/tweet-video'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
@@ -568,6 +580,7 @@ export interface RootRouteChildren {
   ApiStatusRoute: typeof ApiStatusRoute
   ApiSyncRoute: typeof ApiSyncRoute
   ApiTweetExpandRoute: typeof ApiTweetExpandRoute
+  ApiTweetTranslationRoute: typeof ApiTweetTranslationRoute
   ApiTweetVideoRoute: typeof ApiTweetVideoRoute
   ApiXremarkRoute: typeof ApiXremarkRoute
   ApiXurlRateLimitsRoute: typeof ApiXurlRateLimitsRoute
@@ -716,6 +729,13 @@ declare module '@tanstack/react-router' {
       path: '/api/tweet-video'
       fullPath: '/api/tweet-video'
       preLoaderRoute: typeof ApiTweetVideoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/tweet-translation': {
+      id: '/api/tweet-translation'
+      path: '/api/tweet-translation'
+      fullPath: '/api/tweet-translation'
+      preLoaderRoute: typeof ApiTweetTranslationRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/tweet-expand': {
@@ -925,6 +945,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiStatusRoute: ApiStatusRoute,
   ApiSyncRoute: ApiSyncRoute,
   ApiTweetExpandRoute: ApiTweetExpandRoute,
+  ApiTweetTranslationRoute: ApiTweetTranslationRoute,
   ApiTweetVideoRoute: ApiTweetVideoRoute,
   ApiXremarkRoute: ApiXremarkRoute,
   ApiXurlRateLimitsRoute: ApiXurlRateLimitsRoute,
