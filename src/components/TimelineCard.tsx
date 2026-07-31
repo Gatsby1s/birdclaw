@@ -316,6 +316,7 @@ function TweetPresentation({
 	quotedTweet,
 	mediaViewerPermalink,
 	translatedText,
+	translateQuotedTweet = false,
 	afterText,
 }: {
 	tweet: TimelineItem | EmbeddedTweet;
@@ -325,6 +326,7 @@ function TweetPresentation({
 	quotedTweet?: EmbeddedTweet | null;
 	mediaViewerPermalink?: string | null;
 	translatedText?: string;
+	translateQuotedTweet?: boolean;
 	afterText?: ReactNode;
 }) {
 	const translatedEntities = translatedText
@@ -369,7 +371,11 @@ function TweetPresentation({
 			) : null}
 			{quotedTweet ? (
 				<div className={embeddedCardClass}>
-					<EmbeddedTweetCard item={quotedTweet} label="Quoted tweet" />
+					<EmbeddedTweetCard
+						item={quotedTweet}
+						label="Quoted tweet"
+						translationEnabled={translateQuotedTweet}
+					/>
 				</div>
 			) : null}
 			{visibleUrlCards.map((entry, index) => (
@@ -748,6 +754,7 @@ export function TimelineCard({
 					quotedTweet={item.retweetedTweet ? null : item.quotedTweet}
 					replyToTweet={item.retweetedTweet ? null : item.replyToTweet}
 					translatedText={translatedText}
+					translateQuotedTweet={translationViewport.nearViewport}
 					tweet={presentedTweet}
 					visibleUrlCards={visibleUrlCards}
 				/>
