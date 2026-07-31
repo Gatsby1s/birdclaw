@@ -170,6 +170,7 @@ function getTwitter6551StatusEffect(): Effect.Effect<
 		const config = getTwitter6551Config();
 		const runtime = getTwitter6551RuntimeStatus();
 		const works =
+			runtime.activeSource === "local" ||
 			runtime.connected ||
 			Boolean(runtime.lastBackfillAt && runtime.state !== "error");
 		return {
@@ -182,13 +183,19 @@ function getTwitter6551StatusEffect(): Effect.Effect<
 				: runtime.state === "error"
 					? "error"
 					: "warning") as "ok" | "warning" | "error",
-			detail: runtime.connected
-				? `realtime connected; ${String(runtime.watchUsers.length)} watched account${runtime.watchUsers.length === 1 ? "" : "s"}`
-				: runtime.lastBackfillAt
-					? `recovery polling active; last sync ${runtime.lastBackfillAt}`
-					: config.tokenDetected
-						? (runtime.lastError ?? "token detected; worker is not connected")
-						: `${config.tokenEnv} not detected`,
+			detail:
+				runtime.activeSource === "local"
+					? `local bridge online; 6551 is standing by`
+					: runtime.connected
+						? `6551 realtime connected; ${String(runtime.watchUsers.length)} watched account${runtime.watchUsers.length === 1 ? "" : "s"}`
+						: runtime.activeSource === "waiting"
+							? "waiting for the local bridge before 6551 takeover"
+							: runtime.lastBackfillAt
+								? `6551 recovery polling active; last sync ${runtime.lastBackfillAt}`
+								: config.tokenDetected
+									? (runtime.lastError ??
+										"token detected; worker is not connected")
+									: `${config.tokenEnv} not detected`,
 			accounts: [],
 		};
 	});

@@ -941,6 +941,38 @@ export function listMentionsViaBird(options: {
 	return runEffectPromise(listMentionsViaBirdEffect(options));
 }
 
+export function listUserTweetsViaBirdEffect({
+	username,
+	maxResults,
+	maxPages = 3,
+}: {
+	username: string;
+	maxResults: number;
+	maxPages?: number;
+}): Effect.Effect<XurlMentionsResponse, unknown> {
+	return Effect.gen(function* () {
+		const stdout = yield* runBirdJsonCommandEffect([
+			"user-tweets",
+			username.replace(/^@/, ""),
+			"-n",
+			String(maxResults),
+			"--max-pages",
+			String(maxPages),
+			"--json",
+		]);
+		const payload = yield* parseBirdJsonEffect(stdout);
+		return yield* normalizeBirdTweetsPayloadEffect(payload, "user-tweets");
+	});
+}
+
+export function listUserTweetsViaBird(options: {
+	username: string;
+	maxResults: number;
+	maxPages?: number;
+}): Promise<XurlMentionsResponse> {
+	return runEffectPromise(listUserTweetsViaBirdEffect(options));
+}
+
 function listTweetsViaBirdCommandEffect({
 	command,
 	maxResults,

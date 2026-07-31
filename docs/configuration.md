@@ -78,26 +78,39 @@ See [Backup](backup.md). When `autoSync` is enabled, read commands pull + merge 
 
 ## Environment variables
 
-| Variable                       | Purpose                                                                                                                                              |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BIRDCLAW_HOME`                | Override the storage root (`~/.birdclaw` by default)                                                                                                 |
-| `BIRDCLAW_CONFIG`              | Read and write config at a non-default path                                                                                                          |
-| `BIRDCLAW_ACTIONS_TRANSPORT`   | Override moderation action transport with `auto`, `xurl`, or `bird` for one process                                                                  |
-| `BIRDCLAW_HOST`                | Host interface for the production `birdclaw serve` listener; defaults to `127.0.0.1`                                                                 |
-| `BIRDCLAW_PORT`                | Port for the production `birdclaw serve` listener; defaults to `3000`                                                                                |
-| `BIRDCLAW_ALLOWED_HOSTS`       | Comma-separated extra hostnames accepted by the source `pnpm dev` server                                                                             |
-| `BIRDCLAW_LOCAL_WEB`           | Internal local-server mode; production derives local access from the peer socket, while forwarded/proxied requests still require remote-token config |
-| `BIRDCLAW_WEB_TOKEN`           | App-level token for remote login; browsers receive a signed HttpOnly session, while API clients may send `x-birdclaw-token`                           |
-| `BIRDCLAW_ALLOW_REMOTE_WEB`    | Set to `1` to allow remote access through a trusted private proxy                                                                                    |
-| `BIRDCLAW_DISABLE_LIVE_WRITES` | Set to `1` to block any live mutation (used by tests and CI)                                                                                         |
-| `BIRDCLAW_6551_ENABLED`        | Set to `1` to run the 6551 realtime worker in the production web process                                                                             |
-| `BIRDCLAW_6551_WATCH_USERS`    | Comma-separated X handles to monitor and recovery-sync                                                                                               |
-| `BIRDCLAW_6551_TARGET_TWEETS`  | Comma-separated tweet IDs to preserve and refresh with quote tweets                                                                                  |
-| `BIRDCLAW_6551_BACKFILL_MINUTES` | Minutes between latest-100 recovery polls; defaults to `120`                                                                                       |
-| `TWITTER_TOKEN`                | 6551 Bearer token; `OPENNEWS_TOKEN` is accepted as a compatibility fallback                                                                          |
-| `BIRDCLAW_BACKUP_AUTO_SYNC`    | Set to `0` to disable auto-sync for one process                                                                                                      |
-| `NO_COLOR`                     | Disable ANSI color in human output                                                                                                                   |
-| `OPENAI_API_KEY`               | Enable inbox scoring and low-signal filtering                                                                                                        |
+| Variable                                    | Purpose                                                                                                                                              |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BIRDCLAW_HOME`                             | Override the storage root (`~/.birdclaw` by default)                                                                                                 |
+| `BIRDCLAW_CONFIG`                           | Read and write config at a non-default path                                                                                                          |
+| `BIRDCLAW_ACTIONS_TRANSPORT`                | Override moderation action transport with `auto`, `xurl`, or `bird` for one process                                                                  |
+| `BIRDCLAW_HOST`                             | Host interface for the production `birdclaw serve` listener; defaults to `127.0.0.1`                                                                 |
+| `BIRDCLAW_PORT`                             | Port for the production `birdclaw serve` listener; defaults to `3000`                                                                                |
+| `BIRDCLAW_ALLOWED_HOSTS`                    | Comma-separated extra hostnames accepted by the source `pnpm dev` server                                                                             |
+| `BIRDCLAW_LOCAL_WEB`                        | Internal local-server mode; production derives local access from the peer socket, while forwarded/proxied requests still require remote-token config |
+| `BIRDCLAW_WEB_TOKEN`                        | App-level token for remote login; browsers receive a signed HttpOnly session, while API clients may send `x-birdclaw-token`                          |
+| `BIRDCLAW_ALLOW_REMOTE_WEB`                 | Set to `1` to allow remote access through a trusted private proxy                                                                                    |
+| `BIRDCLAW_DISABLE_LIVE_WRITES`              | Set to `1` to block any live mutation (used by tests and CI)                                                                                         |
+| `BIRDCLAW_6551_ENABLED`                     | Set to `1` to run the 6551 realtime worker in the production web process                                                                             |
+| `BIRDCLAW_6551_ACCOUNT_ID`                  | BirdClaw account scope used by 6551; set it to the same account ID uploaded by the local bridge                                                      |
+| `BIRDCLAW_6551_WATCH_USERS`                 | Comma-separated X handles to monitor and recovery-sync                                                                                               |
+| `BIRDCLAW_6551_TARGET_TWEETS`               | Comma-separated tweet IDs to preserve and refresh with quote tweets                                                                                  |
+| `BIRDCLAW_6551_BACKFILL_MINUTES`            | Minutes between latest-100 recovery polls; defaults to `120`                                                                                         |
+| `BIRDCLAW_6551_FAILOVER_MODE`               | Set to `1` to keep 6551 on standby while an authenticated local bridge heartbeat is fresh                                                            |
+| `BIRDCLAW_LOCAL_STALE_SECONDS`              | Seconds without a local heartbeat before 6551 takes over; defaults to `180`                                                                          |
+| `BIRDCLAW_LOCAL_BRIDGE_TOKEN`               | Cloud-side secret accepted only by the local bridge ingest endpoint                                                                                  |
+| `BIRDCLAW_CLOUD_BRIDGE_URL`                 | Local Mac destination URL for heartbeat and incremental timeline upload                                                                              |
+| `BIRDCLAW_CLOUD_BRIDGE_TOKEN`               | Local Mac copy of the cloud bridge secret                                                                                                            |
+| `BIRDCLAW_CLOUD_BRIDGE_INTERVAL_SECONDS`    | Local heartbeat and upload interval; defaults to `60`                                                                                                |
+| `BIRDCLAW_CLOUD_BRIDGE_LOOKBACK_HOURS`      | Bounded replay window used when no acknowledged local cursor exists; defaults to `24`                                                                |
+| `BIRDCLAW_LOCAL_COLLECTOR_ENABLED`          | Set to `1` on the Mac to collect watched accounts and target threads through the local `bird` session before heartbeating                            |
+| `BIRDCLAW_LOCAL_COLLECTOR_WATCH_USERS`      | Local comma-separated account watch list; may mirror the 6551 watch list                                                                             |
+| `BIRDCLAW_LOCAL_COLLECTOR_TARGET_TWEETS`    | Local comma-separated target posts whose threads and quote tweets are refreshed                                                                      |
+| `BIRDCLAW_LOCAL_COLLECTOR_ACCOUNT_ID`       | Optional local account scope to collect and upload; defaults to BirdClaw's default account                                                           |
+| `BIRDCLAW_LOCAL_COLLECTOR_INTERVAL_SECONDS` | Local collection interval; defaults to `120`                                                                                                         |
+| `TWITTER_TOKEN`                             | 6551 Bearer token; `OPENNEWS_TOKEN` is accepted as a compatibility fallback                                                                          |
+| `BIRDCLAW_BACKUP_AUTO_SYNC`                 | Set to `0` to disable auto-sync for one process                                                                                                      |
+| `NO_COLOR`                                  | Disable ANSI color in human output                                                                                                                   |
+| `OPENAI_API_KEY`                            | Enable inbox scoring and low-signal filtering                                                                                                        |
 
 `BIRDCLAW_DISABLE_LIVE_WRITES=1` is set automatically in CI and Playwright runs so test code can never publish a tweet, send a DM, or block an account.
 

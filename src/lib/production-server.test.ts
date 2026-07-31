@@ -4,6 +4,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { withTestHome } from "../test/test-home";
 import { startProductionServer } from "./production-server";
 
 const tempDirs: string[] = [];
@@ -124,6 +125,75 @@ describe("production server", () => {
 				port: 0,
 			}),
 		).rejects.toThrow("BIRDCLAW_WEB_TOKEN");
+	});
+
+	it("requires the dedicated token on the local bridge endpoint", async () => {
+		await withTestHome(async () => {
+			process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN = "bridge-secret";
+			const packageRoot = mkdtempSync(
+				path.join(os.tmpdir(), "birdclaw-production-bridge-"),
+			);
+			tempDirs.push(packageRoot);
+			const clientDir = path.join(packageRoot, "client");
+			mkdirSync(clientDir, { recursive: true });
+			const serverEntry = path.join(packageRoot, "server.mjs");
+			writeFileSync(
+				serverEntry,
+				`export default { fetch() { return new Response("private"); } };`,
+			);
+			const server = await startProductionServer({
+				packageRoot,
+				clientDir,
+				serverEntry,
+				port: 0,
+			});
+			try {
+				const address = server.address();
+				if (!address || typeof address === "string") {
+					throw new Error("no address");
+				}
+				const url = `http://127.0.0.1:${String(address.port)}/api/integrations/local-bridge`;
+				const batch = {
+					version: 1,
+					sentAt: "2026-07-31T08:00:00.000Z",
+					caughtUp: true,
+					cursor: {
+						updatedAt: "2026-07-31T08:00:00.000Z",
+						accountId: "",
+						tweetId: "",
+						kind: "",
+					},
+					accounts: [],
+					profiles: [],
+					tweets: [],
+					edges: [],
+				};
+
+				await expect(
+					fetch(url, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify(batch),
+					}).then((response) => response.status),
+				).resolves.toBe(401);
+				const accepted = await fetch(url, {
+					method: "POST",
+					headers: {
+						authorization: "Bearer bridge-secret",
+						"content-type": "application/json",
+					},
+					body: JSON.stringify(batch),
+				});
+				expect(accepted.status).toBe(200);
+				await expect(accepted.json()).resolves.toMatchObject({
+					ok: true,
+					caughtUp: true,
+					edges: 0,
+				});
+			} finally {
+				await new Promise<void>((resolve) => server.close(() => resolve()));
+			}
+		});
 	});
 
 	it("serves built assets before delegating requests to the SSR handler", async () => {

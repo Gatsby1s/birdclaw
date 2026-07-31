@@ -17,9 +17,21 @@ import {
 	verifyBirdclawWebToken,
 } from "./http-effect";
 import {
+	importLocalCloudBridgeBatch,
+	isLocalCloudBridgeTokenConfigured,
+	startLocalCloudBridgeClient,
+	stopLocalCloudBridgeClient,
+	verifyLocalCloudBridgeToken,
+} from "./local-cloud-bridge";
+import {
+	startLocalTwitterCollector,
+	stopLocalTwitterCollector,
+} from "./local-twitter-collector";
+import {
 	getTwitter6551RuntimeStatus,
-	startTwitter6551Worker,
-	stopTwitter6551Worker,
+	recordTwitter6551LocalHeartbeat,
+	startTwitter6551WorkerManager,
+	stopTwitter6551WorkerManager,
 } from "./twitter-6551";
 
 interface FetchHandler {
@@ -56,6 +68,7 @@ const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 const LOGIN_WINDOW_MS = 15 * 60_000;
 const LOGIN_MAX_ATTEMPTS = 8;
 const MAX_LOGIN_RATE_KEYS = 10_000;
+const MAX_LOCAL_BRIDGE_BYTES = 8 * 1024 * 1024;
 
 function isLoopbackAddress(address: string | undefined) {
 	if (!address) return false;
@@ -268,6 +281,71 @@ async function readSmallForm(request: IncomingMessage) {
 		chunks.push(buffer);
 	}
 	return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+}
+
+async function readLocalBridgeJson(request: IncomingMessage) {
+	const chunks: Buffer[] = [];
+	let size = 0;
+	for await (const chunk of request) {
+		const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+		size += buffer.length;
+		if (size > MAX_LOCAL_BRIDGE_BYTES) {
+			throw new Error("Local bridge request is too large");
+		}
+		chunks.push(buffer);
+	}
+	return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+}
+
+async function handleLocalCloudBridge(
+	request: IncomingMessage,
+	response: ServerResponse,
+) {
+	const url = new URL(request.url ?? "/", "http://local");
+	if (url.pathname !== "/api/integrations/local-bridge") return false;
+	if (request.method !== "POST") {
+		sendText(response, 405, "Method not allowed", "text/plain; charset=utf-8", {
+			allow: "POST",
+		});
+		return true;
+	}
+	if (!isLocalCloudBridgeTokenConfigured()) {
+		sendText(response, 503, "Local bridge is not configured");
+		return true;
+	}
+	const authorization = request.headers.authorization;
+	const candidate = authorization?.startsWith("Bearer ")
+		? authorization.slice("Bearer ".length).trim()
+		: "";
+	if (!verifyLocalCloudBridgeToken(candidate)) {
+		sendText(response, 401, "Unauthorized");
+		return true;
+	}
+	try {
+		const result = await importLocalCloudBridgeBatch(
+			await readLocalBridgeJson(request),
+		);
+		if (result.caughtUp) {
+			await recordTwitter6551LocalHeartbeat(result.edges);
+		}
+		sendText(
+			response,
+			200,
+			JSON.stringify(result),
+			"application/json; charset=utf-8",
+		);
+	} catch (error) {
+		sendText(
+			response,
+			400,
+			JSON.stringify({
+				ok: false,
+				message: error instanceof Error ? error.message : String(error),
+			}),
+			"application/json; charset=utf-8",
+		);
+	}
+	return true;
 }
 
 function loginRateKey(request: IncomingMessage) {
@@ -491,11 +569,6 @@ export async function startProductionServer({
 		);
 	}
 	const handler = loaded.default;
-	void startTwitter6551Worker().catch((error) => {
-		console.error(
-			`6551 worker startup failed: ${error instanceof Error ? error.message : String(error)}`,
-		);
-	});
 	const server = createServer(async (request, response) => {
 		const requestAbort = new AbortController();
 		const abortRequest = () => requestAbort.abort();
@@ -505,6 +578,7 @@ export async function startProductionServer({
 		request.once("aborted", abortRequest);
 		response.once("close", abortClosedResponse);
 		try {
+			if (await handleLocalCloudBridge(request, response)) return;
 			if (await handlePrivateWebGate(request, response)) return;
 			if (await sendStaticFile(request, response, clientDir)) return;
 			await sendWebResponse(
@@ -524,12 +598,26 @@ export async function startProductionServer({
 		}
 	});
 	server.once("close", () => {
-		void stopTwitter6551Worker();
+		stopLocalCloudBridgeClient();
+		stopLocalTwitterCollector();
+		void stopTwitter6551WorkerManager();
 	});
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(port, host, resolve);
 	});
+	try {
+		startLocalTwitterCollector();
+		startLocalCloudBridgeClient();
+		void startTwitter6551WorkerManager().catch((error) => {
+			console.error(
+				`6551 worker startup failed: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		});
+	} catch (error) {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		throw error;
+	}
 	return server;
 }
 
@@ -550,7 +638,9 @@ export async function runProductionServer(options: ProductionServerOptions) {
 		};
 		const stop = (signal: NodeJS.Signals) => {
 			removeHandlers();
-			void stopTwitter6551Worker().finally(() => {
+			stopLocalCloudBridgeClient();
+			stopLocalTwitterCollector();
+			void stopTwitter6551WorkerManager().finally(() => {
 				server.close(() => process.kill(process.pid, signal));
 				server.closeAllConnections();
 			});

@@ -19,6 +19,8 @@ const STALE_CONNECTION_MS = 75_000;
 const SUBSCRIPTION_TIMEOUT_MS = 15_000;
 const MAX_RECONNECT_MS = 60_000;
 const AUTH_RECONNECT_MS = 5 * 60_000;
+const DEFAULT_LOCAL_STALE_SECONDS = 180;
+const FAILOVER_CHECK_MS = 15_000;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -75,13 +77,19 @@ export interface Twitter6551RuntimeStatus {
 		| "connected"
 		| "degraded"
 		| "error"
+		| "standby"
 		| "stopped";
 	connected: boolean;
+	failoverMode: boolean;
+	activeSource: "disabled" | "waiting" | "local" | "6551";
 	watchUsers: string[];
 	targetTweetIds: string[];
 	lastConnectedAt: string | null;
 	lastEventAt: string | null;
 	lastBackfillAt: string | null;
+	lastLocalHeartbeatAt: string | null;
+	localStaleSeconds: number;
+	localBridgeIngestedCount: number;
 	lastError: string | null;
 	reconnectCount: number;
 	ingestedCount: number;
@@ -644,6 +652,18 @@ export class Twitter6551Client {
 			.filter((tweet): tweet is Twitter6551Tweet => Boolean(tweet));
 	}
 
+	async searchTweets(keywords: string, maxResults = 100) {
+		const data = await this.request<unknown>("twitter_search", {
+			keywords,
+			maxResults: Math.max(1, Math.min(100, Math.floor(maxResults))),
+			product: "Latest",
+			excludeRetweets: true,
+		});
+		return (Array.isArray(data) ? data : [])
+			.map((tweet) => normalizeTwitter6551Tweet(tweet))
+			.filter((tweet): tweet is Twitter6551Tweet => Boolean(tweet));
+	}
+
 	async addWatch(username: string) {
 		return this.request<unknown>("twitter_watch_add", {
 			username: normalizedHandle(username),
@@ -721,20 +741,43 @@ export function getTwitter6551RuntimeConfig() {
 			"BIRDCLAW_6551_BACKFILL_MINUTES",
 			base.backfillMinutes || DEFAULT_BACKFILL_MINUTES,
 		),
+		failoverMode: process.env.BIRDCLAW_6551_FAILOVER_MODE === "1",
+		localStaleSeconds: positiveEnvNumber(
+			"BIRDCLAW_LOCAL_STALE_SECONDS",
+			DEFAULT_LOCAL_STALE_SECONDS,
+		),
 	};
 }
+
+let lastLocalHeartbeatAtMs = 0;
+let localBridgeIngestedCount = 0;
 
 function emptyStatus(): Twitter6551RuntimeStatus {
 	const config = getTwitter6551RuntimeConfig();
 	return {
 		enabled: config.enabled,
-		state: config.enabled ? "starting" : "disabled",
+		state: config.enabled
+			? config.failoverMode
+				? "standby"
+				: "starting"
+			: "disabled",
 		connected: false,
+		failoverMode: config.failoverMode,
+		activeSource: config.enabled
+			? config.failoverMode
+				? "waiting"
+				: "6551"
+			: "disabled",
 		watchUsers: config.watchUsers,
 		targetTweetIds: config.targetTweetIds,
 		lastConnectedAt: null,
 		lastEventAt: null,
 		lastBackfillAt: null,
+		lastLocalHeartbeatAt: lastLocalHeartbeatAtMs
+			? new Date(lastLocalHeartbeatAtMs).toISOString()
+			: null,
+		localStaleSeconds: config.localStaleSeconds,
+		localBridgeIngestedCount,
 		lastError: null,
 		reconnectCount: 0,
 		ingestedCount: 0,
@@ -745,11 +788,16 @@ let runtimeStatus: Twitter6551RuntimeStatus = {
 	enabled: false,
 	state: "disabled",
 	connected: false,
+	failoverMode: false,
+	activeSource: "disabled",
 	watchUsers: [],
 	targetTweetIds: [],
 	lastConnectedAt: null,
 	lastEventAt: null,
 	lastBackfillAt: null,
+	lastLocalHeartbeatAt: null,
+	localStaleSeconds: DEFAULT_LOCAL_STALE_SECONDS,
+	localBridgeIngestedCount: 0,
 	lastError: null,
 	reconnectCount: 0,
 	ingestedCount: 0,
@@ -797,6 +845,7 @@ export class Twitter6551Worker {
 			...emptyStatus(),
 			enabled: true,
 			state: "starting",
+			activeSource: "6551",
 		};
 		await enqueueDatabaseWrite((db) => {
 			ensureTwitter6551Tables(db);
@@ -868,6 +917,20 @@ export class Twitter6551Worker {
 			for (const tweetId of this.config.targetTweetIds) {
 				const target = await this.client.getTweet(tweetId);
 				batches.push([target]);
+				try {
+					batches.push(
+						await this.client.searchTweets(`conversation_id:${tweetId}`, 100),
+					);
+				} catch (error) {
+					if (
+						!(
+							error instanceof Twitter6551Error &&
+							(error.status === 400 || error.status === 403)
+						)
+					) {
+						throw error;
+					}
+				}
 				try {
 					batches.push(await this.client.getQuoteTweets(tweetId, 100));
 				} catch (error) {
@@ -1235,10 +1298,32 @@ export function getTwitter6551RuntimeStatus() {
 	return { ...runtimeStatus };
 }
 
+function localBridgeIsFresh(
+	config = getTwitter6551RuntimeConfig(),
+	now = Date.now(),
+) {
+	return Boolean(
+		config.failoverMode &&
+		lastLocalHeartbeatAtMs &&
+		now - lastLocalHeartbeatAtMs <= config.localStaleSeconds * 1000,
+	);
+}
+
 export async function startTwitter6551Worker() {
 	const config = getTwitter6551RuntimeConfig();
 	if (!config.enabled) {
 		runtimeStatus = emptyStatus();
+		return null;
+	}
+	if (localBridgeIsFresh(config)) {
+		runtimeStatus = {
+			...runtimeStatus,
+			...emptyStatus(),
+			enabled: true,
+			state: "standby",
+			activeSource: "local",
+			lastError: null,
+		};
 		return null;
 	}
 	if (activeWorker) return activeWorker;
@@ -1265,7 +1350,111 @@ export async function stopTwitter6551Worker() {
 	await worker?.stop();
 }
 
+let failoverTimer: ReturnType<typeof setInterval> | null = null;
+let failoverStartedAtMs = 0;
+let failoverReconcile: Promise<void> | null = null;
+
+function recordTwitter6551FailoverError(error: unknown) {
+	runtimeStatus = {
+		...runtimeStatus,
+		state: "error",
+		connected: false,
+		lastError: errorMessage(error),
+	};
+}
+
+async function reconcileTwitter6551Failover() {
+	if (failoverReconcile) return failoverReconcile;
+	failoverReconcile = (async () => {
+		const config = getTwitter6551RuntimeConfig();
+		if (!config.enabled) {
+			await stopTwitter6551Worker();
+			runtimeStatus = emptyStatus();
+			return;
+		}
+		if (!config.failoverMode) {
+			await startTwitter6551Worker();
+			return;
+		}
+		const now = Date.now();
+		if (localBridgeIsFresh(config, now)) {
+			await stopTwitter6551Worker();
+			runtimeStatus = {
+				...runtimeStatus,
+				enabled: true,
+				state: "standby",
+				connected: false,
+				failoverMode: true,
+				activeSource: "local",
+				lastLocalHeartbeatAt: new Date(lastLocalHeartbeatAtMs).toISOString(),
+				localStaleSeconds: config.localStaleSeconds,
+				localBridgeIngestedCount,
+				lastError: null,
+			};
+			return;
+		}
+		const graceElapsed =
+			now - failoverStartedAtMs >= config.localStaleSeconds * 1000;
+		if (!graceElapsed) {
+			runtimeStatus = {
+				...runtimeStatus,
+				...emptyStatus(),
+				enabled: true,
+				state: "standby",
+				activeSource: "waiting",
+			};
+			return;
+		}
+		await startTwitter6551Worker();
+	})().finally(() => {
+		failoverReconcile = null;
+	});
+	return failoverReconcile;
+}
+
+export async function startTwitter6551WorkerManager() {
+	const config = getTwitter6551RuntimeConfig();
+	if (!config.enabled || !config.failoverMode) {
+		return startTwitter6551Worker();
+	}
+	if (!failoverStartedAtMs) failoverStartedAtMs = Date.now();
+	if (!failoverTimer) {
+		failoverTimer = setInterval(() => {
+			void reconcileTwitter6551Failover().catch(recordTwitter6551FailoverError);
+		}, FAILOVER_CHECK_MS);
+	}
+	await reconcileTwitter6551Failover();
+	return activeWorker;
+}
+
+export async function recordTwitter6551LocalHeartbeat(
+	ingestedEdges = 0,
+	now = new Date(),
+) {
+	lastLocalHeartbeatAtMs = now.getTime();
+	localBridgeIngestedCount += Math.max(0, ingestedEdges);
+	runtimeStatus = {
+		...runtimeStatus,
+		lastLocalHeartbeatAt: now.toISOString(),
+		localBridgeIngestedCount,
+	};
+	await reconcileTwitter6551Failover();
+	return getTwitter6551RuntimeStatus();
+}
+
+export async function stopTwitter6551WorkerManager() {
+	if (failoverTimer) clearInterval(failoverTimer);
+	failoverTimer = null;
+	failoverStartedAtMs = 0;
+	await stopTwitter6551Worker();
+}
+
 export async function runTwitter6551Backfill() {
+	if (localBridgeIsFresh()) {
+		throw new Twitter6551Error(
+			"6551 is standing by while the local BirdClaw bridge is online",
+		);
+	}
 	if (!activeWorker) {
 		const worker = await startTwitter6551Worker();
 		if (!worker) throw new Twitter6551Error("6551 worker is disabled");
