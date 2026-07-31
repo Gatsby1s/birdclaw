@@ -14,6 +14,18 @@ import type { TweetMediaItem } from "#/lib/types";
 import { ndjsonResponse } from "#/test/ndjson";
 import { DiscussRouteView as DiscussRoute } from "./discuss";
 
+function referenceTimestamp(value: string) {
+	const date = new Date(value);
+	return `${date.toLocaleDateString("sv-SE")} ${date.toLocaleTimeString(
+		"sv-SE",
+		{
+			hour: "2-digit",
+			minute: "2-digit",
+			hour12: false,
+		},
+	)}`;
+}
+
 function discussionResult(markdown: string) {
 	return {
 		context: {
@@ -683,8 +695,15 @@ describe("discuss route", () => {
 				).toHaveAttribute("href", "#reference-source-S01");
 				expect(within(referencePdf).getByText("tweet_1")).toBeInTheDocument();
 				expect(
-					within(referencePdf).getAllByText("2026-05-23"),
+					within(referencePdf).getAllByText(
+						referenceTimestamp("2026-05-23T08:18:00.000Z"),
+					),
 				).not.toHaveLength(0);
+				expect(
+					within(referencePdf).getByRole("columnheader", {
+						name: "发帖时间",
+					}),
+				).toBeInTheDocument();
 				expect(within(referencePdf).queryByText(/4 likes|4 赞/)).toBeNull();
 				expect(
 					within(referencePdf).queryByText(
