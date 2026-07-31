@@ -30,7 +30,7 @@ describe("tweet translation", () => {
 		expect(shouldAutoTranslateTweetText("🚀 https://example.com")).toBe(false);
 	});
 
-	it("returns a valid cached translation without calling OpenAI", async () => {
+	it("returns a valid cached translation without calling DeepSeek", async () => {
 		const runtime = createRuntimeServices({ fetch: vi.fn() });
 		const readCache = vi.fn(() => ({
 			value: {
@@ -58,25 +58,29 @@ describe("tweet translation", () => {
 		expect(runtime.fetch).not.toHaveBeenCalled();
 	});
 
-	it("translates with the shared Responses API and caches the result", async () => {
+	it("translates with DeepSeek V4 Flash and caches the result", async () => {
 		const fetchMock = vi.fn().mockResolvedValue(
 			new Response(
 				JSON.stringify({
-					output_text: JSON.stringify({
-						sourceLanguage: "Korean",
-						isChinese: false,
-						translatedText: "今天发布新版本。 @birdclaw #launch",
-					}),
+					choices: [
+						{
+							message: {
+								content: JSON.stringify({
+									sourceLanguage: "Korean",
+									isChinese: false,
+									translatedText: "今天发布新版本。 @birdclaw #launch",
+								}),
+							},
+						},
+					],
 				}),
 				{ status: 200 },
 			),
 		);
 		const runtime = createRuntimeServices({
 			env: (name) => {
-				if (name === "OPENAI_API_KEY") return "test-key";
-				if (name === "BIRDCLAW_TRANSLATION_MODEL") {
-					return "translation-model";
-				}
+				if (name === "DEEPSEEK_API_KEY") return "test-key";
+				if (name === "BIRDCLAW_AI_MODEL") return "gpt-5.6-sol";
 				return undefined;
 			},
 			fetch: fetchMock,
@@ -107,20 +111,71 @@ describe("tweet translation", () => {
 		const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
 		const body = JSON.parse(String(request.body)) as {
 			model: string;
-			reasoning: { effort: string };
-			service_tier: string;
-			input: Array<{ content: string }>;
+			thinking: { type: string };
+			response_format: { type: string };
+			messages: Array<{ content: string }>;
 		};
-		expect(body.model).toBe("translation-model");
-		expect(body.reasoning.effort).toBe("minimal");
-		expect(body.service_tier).toBe("default");
-		expect(body.input[1]?.content).toContain(
+		expect(fetchMock.mock.calls[0]?.[0]).toBe(
+			"https://api.deepseek.com/chat/completions",
+		);
+		expect(body.model).toBe("deepseek-v4-flash");
+		expect(body.thinking.type).toBe("disabled");
+		expect(body.response_format.type).toBe("json_object");
+		expect(body.messages[1]?.content).toContain(
 			"새 버전을 오늘 출시합니다. @birdclaw #launch",
 		);
 		expect(writeCache).toHaveBeenCalledOnce();
 	});
 
-	it("does not call OpenAI for an already-Chinese post", async () => {
+	it("namespaces the cache with a translation-only model override", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					choices: [
+						{
+							message: {
+								content: JSON.stringify({
+									sourceLanguage: "English",
+									isChinese: false,
+									translatedText: "独立模型缓存。",
+								}),
+							},
+						},
+					],
+				}),
+				{ status: 200 },
+			),
+		);
+		const runtime = createRuntimeServices({
+			env: (name) => {
+				if (name === "DEEPSEEK_API_KEY") return "test-key";
+				if (name === "BIRDCLAW_TRANSLATION_MODEL") {
+					return "deepseek-v4-pro";
+				}
+				if (name === "BIRDCLAW_AI_MODEL") return "gpt-5.6-sol";
+				return undefined;
+			},
+			fetch: fetchMock,
+		});
+		const readCacheMock = vi.fn((_key: string) => null);
+
+		await Effect.runPromise(
+			translateTweetTextEffect("Use the dedicated translation model.", {
+				readCache: readCacheMock as unknown as typeof readSyncCache,
+				runtime,
+				writeCache: vi.fn(
+					() => "2026-07-31T00:00:00.000Z",
+				) as unknown as typeof writeSyncCache,
+			}),
+		);
+
+		const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+		const body = JSON.parse(String(request.body)) as { model: string };
+		expect(body.model).toBe("deepseek-v4-pro");
+		expect(readCacheMock.mock.calls[0]?.[0]).toContain(":deepseek-v4-pro:");
+	});
+
+	it("does not call DeepSeek for an already-Chinese post", async () => {
 		const runtime = createRuntimeServices({ fetch: vi.fn() });
 		await expect(
 			Effect.runPromise(
@@ -138,12 +193,15 @@ describe("tweet translation", () => {
 
 	it("rejects malformed model output instead of caching it", async () => {
 		const runtime = createRuntimeServices({
-			env: (name) => (name === "OPENAI_API_KEY" ? "test-key" : undefined),
-			fetch: vi.fn().mockResolvedValue(
-				new Response(JSON.stringify({ output_text: "not json" }), {
-					status: 200,
-				}),
-			),
+			env: (name) => (name === "DEEPSEEK_API_KEY" ? "test-key" : undefined),
+			fetch: vi
+				.fn()
+				.mockResolvedValue(
+					new Response(
+						JSON.stringify({ choices: [{ message: { content: "not json" } }] }),
+						{ status: 200 },
+					),
+				),
 		});
 		const writeCache = vi.fn(
 			() => "2026-07-31T00:00:00.000Z",
@@ -173,17 +231,23 @@ describe("tweet translation", () => {
 			await new Promise((resolve) => setTimeout(resolve, 5));
 			return new Response(
 				JSON.stringify({
-					output_text: JSON.stringify({
-						sourceLanguage: "English",
-						isChinese: false,
-						translatedText: "只应请求一次。",
-					}),
+					choices: [
+						{
+							message: {
+								content: JSON.stringify({
+									sourceLanguage: "English",
+									isChinese: false,
+									translatedText: "只应请求一次。",
+								}),
+							},
+						},
+					],
 				}),
 				{ status: 200 },
 			);
 		});
 		const runtime = createRuntimeServices({
-			env: (name) => (name === "OPENAI_API_KEY" ? "test-key" : undefined),
+			env: (name) => (name === "DEEPSEEK_API_KEY" ? "test-key" : undefined),
 			fetch: fetchMock,
 		});
 
@@ -211,15 +275,21 @@ describe("tweet translation", () => {
 
 	it("returns a successful translation when the local cache write fails", async () => {
 		const runtime = createRuntimeServices({
-			env: (name) => (name === "OPENAI_API_KEY" ? "test-key" : undefined),
+			env: (name) => (name === "DEEPSEEK_API_KEY" ? "test-key" : undefined),
 			fetch: vi.fn().mockResolvedValue(
 				new Response(
 					JSON.stringify({
-						output_text: JSON.stringify({
-							sourceLanguage: "English",
-							isChinese: false,
-							translatedText: "缓存失败也能显示译文。",
-						}),
+						choices: [
+							{
+								message: {
+									content: JSON.stringify({
+										sourceLanguage: "English",
+										isChinese: false,
+										translatedText: "缓存失败也能显示译文。",
+									}),
+								},
+							},
+						],
 					}),
 					{ status: 200 },
 				),
@@ -240,5 +310,22 @@ describe("tweet translation", () => {
 			translated: true,
 			translatedText: "缓存失败也能显示译文。",
 		});
+	});
+
+	it("does not fall back to the global OpenAI credential", async () => {
+		const runtime = createRuntimeServices({
+			env: (name) => (name === "OPENAI_API_KEY" ? "openai-key" : undefined),
+			fetch: vi.fn(),
+		});
+
+		await expect(
+			Effect.runPromise(
+				translateTweetTextEffect("This must use the translation provider.", {
+					readCache: vi.fn(() => null) as unknown as typeof readSyncCache,
+					runtime,
+				}),
+			),
+		).rejects.toThrow("DEEPSEEK_API_KEY is not set");
+		expect(runtime.fetch).not.toHaveBeenCalled();
 	});
 });

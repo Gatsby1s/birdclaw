@@ -2,12 +2,10 @@ import { createHash } from "node:crypto";
 import { Effect } from "effect";
 import { z } from "zod";
 import {
-	createAnalysisRequestBody,
-	extractOpenAIResponseText,
-	resolveAnalysisModelSettings,
-} from "./analysis-runtime";
+	extractDeepSeekChatCompletionText,
+	requestDeepSeekChatCompletionEffect,
+} from "./deepseek-chat-runtime";
 import { tryPromise } from "./effect-runtime";
-import { requestOpenAIResponseEffect } from "./openai-response-runtime";
 import {
 	defaultRuntimeServices,
 	type RuntimeServices,
@@ -17,6 +15,7 @@ import { shouldAutoTranslateTweetText } from "./tweet-language";
 
 const TRANSLATION_CACHE_VERSION = "v1";
 const TARGET_LANGUAGE = "zh-CN" as const;
+const DEFAULT_TRANSLATION_MODEL = "deepseek-v4-flash";
 const MAX_TRANSLATION_INPUT_CHARS = 20_000;
 const MAX_CONCURRENT_TRANSLATIONS = 3;
 let activeTranslations = 0;
@@ -212,15 +211,10 @@ export function translateTweetTextEffect(
 		}
 
 		const runtime = options.runtime ?? defaultRuntimeServices;
-		const settings = resolveAnalysisModelSettings(
-			{
-				model: runtime.env("BIRDCLAW_TRANSLATION_MODEL"),
-				reasoningEffort: "minimal",
-				serviceTier: "default",
-			},
-			runtime,
-		);
-		const resolvedCacheKey = cacheKey(normalizedText, settings.model);
+		const model =
+			runtime.env("BIRDCLAW_TRANSLATION_MODEL")?.trim() ||
+			DEFAULT_TRANSLATION_MODEL;
+		const resolvedCacheKey = cacheKey(normalizedText, model);
 		const readCache = options.readCache ?? readSyncCache;
 		const writeCache = options.writeCache ?? writeSyncCache;
 		const cached = yield* Effect.try({
@@ -258,27 +252,36 @@ export function translateTweetTextEffect(
 			const releaseSlot = yield* tryPromise(() =>
 				acquireTranslationSlot(options.signal),
 			).pipe(Effect.mapError(toError));
-			const response = yield* requestOpenAIResponseEffect({
-				body: createAnalysisRequestBody({
-					settings,
-					system:
-						"You are a faithful translation engine. Return only the requested JSON object.",
-					prompt: translationPrompt(normalizedText),
+			const response = yield* requestDeepSeekChatCompletionEffect({
+				body: {
+					model,
+					messages: [
+						{
+							role: "system",
+							content:
+								"You are a faithful translation engine. Return only the requested JSON object.",
+						},
+						{ role: "user", content: translationPrompt(normalizedText) },
+					],
+					response_format: { type: "json_object" },
+					thinking: { type: "disabled" },
 					stream: false,
-					maxOutputTokens: Math.min(
+					max_tokens: Math.min(
 						4_000,
 						Math.max(256, Math.ceil(normalizedText.length * 1.8)),
 					),
-				}),
+				},
 				signal: options.signal,
 				runtime,
 			}).pipe(Effect.ensuring(Effect.sync(releaseSlot)));
 			const payload = (yield* tryPromise(() => response.json()).pipe(
 				Effect.mapError(toError),
 			)) as Record<string, unknown>;
-			const rawText = extractOpenAIResponseText(payload);
+			const rawText = extractDeepSeekChatCompletionText(payload);
 			if (!rawText) {
-				return yield* Effect.fail(new Error("OpenAI returned no translation"));
+				return yield* Effect.fail(
+					new Error("DeepSeek returned no translation"),
+				);
 			}
 			const translated = yield* Effect.try({
 				try: () => parseModelTranslation(normalizedText, rawText),

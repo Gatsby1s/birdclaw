@@ -26,10 +26,12 @@ BIRDCLAW_6551_FAILOVER_MODE=1
 BIRDCLAW_LOCAL_STALE_SECONDS=180
 BIRDCLAW_LOCAL_BRIDGE_TOKEN=<a separate random bridge token>
 TWITTER_TOKEN=<the 6551 API token>
+DEEPSEEK_API_KEY=<the DeepSeek API key used only for translation>
+BIRDCLAW_TRANSLATION_MODEL=deepseek-v4-flash
 ```
 
-`PORT` is supplied by Railway automatically. Never put either token in Git,
-`config.json`, a Docker image, or logs.
+`PORT` is supplied by Railway automatically. Never put tokens or provider API
+keys in Git, `config.json`, a Docker image, or logs.
 
 Open the Railway domain and sign in through `/login`. BirdClaw stores a signed,
 HttpOnly, Secure, SameSite cookie for 30 days. `/logout` clears it.
