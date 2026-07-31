@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.52 - 2026-07-31
+
+### Added
+
+- Expose the private cloud tweet archive as a read-only remote RAG MCP with ChatGPT-compatible `search` and `fetch` tools, stable source IDs, canonical citation URLs, and archived thread context.
+- Protect the MCP independently from the BirdClaw web login with OAuth discovery, signed JWT verification, scoped access, and an explicit identity allowlist.
+
 ## 0.8.51 - 2026-07-31
 
 ### Fixed

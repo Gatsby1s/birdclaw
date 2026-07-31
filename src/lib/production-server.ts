@@ -27,6 +27,7 @@ import {
 	startLocalTwitterCollector,
 	stopLocalTwitterCollector,
 } from "./local-twitter-collector";
+import { handleRagMcpHttpRequest } from "./rag-mcp-server";
 import {
 	getTwitter6551RuntimeStatus,
 	recordTwitter6551LocalHeartbeat,
@@ -578,6 +579,7 @@ export async function startProductionServer({
 		request.once("aborted", abortRequest);
 		response.once("close", abortClosedResponse);
 		try {
+			if (await handleRagMcpHttpRequest(request, response)) return;
 			if (await handleLocalCloudBridge(request, response)) return;
 			if (await handlePrivateWebGate(request, response)) return;
 			if (await sendStaticFile(request, response, clientDir)) return;

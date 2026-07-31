@@ -49,6 +49,7 @@ Status: WIP. Real and usable. Not done. Expect schema churn, transport gaps, and
 - sender bio and influence context in the DM detail header
 - system / light / dark theme switcher with animated transition
 - private X Remark notes on timeline cards and profiles, with manual JSON import or an optional loopback-only live bridge
+- private cloud RAG access through an OAuth-protected remote MCP, with no Ask UI or hosted answer model
 
 ### Triage + filtering
 

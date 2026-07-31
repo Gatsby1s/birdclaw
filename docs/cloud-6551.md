@@ -70,6 +70,37 @@ without a healthy heartbeat, 6551 takes over. A returning Mac replays the last
 to a particular post. The public REST API also exposes no complete reply cursor,
 so BirdClaw must not describe this feed as a full conversation archive.
 
+## Private RAG MCP
+
+The cloud service also exposes the tweet archive as a read-only Streamable HTTP
+MCP at `/mcp`. It deliberately provides no Ask page or hosted answer model:
+ChatGPT supplies the conversation and reasoning, while BirdClaw supplies two
+retrieval tools:
+
+- `search(query)` returns up to 10 stable tweet document IDs and canonical X
+  source URLs.
+- `fetch(id)` returns the archived tweet plus available parent, quote, and reply
+  context for grounded answers and citations.
+
+Private archive access uses a separate OAuth 2.1 resource-server boundary. Do
+not reuse `BIRDCLAW_WEB_TOKEN` or the local bridge token. Configure an
+established identity provider that supports MCP discovery and client
+registration, then set:
+
+```text
+BIRDCLAW_MCP_ISSUER=https://<identity-provider-issuer>/
+BIRDCLAW_MCP_RESOURCE_URL=https://<railway-domain>/mcp
+BIRDCLAW_MCP_AUDIENCE=https://<railway-domain>/mcp
+BIRDCLAW_MCP_JWKS_URL=https://<identity-provider-issuer>/.well-known/jwks.json
+BIRDCLAW_MCP_SCOPE=birdclaw:read
+BIRDCLAW_MCP_ALLOWED_SUBJECTS=<authorized OAuth subject IDs, comma-separated>
+```
+
+The MCP fails closed until all required authentication settings and at least
+one subject allowlist entry are present. Its protected-resource metadata is at
+`/.well-known/oauth-protected-resource`. Tokens are verified for signature,
+issuer, audience, expiry, scope, and subject on every request.
+
 ## Operations
 
 The anonymous `/healthz` endpoint returns only web/worker health. The Settings
