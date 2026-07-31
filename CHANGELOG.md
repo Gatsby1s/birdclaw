@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 0.8.56 - 2026-08-01
+
+### Added
+
+- Preserve X Remark author labels, personal notes, follow reasons, and categories in cloud RAG search and fetch results, and make annotation text such as `反指` searchable.
+
+### Fixed
+
+- Sync the authoritative X Remark snapshot through the local-cloud bridge so old posts and thread context retain author judgment context, while explicitly marking authors without annotations.
+
 ## 0.8.55 - 2026-08-01
 
 ### Added
