@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 0.8.55 - 2026-08-01
+
+### Added
+
+- Generate a saved Today digest for the previous local calendar day at midnight, recover bounded gaps after sleep or restart, and browse those reports from the new desktop right rail or mobile history drawer without spending model tokens again.
+- Download each saved daily digest as a private PDF attachment generated from its persisted snapshot with an isolated browser profile and content-aware cache invalidation.
+- Configure a primary and backup summary model in Settings, defaulting to ChatGPT `gpt-5.5` with DeepSeek `deepseek-v4-flash` failover, while storing the DeepSeek credential only in the Mac's private BirdClaw config.
+
+### Fixed
+
+- Fence concurrent daily workers, reclaim interrupted runs, retry each missed date independently, redact provider credentials from persisted errors and audit logs, and preserve daily history through backup export and restore.
+
 ## 0.8.54 - 2026-08-01
 
 ### Changed
