@@ -12,6 +12,7 @@ import {
 	getSummaryModelConfig,
 	type SummaryModelProvider,
 } from "./config";
+import { requestDeepSeekChatCompletionEffect } from "./deepseek-chat-runtime";
 import { tryPromise } from "./effect-runtime";
 import {
 	redactProviderError,
@@ -149,18 +150,23 @@ function requestTargetEffect(
 			),
 		);
 	}
+	if (target.provider === "deepseek") {
+		return requestDeepSeekChatCompletionEffect({
+			body: deepSeekRequestBody(body, target.model),
+			signal,
+			runtime,
+			apiKey: target.apiKey,
+			baseUrl: target.baseUrl,
+		});
+	}
 	return requestOpenAIResponseEffect({
-		body:
-			target.provider === "deepseek"
-				? deepSeekRequestBody(body, target.model)
-				: { ...body, model: target.model },
+		body: { ...body, model: target.model },
 		signal,
 		runtime,
 		apiKey: target.apiKey,
 		baseUrl: target.baseUrl,
-		path:
-			target.provider === "deepseek" ? "/chat/completions" : "/v1/responses",
-		providerLabel: target.provider === "deepseek" ? "DeepSeek" : "OpenAI",
+		path: "/v1/responses",
+		providerLabel: "OpenAI",
 	});
 }
 

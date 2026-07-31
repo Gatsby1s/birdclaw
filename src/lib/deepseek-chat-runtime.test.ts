@@ -76,6 +76,34 @@ describe("DeepSeek chat runtime", () => {
 		);
 	});
 
+	it("accepts a private local-config credential through the shared transport", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(new Response("{}", { status: 200 }));
+		const runtime = createRuntimeServices({
+			env: () => undefined,
+			fetch: fetchMock,
+		});
+
+		await Effect.runPromise(
+			requestDeepSeekChatCompletionEffect({
+				body: { model: "deepseek-v4-flash" },
+				runtime,
+				apiKey: "local-config-key",
+				baseUrl: "https://configured.example.test",
+			}),
+		);
+
+		expect(fetchMock).toHaveBeenCalledWith(
+			"https://configured.example.test/chat/completions",
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					authorization: "Bearer local-config-key",
+				}),
+			}),
+		);
+	});
+
 	it("retries transient errors and redacts secrets from the final error", async () => {
 		const fetchMock = vi
 			.fn()

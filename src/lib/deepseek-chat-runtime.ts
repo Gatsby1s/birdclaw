@@ -1,5 +1,7 @@
 import { Effect } from "effect";
+import { getDeepSeekApiKey, getSummaryModelConfig } from "./config";
 import { tryPromise } from "./effect-runtime";
+import { redactProviderError } from "./openai-response-runtime";
 import {
 	defaultRuntimeServices,
 	type RuntimeServices,
@@ -102,12 +104,7 @@ function shouldRetryDeepSeekResponse(response: Response) {
 	);
 }
 
-export function redactDeepSeekError(text: string) {
-	return text.replace(/\bsk-[A-Za-z0-9_-]+\b/g, (key) => {
-		if (key.length <= 12) return "sk-...";
-		return `${key.slice(0, 7)}...${key.slice(-4)}`;
-	});
-}
+export const redactDeepSeekError = redactProviderError;
 
 function deepSeekErrorDetail(text: string) {
 	let detail = text.trim();
@@ -145,6 +142,8 @@ export function requestDeepSeekChatCompletionEffect({
 	body,
 	signal,
 	runtime = defaultRuntimeServices,
+	apiKey: apiKeyOverride,
+	baseUrl: baseUrlOverride,
 	maxRetries = DEFAULT_DEEPSEEK_MAX_RETRIES,
 	retryBaseDelayMs = DEFAULT_DEEPSEEK_RETRY_BASE_DELAY_MS,
 	retryMaxDelayMs = DEFAULT_DEEPSEEK_RETRY_MAX_DELAY_MS,
@@ -152,16 +151,26 @@ export function requestDeepSeekChatCompletionEffect({
 	body: unknown;
 	signal?: AbortSignal;
 	runtime?: RuntimeServices;
+	apiKey?: string;
+	baseUrl?: string;
 	maxRetries?: number;
 	retryBaseDelayMs?: number;
 	retryMaxDelayMs?: number;
 }): Effect.Effect<Response, Error> {
 	return Effect.gen(function* () {
-		const apiKey = runtime.env("DEEPSEEK_API_KEY");
+		const useLocalConfig = runtime === defaultRuntimeServices;
+		const apiKey =
+			apiKeyOverride?.trim() ||
+			runtime.env("DEEPSEEK_API_KEY")?.trim() ||
+			(useLocalConfig ? getDeepSeekApiKey() : undefined);
 		if (!apiKey) {
 			return yield* Effect.fail(new Error("DEEPSEEK_API_KEY is not set"));
 		}
-		const url = resolveDeepSeekUrl(runtime.env("DEEPSEEK_BASE_URL"));
+		const url = resolveDeepSeekUrl(
+			baseUrlOverride?.trim() ||
+				runtime.env("DEEPSEEK_BASE_URL")?.trim() ||
+				(useLocalConfig ? getSummaryModelConfig().deepseek.baseUrl : undefined),
+		);
 		const retryCount = Math.max(0, Math.floor(maxRetries));
 		for (let attempt = 0; ; attempt += 1) {
 			const response = yield* tryPromise(() =>
