@@ -18,9 +18,13 @@ BIRDCLAW_ALLOW_REMOTE_WEB=1
 BIRDCLAW_WEB_TOKEN=<a unique web login passphrase>
 BIRDCLAW_DISABLE_LIVE_WRITES=1
 BIRDCLAW_6551_ENABLED=1
+BIRDCLAW_6551_ACCOUNT_ID=acct_primary
 BIRDCLAW_6551_WATCH_USERS=TingHu888
 BIRDCLAW_6551_TARGET_TWEETS=2082353480547660173
 BIRDCLAW_6551_BACKFILL_MINUTES=120
+BIRDCLAW_6551_FAILOVER_MODE=1
+BIRDCLAW_LOCAL_STALE_SECONDS=180
+BIRDCLAW_LOCAL_BRIDGE_TOKEN=<a separate random bridge token>
 TWITTER_TOKEN=<the 6551 API token>
 ```
 
@@ -30,13 +34,35 @@ TWITTER_TOKEN=<the 6551 API token>
 Open the Railway domain and sign in through `/login`. BirdClaw stores a signed,
 HttpOnly, Secure, SameSite cookie for 30 days. `/logout` clears it.
 
+On the Mac, set the matching bridge destination and token:
+
+```text
+BIRDCLAW_CLOUD_BRIDGE_URL=https://<railway-domain>
+BIRDCLAW_CLOUD_BRIDGE_TOKEN=<the same random bridge token>
+BIRDCLAW_CLOUD_BRIDGE_INTERVAL_SECONDS=60
+BIRDCLAW_CLOUD_BRIDGE_LOOKBACK_HOURS=24
+BIRDCLAW_LOCAL_COLLECTOR_ENABLED=1
+BIRDCLAW_LOCAL_COLLECTOR_WATCH_USERS=TingHu888
+BIRDCLAW_LOCAL_COLLECTOR_TARGET_TWEETS=2082353480547660173
+BIRDCLAW_LOCAL_COLLECTOR_INTERVAL_SECONDS=120
+```
+
+While the Mac is online, its BirdClaw server refreshes the watched account,
+target thread, and quote tweets through the local `bird` session. Only after a
+successful local collection does it upload normalized timeline increments and
+a heartbeat. The cloud process then keeps 6551 on standby. After 180 seconds
+without a healthy heartbeat, 6551 takes over. A returning Mac replays the last
+24 hours idempotently before the cloud process returns 6551 to standby.
+
 ## Recovery behavior
 
+- Local and 6551 writes share tweet IDs, so handoff overlap is deduplicated.
 - WebSocket events are written to `twitter6551_events` before processing.
 - Duplicate events and tweets are idempotent.
 - BirdClaw fetches the latest 100 tweets for each watched account every 120
   minutes and after reconnecting.
-- Target posts and their quote tweets are also refreshed.
+- Target posts, best-effort conversation search results, and quote tweets are
+  also refreshed.
 - If the current 6551 plan does not allow Watch/WebSocket, REST recovery
   polling continues and Settings reports a degraded state.
 

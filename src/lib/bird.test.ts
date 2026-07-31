@@ -1027,6 +1027,41 @@ describe("bird transport wrapper", () => {
 		});
 	});
 
+	it("lists watched user tweets for the local cloud collector", async () => {
+		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
+		mockBirdStdoutOnce(
+			JSON.stringify([
+				{
+					id: "watched_1",
+					text: "watched locally",
+					createdAt: "2026-07-31T08:00:00.000Z",
+					authorId: "42",
+					author: { username: "example", name: "Example" },
+				},
+			]),
+		);
+		const { listUserTweetsViaBird } = await import("./bird");
+
+		await expect(
+			listUserTweetsViaBird({
+				username: "@example",
+				maxResults: 100,
+				maxPages: 3,
+			}),
+		).resolves.toMatchObject({
+			data: [{ id: "watched_1", author_id: "42" }],
+		});
+		expectBirdCommandCall(1, [
+			"user-tweets",
+			"example",
+			"-n",
+			"100",
+			"--max-pages",
+			"3",
+			"--json",
+		]);
+	});
+
 	it("looks up tweets by id through bird read", async () => {
 		process.env.BIRDCLAW_BIRD_COMMAND = "/tmp/bird";
 		mockBirdStdoutOnce(

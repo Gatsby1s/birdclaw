@@ -7,6 +7,8 @@ import {
 	normalizeTwitter6551User,
 	Twitter6551Client,
 	getTwitter6551RuntimeStatus,
+	recordTwitter6551LocalHeartbeat,
+	stopTwitter6551WorkerManager,
 	Twitter6551Worker,
 	twitter6551TweetsToPayload,
 } from "./twitter-6551";
@@ -81,6 +83,26 @@ describe("6551 Twitter adapter", () => {
 				userScreenName: "Example",
 			}),
 		).toBeNull();
+	});
+
+	it("keeps 6551 on standby after a healthy local bridge heartbeat", async () => {
+		process.env.BIRDCLAW_6551_ENABLED = "1";
+		process.env.BIRDCLAW_6551_FAILOVER_MODE = "1";
+		process.env.BIRDCLAW_6551_WATCH_USERS = "example";
+		process.env.BIRDCLAW_LOCAL_STALE_SECONDS = "180";
+		process.env.TWITTER_TOKEN = "secret-token";
+		const now = new Date();
+
+		await recordTwitter6551LocalHeartbeat(3, now);
+
+		expect(getTwitter6551RuntimeStatus()).toMatchObject({
+			enabled: true,
+			state: "standby",
+			activeSource: "local",
+			lastLocalHeartbeatAt: now.toISOString(),
+			localBridgeIngestedCount: 3,
+		});
+		await stopTwitter6551WorkerManager();
 	});
 
 	it("ingests idempotently into profiles, tweets, FTS, and the home timeline", () => {
@@ -219,6 +241,43 @@ describe("6551 Twitter adapter", () => {
 		);
 	});
 
+	it("uses latest search for best-effort target conversation recovery", async () => {
+		const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					success: true,
+					data: [
+						{
+							id: "reply_1",
+							text: "target reply",
+							createdAt: "2026-07-31T08:00:00.000Z",
+							userIdStr: "42",
+							userScreenName: "example",
+							userName: "Example",
+							conversationId: "target_1",
+						},
+					],
+				}),
+				{ status: 200 },
+			),
+		);
+		const client = new Twitter6551Client({
+			token: "secret-token",
+			fetchImpl,
+		});
+
+		await expect(
+			client.searchTweets("conversation_id:target_1", 100),
+		).resolves.toMatchObject([{ id: "reply_1", conversationId: "target_1" }]);
+		expect(
+			JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)),
+		).toMatchObject({
+			keywords: "conversation_id:target_1",
+			product: "Latest",
+			excludeRetweets: true,
+		});
+	});
+
 	it("refuses custom hosts before a token can be transmitted", () => {
 		expect(
 			() =>
@@ -244,6 +303,8 @@ describe("6551 Twitter adapter", () => {
 				watchUsers: ["example"],
 				targetTweetIds: [],
 				backfillMinutes: 120,
+				failoverMode: false,
+				localStaleSeconds: 180,
 			},
 			client as never,
 		);
@@ -272,6 +333,8 @@ describe("6551 Twitter adapter", () => {
 			watchUsers: ["example"],
 			targetTweetIds: [],
 			backfillMinutes: 120,
+			failoverMode: false,
+			localStaleSeconds: 180,
 		});
 		const close = vi.fn();
 		(
@@ -312,6 +375,8 @@ describe("6551 Twitter adapter", () => {
 			watchUsers: ["allowed"],
 			targetTweetIds: [],
 			backfillMinutes: 120,
+			failoverMode: false,
+			localStaleSeconds: 180,
 		});
 		const persist = (
 			worker as unknown as {

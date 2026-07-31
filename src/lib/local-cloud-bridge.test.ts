@@ -1,0 +1,350 @@
+// @vitest-environment node
+import { describe, expect, it, vi } from "vitest";
+import {
+	insertTestAccount,
+	insertTestProfile,
+	insertTestTweet,
+	useTestHome,
+} from "../test/test-home";
+import {
+	buildLocalCloudBridgeBatch,
+	importLocalCloudBridgeBatch,
+	LocalCloudBridgeClient,
+	verifyLocalCloudBridgeToken,
+} from "./local-cloud-bridge";
+
+describe("local cloud bridge", () => {
+	const getHome = useTestHome({ prefix: "birdclaw-local-cloud-bridge-" });
+
+	it("copies timeline rows idempotently into the cloud database", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		insertTestTweet(home.db, {
+			text: "local bridge tweet",
+			mediaJson: '[{"type":"photo","url":"https://example.com/photo.jpg"}]',
+		});
+		home.db
+			.prepare(
+				`
+				insert into tweet_account_edges (
+					account_id, tweet_id, kind, first_seen_at, last_seen_at,
+					seen_count, source, raw_json, updated_at
+				) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`,
+			)
+			.run(
+				"account:test",
+				"tweet:test",
+				"home",
+				"2026-07-31T08:00:00.000Z",
+				"2026-07-31T08:00:00.000Z",
+				1,
+				"bird",
+				'{"id":"tweet:test"}',
+				"2026-07-31T08:00:00.000Z",
+			);
+
+		const batch = buildLocalCloudBridgeBatch({
+			cursor: {
+				updatedAt: "2026-07-31T07:59:00.000Z",
+				accountId: "",
+				tweetId: "",
+				kind: "",
+			},
+			now: new Date("2026-07-31T08:01:00.000Z"),
+			db: home.db,
+		});
+		expect(batch.edges).toHaveLength(1);
+		expect(batch.tweets[0]).toMatchObject({
+			id: "tweet:test",
+			text: "local bridge tweet",
+		});
+		expect(batch.profiles[0]).toMatchObject({ id: "profile:test" });
+
+		home.switchHome();
+		await importLocalCloudBridgeBatch(batch);
+		await importLocalCloudBridgeBatch(batch);
+
+		expect(
+			home.db.prepare("select count(*) as count from tweets").get(),
+		).toEqual({ count: 1 });
+		expect(
+			home.db
+				.prepare(
+					"select seen_count, source from tweet_account_edges where tweet_id = ?",
+				)
+				.get("tweet:test"),
+		).toEqual({ seen_count: 1, source: "bird" });
+		expect(
+			home.db
+				.prepare("select count(*) as count from tweets_fts where tweet_id = ?")
+				.get("tweet:test"),
+		).toEqual({ count: 1 });
+	});
+
+	it("does not send a heartbeat until local collection is healthy", async () => {
+		const fetchImpl = vi.fn();
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			fetchImpl,
+			isReady: () => false,
+		});
+
+		await client.runOnce();
+
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(client.getStatus().lastError).toContain("not fresh");
+	});
+
+	it("uses one canonical account and merges profiles by handle", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		insertTestTweet(home.db);
+		home.db
+			.prepare(
+				`
+				insert into tweet_account_edges (
+					account_id, tweet_id, kind, first_seen_at, last_seen_at,
+					seen_count, source, raw_json, updated_at
+				) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`,
+			)
+			.run(
+				"account:test",
+				"tweet:test",
+				"home",
+				"2026-07-31T08:00:00.000Z",
+				"2026-07-31T08:00:00.000Z",
+				1,
+				"bird",
+				"{}",
+				"2026-07-31T08:00:00.000Z",
+			);
+		const batch = buildLocalCloudBridgeBatch({
+			cursor: {
+				updatedAt: "2026-07-31T07:59:00.000Z",
+				accountId: "",
+				tweetId: "",
+				kind: "",
+			},
+			db: home.db,
+		});
+
+		home.switchHome();
+		process.env.BIRDCLAW_6551_FAILOVER_MODE = "1";
+		process.env.BIRDCLAW_6551_ACCOUNT_ID = "acct_primary";
+		insertTestAccount(home.db, {
+			id: "acct_6551",
+			name: "Legacy 6551",
+			handle: "@6551_watch",
+			transport: "twitter6551",
+			isDefault: 1,
+		});
+		insertTestProfile(home.db, {
+			id: "profile:canonical",
+			handle: "TEST",
+		});
+		home.db
+			.prepare(
+				`
+				insert into tweet_account_edges (
+					account_id, tweet_id, kind, first_seen_at, last_seen_at,
+					seen_count, source, raw_json, updated_at
+				) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`,
+			)
+			.run(
+				"acct_6551",
+				"tweet:test",
+				"home",
+				"2026-07-31T07:00:00.000Z",
+				"2026-07-31T07:00:00.000Z",
+				1,
+				"twitter6551",
+				"{}",
+				"2026-07-31T07:00:00.000Z",
+			);
+		home.db
+			.prepare(
+				`
+				insert into local_tweet_bookmarks (
+					account_id, tweet_id, is_bookmarked, created_at, updated_at
+				) values (?, ?, 1, ?, ?)
+				`,
+			)
+			.run(
+				"acct_6551",
+				"tweet:test",
+				"2026-07-31T07:10:00.000Z",
+				"2026-07-31T07:10:00.000Z",
+			);
+		home.db
+			.prepare(
+				`
+				insert into tweet_collections (
+					account_id, tweet_id, kind, collected_at, source, raw_json,
+					updated_at
+				) values (?, ?, 'bookmarks', ?, 'twitter6551', '{}', ?)
+				`,
+			)
+			.run(
+				"acct_6551",
+				"tweet:test",
+				"2026-07-31T07:10:00.000Z",
+				"2026-07-31T07:10:00.000Z",
+			);
+
+		await importLocalCloudBridgeBatch(batch);
+
+		expect(
+			home.db
+				.prepare(
+					"select account_id as accountId from tweet_account_edges where tweet_id = ?",
+				)
+				.all("tweet:test"),
+		).toEqual([{ accountId: "acct_primary" }]);
+		expect(
+			home.db
+				.prepare(
+					"select author_profile_id as authorProfileId from tweets where id = ?",
+				)
+				.get("tweet:test"),
+		).toEqual({ authorProfileId: "profile:canonical" });
+		expect(
+			home.db
+				.prepare(
+					"select count(*) as count from profiles where lower(handle) = 'test'",
+				)
+				.get(),
+		).toEqual({ count: 1 });
+		expect(
+			home.db
+				.prepare("select count(*) as count from accounts where id = ?")
+				.get("acct_6551"),
+		).toEqual({ count: 0 });
+		expect(
+			home.db
+				.prepare(
+					"select account_id as accountId, is_bookmarked as isBookmarked from local_tweet_bookmarks",
+				)
+				.all(),
+		).toEqual([{ accountId: "acct_primary", isBookmarked: 1 }]);
+		expect(
+			home.db
+				.prepare("select account_id as accountId, kind from tweet_collections")
+				.all(),
+		).toEqual([{ accountId: "acct_primary", kind: "bookmarks" }]);
+	});
+
+	it("uploads only the configured local collector account", () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestAccount(home.db, {
+			id: "account:other",
+			handle: "@other",
+			isDefault: 0,
+		});
+		insertTestProfile(home.db);
+		insertTestTweet(home.db, { id: "tweet:one" });
+		insertTestTweet(home.db, { id: "tweet:two" });
+		const insertEdge = home.db.prepare(
+			`
+			insert into tweet_account_edges (
+				account_id, tweet_id, kind, first_seen_at, last_seen_at,
+				seen_count, source, raw_json, updated_at
+			) values (?, ?, 'home', ?, ?, 1, 'bird', '{}', ?)
+			`,
+		);
+		insertEdge.run(
+			"account:test",
+			"tweet:one",
+			"2026-07-31T08:00:00.000Z",
+			"2026-07-31T08:00:00.000Z",
+			"2026-07-31T08:00:00.000Z",
+		);
+		insertEdge.run(
+			"account:other",
+			"tweet:two",
+			"2026-07-31T08:01:00.000Z",
+			"2026-07-31T08:01:00.000Z",
+			"2026-07-31T08:01:00.000Z",
+		);
+
+		const batch = buildLocalCloudBridgeBatch({
+			accountId: "account:test",
+			cursor: {
+				updatedAt: "2026-07-31T07:59:00.000Z",
+				accountId: "",
+				tweetId: "",
+				kind: "",
+			},
+			db: home.db,
+		});
+
+		expect(batch.edges.map((edge) => edge.accountId)).toEqual(["account:test"]);
+		expect(batch.tweets.map((tweet) => tweet.id)).toEqual(["tweet:one"]);
+	});
+
+	it("marks only the final backlog page as caught up", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		insertTestTweet(home.db, { id: "tweet:one" });
+		insertTestTweet(home.db, { id: "tweet:two" });
+		const insertEdge = home.db.prepare(
+			`
+			insert into tweet_account_edges (
+				account_id, tweet_id, kind, first_seen_at, last_seen_at,
+				seen_count, source, raw_json, updated_at
+			) values (?, ?, 'home', ?, ?, 1, 'bird', '{}', ?)
+			`,
+		);
+		insertEdge.run(
+			"account:test",
+			"tweet:one",
+			"2026-07-31T08:00:00.000Z",
+			"2026-07-31T08:00:00.000Z",
+			"2026-07-31T08:00:00.000Z",
+		);
+		insertEdge.run(
+			"account:test",
+			"tweet:two",
+			"2026-07-31T08:01:00.000Z",
+			"2026-07-31T08:01:00.000Z",
+			"2026-07-31T08:01:00.000Z",
+		);
+		const sentBatches: Array<{ caughtUp: boolean; edges: unknown[] }> = [];
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			batchSize: 1,
+			now: () => new Date("2026-07-31T09:00:00.000Z"),
+			fetchImpl: vi.fn(async (_url, init) => {
+				sentBatches.push(JSON.parse(String(init?.body)));
+				return Response.json({ ok: true });
+			}),
+		});
+
+		await client.runOnce();
+
+		expect(sentBatches.map((batch) => batch.caughtUp)).toEqual([
+			false,
+			false,
+			true,
+		]);
+		expect(sentBatches.map((batch) => batch.edges.length)).toEqual([1, 1, 0]);
+		expect(client.getStatus()).toMatchObject({
+			lastError: null,
+			uploadedEdges: 2,
+		});
+	});
+
+	it("authenticates the bridge with a dedicated constant-time token", () => {
+		process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN = "bridge-secret";
+		expect(verifyLocalCloudBridgeToken("bridge-secret")).toBe(true);
+		expect(verifyLocalCloudBridgeToken("wrong-secret")).toBe(false);
+	});
+});

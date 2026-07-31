@@ -442,11 +442,19 @@ function SettingsRoute() {
 									{twitter6551?.baseUrl} · {twitter6551?.tokenEnv}
 								</p>
 								<p className="mt-1 text-[13px] text-[var(--ink-soft)]">
-									{twitter6551Runtime?.state ?? "disabled"} ·{" "}
+									{twitter6551Runtime?.activeSource ?? "disabled"} ·{" "}
 									{String(twitter6551?.watchUsers.length ?? 0)} watched accounts
 									· {String(twitter6551?.targetTweetIds.length ?? 0)} pinned
 									posts
 								</p>
+								{twitter6551Runtime?.lastLocalHeartbeatAt ? (
+									<p className="mt-1 text-[12px] text-[var(--ink-soft)]">
+										Last local heartbeat:{" "}
+										{new Date(
+											twitter6551Runtime.lastLocalHeartbeatAt,
+										).toLocaleString()}
+									</p>
+								) : null}
 								{twitter6551Runtime?.lastBackfillAt ? (
 									<p className="mt-1 text-[12px] text-[var(--ink-soft)]">
 										Last recovery sync:{" "}
@@ -465,26 +473,30 @@ function SettingsRoute() {
 								<span
 									className={cx(
 										"inline-flex min-h-8 w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-bold",
-										twitter6551Runtime?.connected
+										twitter6551Runtime?.connected ||
+											twitter6551Runtime?.activeSource === "local"
 											? "border-[color:color-mix(in_srgb,#22c55e_45%,var(--line))] text-[var(--ink)]"
 											: "border-[var(--line)] text-[var(--ink-soft)]",
 									)}
 								>
 									<CheckCircle2 className="size-4" strokeWidth={2} />
-									{twitter6551Runtime?.connected
-										? "Live"
-										: !twitter6551?.tokenDetected
-											? "No token"
-											: !twitter6551Runtime?.enabled
-												? "Disabled"
-												: twitter6551Runtime.state === "error"
-													? "Error"
-													: "Recovery polling"}
+									{twitter6551Runtime?.activeSource === "local"
+										? "Local · 6551 standby"
+										: twitter6551Runtime?.connected
+											? "Live"
+											: !twitter6551?.tokenDetected
+												? "No token"
+												: !twitter6551Runtime?.enabled
+													? "Disabled"
+													: twitter6551Runtime.state === "error"
+														? "Error"
+														: "Recovery polling"}
 								</span>
 								<button
 									className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1 text-[13px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)] disabled:opacity-55"
 									disabled={
 										!twitter6551Runtime?.enabled ||
+										twitter6551Runtime?.activeSource === "local" ||
 										twitter6551Mutation.isPending
 									}
 									onClick={() => twitter6551Mutation.mutate()}
