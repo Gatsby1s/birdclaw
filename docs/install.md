@@ -100,6 +100,14 @@ export OPENAI_API_KEY="sk-..."
 
 Add it to `~/.profile` or your shell rc to persist. The inbox uses OpenAI for low-signal scoring; without the key, `inbox --score` is a no-op and the heuristic ranker still works.
 
+## Optional: DeepSeek translation
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+```
+
+BirdClaw uses the dedicated DeepSeek Chat Completions API and `deepseek-v4-flash` for automatic tweet translation. `BIRDCLAW_TRANSLATION_MODEL` and `DEEPSEEK_BASE_URL` are optional translation-only overrides; they do not change the OpenAI model used by digests, discussions, profile analysis, or inbox scoring.
+
 ## Updating
 
 - **Homebrew:** `brew upgrade birdclaw`.
