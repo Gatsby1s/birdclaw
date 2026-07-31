@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.54 - 2026-08-01
+
+### Changed
+
+- Route automatic tweet translation through the dedicated DeepSeek API with `deepseek-v4-flash`, while leaving Today, Discuss, profile analysis, inbox scoring, and all other OpenAI model settings unchanged.
+
 ## 0.8.53 - 2026-08-01
 
 ### Fixed
