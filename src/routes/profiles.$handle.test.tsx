@@ -193,23 +193,23 @@ describe("profile route", () => {
 		).toHaveAttribute("href", "https://huggingface.co/NousResearch");
 		expect(screen.getByRole("link", { name: "@openclaw" })).toHaveAttribute(
 			"href",
-			"/profiles/openclaw",
+			"/authors/openclaw",
 		);
 		expect(screen.getByRole("link", { name: "@forbes" })).toHaveAttribute(
 			"href",
-			"/profiles/forbes",
+			"/authors/forbes",
 		);
 		expect(screen.getByRole("link", { name: "@MIT" })).toHaveAttribute(
 			"href",
-			"/profiles/MIT",
+			"/authors/MIT",
 		);
 		expect(screen.getByRole("link", { name: "@Microsoft" })).toHaveAttribute(
 			"href",
-			"/profiles/Microsoft",
+			"/authors/Microsoft",
 		);
 		expect(screen.getByRole("link", { name: "@Qantas" })).toHaveAttribute(
 			"href",
-			"/profiles/Qantas",
+			"/authors/Qantas",
 		);
 		for (const [handle, bio] of [
 			["@openclaw", "Agent tooling."],

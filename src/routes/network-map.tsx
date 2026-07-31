@@ -537,7 +537,7 @@ function ProfileRow({ feature }: { feature: MapFeature }) {
 	return (
 		<a
 			className="flex min-w-0 gap-3 border-b border-[var(--line)] px-4 py-3 transition-colors hover:bg-[var(--bg-hover)]"
-			href={`/profiles/${encodeURIComponent(feature.properties.handle)}`}
+			href={`/authors/${encodeURIComponent(feature.properties.handle)}`}
 		>
 			<Avatar feature={feature} size={40} className="ring-[var(--bg)]" />
 			<div className="min-w-0 flex-1">

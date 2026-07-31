@@ -34,6 +34,7 @@ describe("ProfilePreview", () => {
 		);
 
 		const link = screen.getByRole("link", { name: "@amelia" });
+		expect(link).toHaveAttribute("href", "/authors/amelia");
 		const wrapper = link.parentElement as HTMLElement;
 		act(() => link.focus());
 		expect(screen.getByRole("group")).toHaveTextContent("Design systems");

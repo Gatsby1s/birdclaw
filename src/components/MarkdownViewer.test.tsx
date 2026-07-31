@@ -571,9 +571,9 @@ describe("MarkdownViewer", () => {
 		);
 
 		const openAiLink = screen.getByRole("link", { name: "@OpenAI" });
-		expect(openAiLink).toHaveAttribute("href", "/profiles/OpenAI");
+		expect(openAiLink).toHaveAttribute("href", "/authors/OpenAI");
 		const openClawLink = screen.getByRole("link", { name: "@openclaw" });
-		expect(openClawLink).toHaveAttribute("href", "/profiles/openclaw");
+		expect(openClawLink).toHaveAttribute("href", "/authors/openclaw");
 		fireEvent.pointerEnter(openAiLink.parentElement as Element);
 		expect(screen.getByText("AI research and products.")).toBeInTheDocument();
 		fireEvent.pointerEnter(openClawLink.parentElement as Element);
