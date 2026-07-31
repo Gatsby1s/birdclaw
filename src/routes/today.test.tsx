@@ -30,6 +30,18 @@ const hydratedAuthorProfile = {
 	avatarUrl: "https://pbs.twimg.com/profile_images/alice/avatar.jpg",
 };
 
+function referenceTimestamp(value: string) {
+	const date = new Date(value);
+	return `${date.toLocaleDateString("sv-SE")} ${date.toLocaleTimeString(
+		"sv-SE",
+		{
+			hour: "2-digit",
+			minute: "2-digit",
+			hour12: false,
+		},
+	)}`;
+}
+
 function digestResult(label: string, markdown: string, includeDms = false) {
 	return {
 		context: {
@@ -624,8 +636,20 @@ describe("today route", () => {
 				).toHaveAttribute("href", "#reference-source-S01");
 				expect(within(referencePdf).getByText("tweet_1")).toBeInTheDocument();
 				expect(
-					within(referencePdf).getAllByText("2026-05-16"),
+					within(referencePdf).getAllByText(
+						referenceTimestamp("2026-05-16T10:00:00.000Z"),
+					),
 				).not.toHaveLength(0);
+				expect(referenceText).toContain(
+					`回复上下文：@bob · ${referenceTimestamp(
+						"2026-05-16T09:42:00.000Z",
+					)}`,
+				);
+				expect(
+					within(referencePdf).getByRole("columnheader", {
+						name: "发帖时间",
+					}),
+				).toBeInTheDocument();
 				expect(within(referencePdf).queryByText(/12 likes|12 赞/)).toBeNull();
 				expect(
 					within(referencePdf).queryByText(
@@ -679,6 +703,16 @@ describe("today route", () => {
 				const result = digestResult("Today", markdown);
 				result.digest.summary =
 					"Structured summary must not replace the webpage.";
+				Object.assign(result.context.tweets[0]!, {
+					replyToTweet: {
+						id: "tweet_parent",
+						url: "https://x.com/bob/status/tweet_parent",
+						author: "bob",
+						name: "Bob",
+						createdAt: "2026-05-16T09:42:00.000Z",
+						text: "Parent tweet context.",
+					},
+				});
 				result.context.tweets[0]!.media = [
 					{
 						url: "https://pbs.twimg.com/media/one.jpg",

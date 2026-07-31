@@ -525,6 +525,19 @@ function formatReferenceDate(value: string) {
 	return parsed.toLocaleDateString("sv-SE");
 }
 
+function formatReferenceTimestamp(value: string) {
+	const parsed = new Date(value);
+	if (Number.isNaN(parsed.getTime())) return "";
+	return `${parsed.toLocaleDateString("sv-SE")} ${parsed.toLocaleTimeString(
+		"sv-SE",
+		{
+			hour: "2-digit",
+			minute: "2-digit",
+			hour12: false,
+		},
+	)}`;
+}
+
 function ReferenceTweetCard({
 	anchorId,
 	includeMedia,
@@ -558,7 +571,7 @@ function ReferenceTweetCard({
 				</strong>
 				{tweet.createdAt ? (
 					<time dateTime={tweet.createdAt}>
-						{formatReferenceDate(tweet.createdAt)}
+						{formatReferenceTimestamp(tweet.createdAt)}
 					</time>
 				) : null}
 			</div>
@@ -572,7 +585,7 @@ function ReferenceTweetCard({
 						回复上下文：@
 						{tweet.replyToTweet.author}
 						{tweet.replyToTweet.createdAt
-							? ` · ${formatReferenceDate(tweet.replyToTweet.createdAt)}`
+							? ` · ${formatReferenceTimestamp(tweet.replyToTweet.createdAt)}`
 							: ""}
 					</strong>
 					<span>{tweet.replyToTweet.text}</span>
@@ -678,7 +691,7 @@ function ReferenceDigestPrint({
 							<th>作者信息</th>
 							<td>
 								每条原文突出显示作者昵称与账号
-								ID，只保留发帖日期，不显示点赞量和原文链接。
+								ID，保留精确到分钟的发帖时间，不显示点赞量和原文链接。
 							</td>
 						</tr>
 					</tbody>
@@ -832,7 +845,7 @@ function ReferenceDigestPrint({
 					<h2>来源索引</h2>
 					<p>
 						这里按全局编号列出每条原文的作者、账号 ID、推文 ID
-						和日期，便于从纸面快速反查。
+						和发帖时间，便于从纸面快速反查。
 					</p>
 					<table>
 						<thead>
@@ -840,7 +853,7 @@ function ReferenceDigestPrint({
 								<th>编号</th>
 								<th>作者 / 账号 ID</th>
 								<th>推文 ID</th>
-								<th>日期</th>
+								<th>发帖时间</th>
 								<th>页码</th>
 							</tr>
 						</thead>
@@ -857,7 +870,7 @@ function ReferenceDigestPrint({
 										<td>{tweet?.id ?? tweetId}</td>
 										<td>
 											{tweet?.createdAt
-												? formatReferenceDate(tweet.createdAt)
+												? formatReferenceTimestamp(tweet.createdAt)
 												: ""}
 										</td>
 										<td>
