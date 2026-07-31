@@ -11,14 +11,19 @@ import {
 	UserSearch,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fetchJson, setLocalBookmark } from "#/lib/api-client";
-import { expandedTweetTextResponseSchema } from "#/lib/api-contracts";
+import {
+	expandedTweetTextResponseSchema,
+	tweetTranslationResponseSchema,
+} from "#/lib/api-contracts";
 import { formatCompactNumber } from "#/lib/present";
 import { queryKeys } from "#/lib/query-client";
+import { shouldAutoTranslateTweetText } from "#/lib/tweet-language";
 import {
 	isTweetArticleUrlEntity,
 	normalizeTweetUrlEntityRangeForText,
+	rebaseTweetEntitiesForText,
 } from "#/lib/tweet-render";
 import type {
 	EmbeddedTweet,
@@ -252,6 +257,57 @@ function likelyTruncatedText(text: string) {
 	return value.endsWith("…") || value.endsWith("...");
 }
 
+function useNearViewport() {
+	const ref = useRef<HTMLElement | null>(null);
+	const [nearViewport, setNearViewport] = useState(false);
+
+	useEffect(() => {
+		const node = ref.current;
+		if (!node || nearViewport || typeof IntersectionObserver === "undefined") {
+			return;
+		}
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (!entries.some((entry) => entry.isIntersecting)) return;
+				setNearViewport(true);
+				observer.disconnect();
+			},
+			{ rootMargin: "320px 0px" },
+		);
+		observer.observe(node);
+		return () => observer.disconnect();
+	}, [nearViewport]);
+
+	return { nearViewport, ref };
+}
+
+function translatedHiddenUrlRanges(
+	translatedText: string,
+	originalText: string,
+	hiddenUrlRanges: Array<{ start: number; end: number }>,
+) {
+	const ranges: Array<{ start: number; end: number }> = [];
+	const usedStarts = new Set<number>();
+	for (const originalRange of hiddenUrlRanges) {
+		const hiddenValue = originalText.slice(
+			originalRange.start,
+			originalRange.end,
+		);
+		let searchFrom = 0;
+		while (hiddenValue && searchFrom < translatedText.length) {
+			const start = translatedText.indexOf(hiddenValue, searchFrom);
+			if (start < 0) break;
+			if (!usedStarts.has(start)) {
+				usedStarts.add(start);
+				ranges.push({ start, end: start + hiddenValue.length });
+				break;
+			}
+			searchFrom = start + hiddenValue.length;
+		}
+	}
+	return ranges;
+}
+
 function TweetPresentation({
 	tweet,
 	hiddenUrlRanges,
@@ -259,6 +315,7 @@ function TweetPresentation({
 	replyToTweet,
 	quotedTweet,
 	mediaViewerPermalink,
+	translatedText,
 	afterText,
 }: {
 	tweet: TimelineItem | EmbeddedTweet;
@@ -267,16 +324,32 @@ function TweetPresentation({
 	replyToTweet?: EmbeddedTweet | null;
 	quotedTweet?: EmbeddedTweet | null;
 	mediaViewerPermalink?: string | null;
+	translatedText?: string;
 	afterText?: ReactNode;
 }) {
+	const translatedEntities = translatedText
+		? rebaseTweetEntitiesForText(translatedText, tweet.entities)
+		: null;
+	const translatedHiddenRanges = translatedText
+		? translatedHiddenUrlRanges(translatedText, tweet.text, hiddenUrlRanges)
+		: [];
 	return (
 		<>
-			<TweetRichText
-				className={feedRowTextClass}
-				entities={tweet.entities}
-				hiddenUrlRanges={hiddenUrlRanges}
-				text={tweet.text}
-			/>
+			{translatedText && translatedEntities ? (
+				<TweetRichText
+					className={feedRowTextClass}
+					entities={translatedEntities}
+					hiddenUrlRanges={translatedHiddenRanges}
+					text={translatedText}
+				/>
+			) : (
+				<TweetRichText
+					className={feedRowTextClass}
+					entities={tweet.entities}
+					hiddenUrlRanges={hiddenUrlRanges}
+					text={tweet.text}
+				/>
+			)}
 			{afterText}
 			<TweetMediaGrid
 				items={tweet.media}
@@ -322,6 +395,8 @@ export function TimelineCard({
 	showReplyControls?: boolean;
 }) {
 	const [showFullRepost, setShowFullRepost] = useState(false);
+	const [showTranslation, setShowTranslation] = useState(true);
+	const translationViewport = useNearViewport();
 	const canReply =
 		showReplyControls && item.kind !== "like" && item.kind !== "bookmark";
 	const displayTweet = item.retweetedTweet ?? item;
@@ -354,6 +429,45 @@ export function TimelineCard({
 					text: expandedRepost.text,
 				}
 			: displayTweet;
+	const translationCandidate = shouldAutoTranslateTweetText(
+		presentedTweet.text,
+	);
+	const translationQuery = useQuery({
+		queryKey: [
+			"tweet-translation",
+			"zh-CN",
+			presentedTweet.id,
+			presentedTweet.text,
+		],
+		queryFn: ({ signal }) =>
+			fetchJson(
+				"/api/tweet-translation",
+				{
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						tweetId: presentedTweet.id,
+						text: presentedTweet.text,
+						targetLanguage: "zh-CN",
+					}),
+					signal,
+				},
+				tweetTranslationResponseSchema,
+				"Translation unavailable",
+			),
+		enabled: translationViewport.nearViewport && translationCandidate,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+	});
+	useEffect(() => {
+		setShowTranslation(true);
+	}, [presentedTweet.id, presentedTweet.text]);
+	const availableTranslation =
+		translationQuery.data?.translated === true ? translationQuery.data : null;
+	const translatedText =
+		showTranslation && availableTranslation
+			? availableTranslation.translatedText
+			: undefined;
 	const interactionTweetId =
 		item.retweetedTweet && displayTweetId === `${item.id}:retweeted`
 			? item.id
@@ -435,6 +549,7 @@ export function TimelineCard({
 				"cursor-pointer [content-visibility:auto] [contain-intrinsic-size:auto_280px]",
 			)}
 			data-perf="timeline-card"
+			ref={translationViewport.ref}
 			onFocus={conversation.prefetch}
 			onMouseEnter={conversation.prefetch}
 			onClick={(event) => {
@@ -544,40 +659,79 @@ export function TimelineCard({
 				) : null}
 				<TweetPresentation
 					afterText={
-						canExpandRepost ? (
+						translationCandidate || canExpandRepost ? (
 							<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-								<button
-									aria-expanded={showFullRepost && Boolean(expandedRepost)}
-									aria-label={
-										showFullRepost && expandedRepost
-											? "Collapse repost"
-											: expandedRepostQuery.isError
-												? "Retry full repost"
-												: "Show full repost"
-									}
-									className="cursor-pointer border-0 bg-transparent p-0 text-[14px] font-semibold text-[var(--accent)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-									disabled={expandedRepostQuery.isFetching}
-									onClick={(event) => {
-										event.stopPropagation();
-										if (showFullRepost && expandedRepost) {
-											setShowFullRepost(false);
-											return;
+								{availableTranslation ? (
+									<>
+										<span className="text-[12px] text-[var(--ink-soft)]">
+											AI 翻译
+										</span>
+										<button
+											aria-label={showTranslation ? "显示原文" : "显示翻译"}
+											className="cursor-pointer border-0 bg-transparent p-0 text-[13px] font-semibold text-[var(--accent)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+											onClick={(event) => {
+												event.stopPropagation();
+												setShowTranslation((value) => !value);
+											}}
+											type="button"
+										>
+											{showTranslation ? "显示原文" : "显示翻译"}
+										</button>
+									</>
+								) : translationQuery.isFetching ? (
+									<span
+										className="text-[12px] text-[var(--ink-soft)]"
+										role="status"
+									>
+										正在翻译…
+									</span>
+								) : translationQuery.isError ? (
+									<button
+										aria-label="重试翻译"
+										className="cursor-pointer border-0 bg-transparent p-0 text-[13px] font-semibold text-[var(--accent)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+										onClick={(event) => {
+											event.stopPropagation();
+											void translationQuery.refetch();
+										}}
+										type="button"
+									>
+										翻译暂不可用，重试
+									</button>
+								) : null}
+								{canExpandRepost ? (
+									<button
+										aria-expanded={showFullRepost && Boolean(expandedRepost)}
+										aria-label={
+											showFullRepost && expandedRepost
+												? "Collapse repost"
+												: expandedRepostQuery.isError
+													? "Retry full repost"
+													: "Show full repost"
 										}
-										setShowFullRepost(true);
-										if (expandedRepostQuery.isError) {
-											void expandedRepostQuery.refetch();
-										}
-									}}
-									type="button"
-								>
-									{expandedRepostQuery.isFetching
-										? "Loading full post…"
-										: showFullRepost && expandedRepost
-											? "Show less"
-											: expandedRepostQuery.isError
-												? "Try again"
-												: "Show more"}
-								</button>
+										className="cursor-pointer border-0 bg-transparent p-0 text-[14px] font-semibold text-[var(--accent)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+										disabled={expandedRepostQuery.isFetching}
+										onClick={(event) => {
+											event.stopPropagation();
+											if (showFullRepost && expandedRepost) {
+												setShowFullRepost(false);
+												return;
+											}
+											setShowFullRepost(true);
+											if (expandedRepostQuery.isError) {
+												void expandedRepostQuery.refetch();
+											}
+										}}
+										type="button"
+									>
+										{expandedRepostQuery.isFetching
+											? "Loading full post…"
+											: showFullRepost && expandedRepost
+												? "Show less"
+												: expandedRepostQuery.isError
+													? "Try again"
+													: "Show more"}
+									</button>
+								) : null}
 								{expandedRepostQuery.isError ? (
 									<span
 										className="text-[12px] text-[var(--alert)]"
@@ -593,6 +747,7 @@ export function TimelineCard({
 					mediaViewerPermalink={openTweetUrl}
 					quotedTweet={item.retweetedTweet ? null : item.quotedTweet}
 					replyToTweet={item.retweetedTweet ? null : item.replyToTweet}
+					translatedText={translatedText}
 					tweet={presentedTweet}
 					visibleUrlCards={visibleUrlCards}
 				/>

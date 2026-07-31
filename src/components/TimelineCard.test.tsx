@@ -156,6 +156,90 @@ describe("TimelineCard", () => {
 		expect(onReply).toHaveBeenCalledWith("tweet_1");
 	});
 
+	it("automatically shows a Chinese translation and toggles back to the original", async () => {
+		class VisibleIntersectionObserver {
+			private readonly callback: IntersectionObserverCallback;
+
+			constructor(callback: IntersectionObserverCallback) {
+				this.callback = callback;
+			}
+
+			observe(target: Element) {
+				this.callback(
+					[
+						{
+							isIntersecting: true,
+							target,
+						} as IntersectionObserverEntry,
+					],
+					this as unknown as IntersectionObserver,
+				);
+			}
+
+			disconnect() {}
+			unobserve() {}
+			takeRecords() {
+				return [];
+			}
+			readonly root = null;
+			readonly rootMargin = "320px 0px";
+			readonly thresholds = [0];
+		}
+		vi.stubGlobal("IntersectionObserver", VisibleIntersectionObserver);
+		const fetchMock = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				expect(String(input)).toBe("/api/tweet-translation");
+				expect(init?.method).toBe("POST");
+				expect(JSON.parse(String(init?.body))).toEqual({
+					tweetId: "tweet_korean",
+					text: "새 버전을 오늘 출시합니다.",
+					targetLanguage: "zh-CN",
+				});
+				return new Response(
+					JSON.stringify({
+						ok: true,
+						tweetId: "tweet_korean",
+						targetLanguage: "zh-CN",
+						sourceLanguage: "Korean",
+						translated: true,
+						translatedText: "今天发布新版本。",
+						cached: false,
+					}),
+					{ status: 200 },
+				);
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(
+			<TimelineCard
+				item={{
+					...item,
+					id: "tweet_korean",
+					text: "새 버전을 오늘 출시합니다.",
+					entities: {},
+					media: [],
+					mediaCount: 0,
+					replyToTweet: null,
+					quotedTweet: null,
+				}}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		expect(await screen.findByText("今天发布新版本。")).toBeInTheDocument();
+		expect(screen.queryByText("새 버전을 오늘 출시합니다.")).toBeNull();
+		expect(screen.getByText("AI 翻译")).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "显示原文" }));
+		expect(screen.getByText("새 버전을 오늘 출시합니다.")).toBeInTheDocument();
+		expect(screen.queryByText("今天发布新版本。")).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: "显示翻译" }));
+		expect(screen.getByText("今天发布新版本。")).toBeInTheDocument();
+		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
 	it("links the displayed avatar to a local author timeline without opening the thread", () => {
 		const fetchMock = vi.fn();
 		vi.stubGlobal("fetch", fetchMock);

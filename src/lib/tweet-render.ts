@@ -362,6 +362,54 @@ export function collectTweetSegmentsForText(
 		.sort((left, right) => left.start - right.start);
 }
 
+function findUnusedTokenRange(
+	text: string,
+	token: string,
+	usedRanges: Array<{ start: number; end: number }>,
+) {
+	let searchFrom = 0;
+	while (searchFrom < text.length) {
+		const start = text.indexOf(token, searchFrom);
+		if (start < 0) return null;
+		const end = start + token.length;
+		if (
+			!usedRanges.some((range) =>
+				spansOverlap(start, end, range.start, range.end),
+			)
+		) {
+			usedRanges.push({ start, end });
+			return { start, end };
+		}
+		searchFrom = Math.max(end, start + 1);
+	}
+	return null;
+}
+
+export function rebaseTweetEntitiesForText(
+	text: string,
+	entities: TweetEntities,
+): TweetEntities {
+	const usedRanges: Array<{ start: number; end: number }> = [];
+	const urls = (entities.urls ?? []).flatMap((entry) => {
+		const range = findUnusedTokenRange(text, entry.url, usedRanges);
+		return range ? [{ ...entry, ...range }] : [];
+	});
+	const mentions = (entities.mentions ?? []).flatMap((entry) => {
+		const range = findUnusedTokenRange(text, `@${entry.username}`, usedRanges);
+		return range ? [{ ...entry, ...range }] : [];
+	});
+	const hashtags = (entities.hashtags ?? []).flatMap((entry) => {
+		const range = findUnusedTokenRange(text, `#${entry.tag}`, usedRanges);
+		return range ? [{ ...entry, ...range }] : [];
+	});
+	return {
+		...(mentions.length > 0 ? { mentions } : {}),
+		...(urls.length > 0 ? { urls } : {}),
+		...(hashtags.length > 0 ? { hashtags } : {}),
+		...(entities.article ? { article: entities.article } : {}),
+	};
+}
+
 function renderTweetText(
 	text: string,
 	entities: TweetEntities,

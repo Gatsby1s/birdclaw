@@ -409,6 +409,28 @@ export type ExpandedTweetTextResponse = z.infer<
 	typeof expandedTweetTextResponseSchema
 >;
 
+export const tweetTranslationRequestSchema = z.object({
+	tweetId: z.string().trim().min(1).max(128),
+	text: z.string().trim().min(1).max(20_000),
+	targetLanguage: z.literal("zh-CN").default("zh-CN"),
+});
+export type TweetTranslationRequest = z.infer<
+	typeof tweetTranslationRequestSchema
+>;
+
+export const tweetTranslationResponseSchema = z.object({
+	ok: z.literal(true),
+	tweetId: z.string(),
+	targetLanguage: z.literal("zh-CN"),
+	sourceLanguage: z.string().min(1).max(80),
+	translated: z.boolean(),
+	translatedText: z.string().min(1).max(40_000),
+	cached: z.boolean(),
+});
+export type TweetTranslationResponse = z.infer<
+	typeof tweetTranslationResponseSchema
+>;
+
 const blockItemSchema = z.object({
 	accountId: z.string(),
 	accountHandle: z.string(),

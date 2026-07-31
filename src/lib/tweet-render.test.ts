@@ -3,12 +3,69 @@ import type { TweetEntities } from "./types";
 import {
 	enrichFallbackUrlEntities,
 	profileDescriptionEntitiesFromXurl,
+	rebaseTweetEntitiesForText,
 	renderTweetMarkdown,
 	renderTweetPlainText,
 	tweetEntitiesFromXurl,
 } from "./tweet-render";
 
 describe("tweet render helpers", () => {
+	it("rebuilds preserved links, mentions, and hashtags at translated offsets", () => {
+		const profile = {
+			id: "profile_sam",
+			handle: "sam",
+			displayName: "Sam",
+			bio: "",
+			followersCount: 1,
+			avatarHue: 120,
+			createdAt: "",
+		};
+		const rebased = rebaseTweetEntitiesForText(
+			"中文译文 @sam #launch https://t.co/demo",
+			{
+				mentions: [
+					{
+						username: "sam",
+						start: 0,
+						end: 4,
+						profile,
+					},
+				],
+				hashtags: [{ tag: "launch", start: 5, end: 12 }],
+				urls: [
+					{
+						url: "https://t.co/demo",
+						expandedUrl: "https://example.com/demo",
+						displayUrl: "example.com/demo",
+						start: 13,
+						end: 30,
+					},
+				],
+			},
+		);
+
+		expect(rebased).toEqual({
+			mentions: [
+				{
+					username: "sam",
+					start: 5,
+					end: 9,
+					profile,
+				},
+			],
+			urls: [
+				{
+					url: "https://t.co/demo",
+					expandedUrl: "https://example.com/demo",
+					displayUrl: "example.com/demo",
+					start: 18,
+					end: 35,
+				},
+			],
+			hashtags: [{ tag: "launch", start: 10, end: 17 }],
+		});
+	});
+
 	it("renders plain text with expanded urls", () => {
 		expect(
 			renderTweetPlainText("Hi @sam https://t.co/demo #ship", {
