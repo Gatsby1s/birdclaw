@@ -61,7 +61,10 @@ function RootDocument({ children }: { children: ReactNode }) {
 	});
 	const compactNavigation =
 		pathname.startsWith("/dms") || pathname.startsWith("/network-map");
-	const wideMain = compactNavigation || pathname.startsWith("/discuss");
+	const wideMain =
+		compactNavigation ||
+		pathname.startsWith("/discuss") ||
+		pathname.startsWith("/today");
 
 	return (
 		<html lang="en" suppressHydrationWarning>

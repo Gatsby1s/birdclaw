@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	CheckCircle2,
+	Bot,
 	Cloud,
 	Copy,
 	Database,
@@ -14,7 +15,7 @@ import {
 	Unplug,
 	Upload,
 } from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	birdclawSettingsSchema,
 	type BirdclawSettings,
@@ -89,6 +90,35 @@ async function updateProfileSource(
 		},
 		birdclawSettingsSchema,
 		"Settings update failed",
+	);
+}
+
+type SummaryProvider = "openai" | "deepseek";
+
+async function updateSummaryModels(input: {
+	primary: SummaryProvider;
+	backup: SummaryProvider;
+	apiKey?: string;
+}): Promise<BirdclawSettings> {
+	return fetchJson(
+		"/api/settings",
+		{
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				analysis: {
+					summaryModels: {
+						primary: input.primary,
+						backup: input.backup,
+					},
+				},
+				...(input.apiKey
+					? { providers: { deepseek: { apiKey: input.apiKey } } }
+					: {}),
+			}),
+		},
+		birdclawSettingsSchema,
+		"Summary model settings update failed",
 	);
 }
 
@@ -188,6 +218,9 @@ function SettingsRoute() {
 		staleTime: 0,
 	});
 	const settings = settingsQuery.data ?? null;
+	const [primaryModel, setPrimaryModel] = useState<SummaryProvider>("openai");
+	const [backupModel, setBackupModel] = useState<SummaryProvider>("deepseek");
+	const [deepSeekApiKey, setDeepSeekApiKey] = useState("");
 	const mutation = useMutation({
 		mutationFn: updateProfileSource,
 		onSuccess: (data) => {
@@ -195,6 +228,18 @@ function SettingsRoute() {
 			void queryClient.invalidateQueries({ queryKey: queryKeys.dataSources });
 		},
 	});
+	const summaryMutation = useMutation({
+		mutationFn: updateSummaryModels,
+		onSuccess: (data) => {
+			queryClient.setQueryData(queryKeys.settings, data);
+			setDeepSeekApiKey("");
+		},
+	});
+	useEffect(() => {
+		if (!settings) return;
+		setPrimaryModel(settings.analysis.summaryModels.primary);
+		setBackupModel(settings.analysis.summaryModels.backup);
+	}, [settings]);
 	const xRemarkMutation = useMutation({
 		mutationFn: importXRemarkBackup,
 		onSuccess: (data) => {
@@ -229,6 +274,13 @@ function SettingsRoute() {
 		xRemarkLiveMutation.data && "token" in xRemarkLiveMutation.data
 			? xRemarkLiveMutation.data.token
 			: undefined;
+	const summaryProviders = settings?.providers;
+	const summaryChanged = Boolean(
+		settings &&
+		(primaryModel !== settings.analysis.summaryModels.primary ||
+			backupModel !== settings.analysis.summaryModels.backup ||
+			deepSeekApiKey.trim()),
+	);
 
 	return (
 		<section className="flex min-h-screen flex-col">
@@ -256,6 +308,13 @@ function SettingsRoute() {
 						: "Settings update failed"}
 				</div>
 			) : null}
+			{summaryMutation.error ? (
+				<div className={errorCopyClass}>
+					{summaryMutation.error instanceof Error
+						? summaryMutation.error.message
+						: "Summary model settings update failed"}
+				</div>
+			) : null}
 			{xRemarkMutation.error ? (
 				<div className={errorCopyClass}>
 					{xRemarkMutation.error instanceof Error
@@ -279,6 +338,102 @@ function SettingsRoute() {
 			) : null}
 			{settings ? (
 				<div className="border-t border-[var(--line)]">
+					<section className="border-b border-[var(--line)] px-4 py-5">
+						<div className="flex items-center gap-2 text-[16px] font-bold text-[var(--ink)]">
+							<Bot className="size-4.5" strokeWidth={1.9} />
+							<span>AI Summary Models</span>
+						</div>
+						<p className="mt-1 text-[13px] text-[var(--ink-soft)]">
+							Today uses the primary model first and switches to the backup only
+							when a clean failover is possible.
+						</p>
+						<div className="mt-4 grid gap-3 min-[760px]:grid-cols-2">
+							<label className="grid gap-1.5 text-[12px] font-semibold text-[var(--ink-soft)]">
+								<span>Primary summary model</span>
+								<select
+									className="min-h-11 rounded-xl border border-[var(--line-strong)] bg-[var(--bg)] px-3 text-[14px] font-semibold text-[var(--ink)] outline-none focus:border-[var(--accent)]"
+									value={primaryModel}
+									onChange={(event) => {
+										const next = event.currentTarget.value as SummaryProvider;
+										setPrimaryModel(next);
+										setBackupModel(next === "openai" ? "deepseek" : "openai");
+									}}
+								>
+									<option value="openai">
+										ChatGPT · {summaryProviders?.openai.model}
+									</option>
+									<option value="deepseek">DeepSeek V4 / Flash</option>
+								</select>
+							</label>
+							<label className="grid gap-1.5 text-[12px] font-semibold text-[var(--ink-soft)]">
+								<span>Backup summary model</span>
+								<select
+									className="min-h-11 rounded-xl border border-[var(--line-strong)] bg-[var(--bg)] px-3 text-[14px] font-semibold text-[var(--ink)] outline-none focus:border-[var(--accent)]"
+									value={backupModel}
+									onChange={(event) => {
+										const next = event.currentTarget.value as SummaryProvider;
+										setBackupModel(next);
+										setPrimaryModel(next === "openai" ? "deepseek" : "openai");
+									}}
+								>
+									<option value="openai">
+										ChatGPT · {summaryProviders?.openai.model}
+									</option>
+									<option value="deepseek">DeepSeek V4 / Flash</option>
+								</select>
+							</label>
+						</div>
+						<div className="mt-3 grid gap-3 min-[760px]:grid-cols-[minmax(0,1fr)_auto] min-[760px]:items-end">
+							<label className="grid gap-1.5 text-[12px] font-semibold text-[var(--ink-soft)]">
+								<span>
+									DeepSeek API token ·{" "}
+									{summaryProviders?.deepseek.tokenConfigured
+										? "Configured"
+										: "Not configured"}
+								</span>
+								<input
+									autoComplete="new-password"
+									className="min-h-11 rounded-xl border border-[var(--line-strong)] bg-[var(--bg)] px-3 text-[14px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-soft)] focus:border-[var(--accent)]"
+									placeholder={
+										summaryProviders?.deepseek.tokenConfigured
+											? "Leave blank to keep the saved token"
+											: "Paste DeepSeek API token"
+									}
+									type="password"
+									value={deepSeekApiKey}
+									onChange={(event) =>
+										setDeepSeekApiKey(event.currentTarget.value)
+									}
+								/>
+							</label>
+							<button
+								className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-[var(--accent)] px-4 text-[13px] font-bold text-[var(--accent-text)] disabled:opacity-50"
+								disabled={!summaryChanged || summaryMutation.isPending}
+								onClick={() =>
+									summaryMutation.mutate({
+										primary: primaryModel,
+										backup: backupModel,
+										...(deepSeekApiKey.trim()
+											? { apiKey: deepSeekApiKey.trim() }
+											: {}),
+									})
+								}
+								type="button"
+							>
+								{summaryMutation.isPending ? "Saving" : "Save model settings"}
+							</button>
+						</div>
+						<p
+							className="mt-2 text-[11px] text-[var(--ink-soft)]"
+							aria-live="polite"
+						>
+							Primary:{" "}
+							{primaryModel === "openai" ? "ChatGPT" : "DeepSeek V4 / Flash"} ·
+							Backup:{" "}
+							{backupModel === "openai" ? "ChatGPT" : "DeepSeek V4 / Flash"}.
+							Tokens are stored only in this Mac’s private BirdClaw config.
+						</p>
+					</section>
 					<section className="border-b border-[var(--line)] px-4 py-4">
 						<div className="flex flex-col gap-3 min-[760px]:flex-row min-[760px]:items-center min-[760px]:justify-between">
 							<div className="min-w-0">

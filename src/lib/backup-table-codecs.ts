@@ -884,6 +884,80 @@ const definitions = {
 			],
 		},
 	},
+	period_digest_history: {
+		exportSql: `
+      select id, digest_date, timezone, status, attempt_count, window_since,
+        window_until, include_dms, provider, model, reasoning_effort,
+        service_tier, context_hash, counts_json, digest_json, markdown,
+        tweets_json, dms_json, links_json, error, started_at, finished_at,
+        created_at, updated_at
+      from period_digest_history
+      where status = 'ready'
+      order by digest_date, id
+    `,
+		...fixedShard("data/digests/daily-history.jsonl", "period_digest_history"),
+		merge: {
+			order: 22,
+			sql: `
+      insert into period_digest_history (
+        id, digest_date, timezone, status, attempt_count, window_since,
+        window_until, include_dms, provider, model, reasoning_effort,
+        service_tier, context_hash, counts_json, digest_json, markdown,
+        tweets_json, dms_json, links_json, error, started_at, finished_at,
+        created_at, updated_at
+      ) values (?, ?, ?, 'ready', coalesce(?, 1), ?, ?, coalesce(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
+      on conflict(digest_date) do update set
+        timezone = excluded.timezone,
+        status = 'ready',
+        attempt_count = max(period_digest_history.attempt_count, excluded.attempt_count),
+        window_since = excluded.window_since,
+        window_until = excluded.window_until,
+        include_dms = excluded.include_dms,
+        provider = excluded.provider,
+        model = excluded.model,
+        reasoning_effort = excluded.reasoning_effort,
+        service_tier = excluded.service_tier,
+        context_hash = excluded.context_hash,
+        counts_json = excluded.counts_json,
+        digest_json = excluded.digest_json,
+        markdown = excluded.markdown,
+        tweets_json = excluded.tweets_json,
+        dms_json = excluded.dms_json,
+        links_json = excluded.links_json,
+        error = null,
+        started_at = excluded.started_at,
+        finished_at = excluded.finished_at,
+        created_at = min(period_digest_history.created_at, excluded.created_at),
+        updated_at = excluded.updated_at
+      where excluded.updated_at >= period_digest_history.updated_at
+      `,
+			columns: [
+				"id",
+				"digest_date",
+				"timezone",
+				"attempt_count",
+				"window_since",
+				"window_until",
+				"include_dms",
+				"provider",
+				"model",
+				"reasoning_effort",
+				"service_tier",
+				"context_hash",
+				"counts_json",
+				"digest_json",
+				"markdown",
+				"tweets_json",
+				"dms_json",
+				"links_json",
+				"error",
+				"started_at",
+				"finished_at",
+				"created_at",
+				"updated_at",
+			],
+		},
+	},
 	follow_snapshots: {
 		exportSql: `
       select id, account_id, direction, source, status, page_count,

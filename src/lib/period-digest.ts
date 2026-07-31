@@ -7,7 +7,6 @@ import {
 	parseHybridAnalysis,
 	readHybridAnalysisStreamEffect,
 	resolveAnalysisModelSettings,
-	streamHybridAnalysisEffect,
 } from "./analysis-runtime";
 import { maybeAutoSyncBackupEffect } from "./backup";
 import { runEffectPromise } from "./effect-runtime";
@@ -21,6 +20,10 @@ import {
 	processOpenAIResponseSseChunk,
 } from "./openai-response-runtime";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
+import {
+	resolveSummaryModelSettings,
+	streamSummaryAnalysisEffect,
+} from "./summary-model-runtime";
 import { syncHomeTimelineEffect, type HomeTimelineMode } from "./timeline-live";
 import type {
 	EmbeddedTweet,
@@ -59,6 +62,7 @@ export interface PeriodDigestOptions {
 	liveMentionsLimit?: number;
 	liveMentionsMaxPages?: number;
 	liveThreadLimit?: number;
+	bufferModelDeltasUntilSuccess?: boolean;
 }
 
 export interface PeriodDigestWindow {
@@ -72,6 +76,7 @@ export interface PeriodDigestRunResult {
 	digest: PeriodDigest;
 	markdown: string;
 	model: string;
+	provider?: string;
 	reasoningEffort: string;
 	serviceTier: string;
 	cached: boolean;
@@ -619,7 +624,11 @@ function languageFromOptions(options: PeriodDigestOptions) {
 }
 
 function modelFromOptions(options: PeriodDigestOptions) {
-	return resolveAnalysisModelSettings(options).model;
+	return resolveSummaryModelSettings(options).model;
+}
+
+function providerFromOptions(options: PeriodDigestOptions) {
+	return resolveSummaryModelSettings(options).provider;
 }
 
 function reasoningEffortFromOptions(options: PeriodDigestOptions) {
@@ -878,7 +887,8 @@ function digestCacheKey(
 	options: PeriodDigestOptions,
 ) {
 	const parts = [
-		"period-digest:v2",
+		"period-digest:v3",
+		providerFromOptions(options),
 		modelFromOptions(options),
 		reasoningEffortFromOptions(options),
 		serviceTierFromOptions(options),
@@ -907,12 +917,13 @@ function latestDigestCacheKey(options: PeriodDigestOptions) {
 			Math.trunc(options.maxTweets ?? DEFAULT_MAX_TWEETS),
 		),
 		maxLinks: Math.max(3, Math.trunc(options.maxLinks ?? DEFAULT_MAX_LINKS)),
+		provider: providerFromOptions(options),
 		model: modelFromOptions(options),
 		language: languageFromOptions(options) ?? null,
 		reasoningEffort: reasoningEffortFromOptions(options),
 		serviceTier: serviceTierFromOptions(options),
 	};
-	return `period-digest-latest:v1:${createHash("sha1")
+	return `period-digest-latest:v2:${createHash("sha1")
 		.update(JSON.stringify(identity))
 		.digest("hex")}`;
 }
@@ -953,6 +964,7 @@ interface CachedPeriodDigestValue {
 	digest: PeriodDigest;
 	markdown: string;
 	model: string;
+	provider?: string;
 	reasoningEffort: string;
 	serviceTier: string;
 	updatedAt?: string;
@@ -968,6 +980,7 @@ function cachedDigestResult(
 		digest,
 		markdown: cached.value.markdown,
 		model: cached.value.model,
+		...(cached.value.provider ? { provider: cached.value.provider } : {}),
 		reasoningEffort: cached.value.reasoningEffort,
 		serviceTier: cached.value.serviceTier,
 		cached: true,
@@ -1171,7 +1184,7 @@ function createOpenAIRequestBody(
 	options: PeriodDigestOptions,
 ) {
 	return createAnalysisRequestBody({
-		settings: resolveAnalysisModelSettings(options),
+		settings: resolveSummaryModelSettings(options),
 		system:
 			"You are a precise local Twitter archive analyst. Stream Markdown first, then emit the requested JSON object after the delimiter. Do not invent events not present in the dataset.",
 		prompt: buildPrompt(context, {
@@ -1196,7 +1209,8 @@ function completeOpenAIStreamEffect(
 			writeSyncCache(cacheKey, {
 				digest: stream.value,
 				markdown: stream.markdown,
-				model: modelFromOptions(options),
+				model: stream.model ?? modelFromOptions(options),
+				provider: stream.provider ?? providerFromOptions(options),
 				reasoningEffort: reasoningEffortFromOptions(options),
 				serviceTier: serviceTierFromOptions(options),
 				usage: stream.usage,
@@ -1207,7 +1221,8 @@ function completeOpenAIStreamEffect(
 			context: enrichedContext,
 			digest: stream.value,
 			markdown: stream.markdown,
-			model: modelFromOptions(options),
+			model: stream.model ?? modelFromOptions(options),
+			provider: stream.provider ?? providerFromOptions(options),
 			reasoningEffort: reasoningEffortFromOptions(options),
 			serviceTier: serviceTierFromOptions(options),
 			cached: false,
@@ -1219,6 +1234,7 @@ function completeOpenAIStreamEffect(
 				digest: result.digest,
 				markdown: result.markdown,
 				model: result.model,
+				provider: result.provider,
 				reasoningEffort: result.reasoningEffort,
 				serviceTier: result.serviceTier,
 				updatedAt: result.updatedAt,
@@ -1314,6 +1330,7 @@ export function streamPeriodDigestEffect(
 					digest: result.digest,
 					markdown: result.markdown,
 					model: result.model,
+					provider: result.provider,
 					reasoningEffort: result.reasoningEffort,
 					serviceTier: result.serviceTier,
 					updatedAt: result.updatedAt,
@@ -1342,17 +1359,26 @@ export function streamPeriodDigestEffect(
 
 		handlers.onEvent?.({ type: "start", context, cached: false });
 		emitDigestStatus(handlers, "Streaming AI summary");
-		const stream = yield* streamHybridAnalysisEffect({
+		const stream = yield* streamSummaryAnalysisEffect({
 			body: createOpenAIRequestBody(context, resolvedOptions),
+			options: resolvedOptions,
 			signal: resolvedOptions.signal,
 			parse: (value) => PeriodDigestSchema.parse(value),
 			fallback: (markdown) =>
 				fallbackDigest(context, markdown, languageFromOptions(resolvedOptions)),
 			delimiterPattern: DELIMITER_PATTERN,
+			bufferDeltasUntilSuccess:
+				resolvedOptions.bufferModelDeltasUntilSuccess === true,
 			onDelta: (delta) => {
 				handlers.onDelta?.(delta);
 				handlers.onEvent?.({ type: "delta", delta });
 			},
+			onFailover: (target) =>
+				emitDigestStatus(
+					handlers,
+					"Primary summary model unavailable",
+					`Switching to ${target.provider === "deepseek" ? "DeepSeek V4 / Flash" : "ChatGPT"}.`,
+				),
 		});
 		return yield* completeOpenAIStreamEffect(
 			stream,

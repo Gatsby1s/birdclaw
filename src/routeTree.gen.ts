@@ -38,6 +38,7 @@ import { Route as ApiSearchDiscussionRouteImport } from './routes/api/search-dis
 import { Route as ApiQueryRouteImport } from './routes/api/query'
 import { Route as ApiProfileHydrateRouteImport } from './routes/api/profile-hydrate'
 import { Route as ApiProfileAnalysisRouteImport } from './routes/api/profile-analysis'
+import { Route as ApiPeriodDigestHistoryRouteImport } from './routes/api/period-digest-history'
 import { Route as ApiPeriodDigestRouteImport } from './routes/api/period-digest'
 import { Route as ApiNetworkMapRouteImport } from './routes/api/network-map'
 import { Route as ApiLinkPreviewRouteImport } from './routes/api/link-preview'
@@ -199,6 +200,11 @@ const ApiProfileAnalysisRoute = ApiProfileAnalysisRouteImport.update({
   path: '/api/profile-analysis',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPeriodDigestHistoryRoute = ApiPeriodDigestHistoryRouteImport.update({
+  id: '/api/period-digest-history',
+  path: '/api/period-digest-history',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPeriodDigestRoute = ApiPeriodDigestRouteImport.update({
   id: '/api/period-digest',
   path: '/api/period-digest',
@@ -305,6 +311,7 @@ export interface FileRoutesByFullPath {
   '/api/link-preview': typeof ApiLinkPreviewRoute
   '/api/network-map': typeof ApiNetworkMapRoute
   '/api/period-digest': typeof ApiPeriodDigestRoute
+  '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
   '/api/profile-analysis': typeof ApiProfileAnalysisRoute
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
   '/api/query': typeof ApiQueryRoute
@@ -351,6 +358,7 @@ export interface FileRoutesByTo {
   '/api/link-preview': typeof ApiLinkPreviewRoute
   '/api/network-map': typeof ApiNetworkMapRoute
   '/api/period-digest': typeof ApiPeriodDigestRoute
+  '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
   '/api/profile-analysis': typeof ApiProfileAnalysisRoute
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
   '/api/query': typeof ApiQueryRoute
@@ -398,6 +406,7 @@ export interface FileRoutesById {
   '/api/link-preview': typeof ApiLinkPreviewRoute
   '/api/network-map': typeof ApiNetworkMapRoute
   '/api/period-digest': typeof ApiPeriodDigestRoute
+  '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
   '/api/profile-analysis': typeof ApiProfileAnalysisRoute
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
   '/api/query': typeof ApiQueryRoute
@@ -446,6 +455,7 @@ export interface FileRouteTypes {
     | '/api/link-preview'
     | '/api/network-map'
     | '/api/period-digest'
+    | '/api/period-digest-history'
     | '/api/profile-analysis'
     | '/api/profile-hydrate'
     | '/api/query'
@@ -492,6 +502,7 @@ export interface FileRouteTypes {
     | '/api/link-preview'
     | '/api/network-map'
     | '/api/period-digest'
+    | '/api/period-digest-history'
     | '/api/profile-analysis'
     | '/api/profile-hydrate'
     | '/api/query'
@@ -538,6 +549,7 @@ export interface FileRouteTypes {
     | '/api/link-preview'
     | '/api/network-map'
     | '/api/period-digest'
+    | '/api/period-digest-history'
     | '/api/profile-analysis'
     | '/api/profile-hydrate'
     | '/api/query'
@@ -585,6 +597,7 @@ export interface RootRouteChildren {
   ApiLinkPreviewRoute: typeof ApiLinkPreviewRoute
   ApiNetworkMapRoute: typeof ApiNetworkMapRoute
   ApiPeriodDigestRoute: typeof ApiPeriodDigestRoute
+  ApiPeriodDigestHistoryRoute: typeof ApiPeriodDigestHistoryRoute
   ApiProfileAnalysisRoute: typeof ApiProfileAnalysisRoute
   ApiProfileHydrateRoute: typeof ApiProfileHydrateRoute
   ApiQueryRoute: typeof ApiQueryRoute
@@ -808,6 +821,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiProfileAnalysisRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/period-digest-history': {
+      id: '/api/period-digest-history'
+      path: '/api/period-digest-history'
+      fullPath: '/api/period-digest-history'
+      preLoaderRoute: typeof ApiPeriodDigestHistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/period-digest': {
       id: '/api/period-digest'
       path: '/api/period-digest'
@@ -958,6 +978,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiLinkPreviewRoute: ApiLinkPreviewRoute,
   ApiNetworkMapRoute: ApiNetworkMapRoute,
   ApiPeriodDigestRoute: ApiPeriodDigestRoute,
+  ApiPeriodDigestHistoryRoute: ApiPeriodDigestHistoryRoute,
   ApiProfileAnalysisRoute: ApiProfileAnalysisRoute,
   ApiProfileHydrateRoute: ApiProfileHydrateRoute,
   ApiQueryRoute: ApiQueryRoute,

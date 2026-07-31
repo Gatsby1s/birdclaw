@@ -858,6 +858,66 @@ describe("today route", () => {
 		).toBeInTheDocument();
 	});
 
+	it("restores a saved daily report without starting a model stream", async () => {
+		const saved = digestResult(
+			"2026-07-31",
+			"# July 31\n\n## What people are talking about\n\n- Restored report (tweet_1)",
+		);
+		const metadata = {
+			id: "history_1",
+			date: "2026-07-31",
+			timezone: "Asia/Shanghai",
+			status: "ready" as const,
+			title: "July 31",
+			summary: "Saved daily report",
+			counts: saved.context.counts,
+			provider: "openai",
+			model: "gpt-5.5",
+			attemptCount: 1,
+			createdAt: saved.updatedAt,
+			updatedAt: saved.updatedAt,
+			finishedAt: saved.updatedAt,
+			pdfAvailable: true,
+		};
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/profile-hydrate") {
+				return Response.json({ ok: true, results: [] });
+			}
+			if (url.pathname === "/api/period-digest-history") {
+				return url.searchParams.has("id")
+					? Response.json({ item: { metadata, result: saved } })
+					: Response.json({ items: [metadata] });
+			}
+			throw new Error(`Unexpected request: ${url.pathname}`);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(
+			<TodayRoute
+				searchState={validateTodaySearch({ run: "history_1" })}
+				onSearchChange={vi.fn()}
+			/>,
+		);
+
+		expect(
+			await screen.findByText("Restored from daily history · 0 token"),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "July 31", level: 1 }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("link", { name: "Download 2026-07-31 PDF" }),
+		).toHaveAttribute("href", "/api/period-digest-history?id=history_1&pdf=1");
+		expect(
+			fetchMock.mock.calls.some(
+				([input]) =>
+					new URL(String(input), "http://localhost").pathname ===
+					"/api/period-digest",
+			),
+		).toBe(false);
+	});
+
 	it("shows an actionable message when the digest connection drops", async () => {
 		const fetchMock = vi.fn(async () => {
 			throw new TypeError("network error");
