@@ -240,6 +240,102 @@ describe("TimelineCard", () => {
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 
+	it("automatically translates a quoted tweet with an independent original toggle", async () => {
+		class VisibleIntersectionObserver {
+			private readonly callback: IntersectionObserverCallback;
+
+			constructor(callback: IntersectionObserverCallback) {
+				this.callback = callback;
+			}
+
+			observe(target: Element) {
+				this.callback(
+					[
+						{
+							isIntersecting: true,
+							target,
+						} as IntersectionObserverEntry,
+					],
+					this as unknown as IntersectionObserver,
+				);
+			}
+
+			disconnect() {}
+			unobserve() {}
+			takeRecords() {
+				return [];
+			}
+			readonly root = null;
+			readonly rootMargin = "320px 0px";
+			readonly thresholds = [0];
+		}
+		vi.stubGlobal("IntersectionObserver", VisibleIntersectionObserver);
+		const fetchMock = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				expect(String(input)).toBe("/api/tweet-translation");
+				expect(init?.method).toBe("POST");
+				expect(JSON.parse(String(init?.body))).toEqual({
+					tweetId: "tweet_quote_korean",
+					text: "인용된 게시물입니다.",
+					targetLanguage: "zh-CN",
+				});
+				return new Response(
+					JSON.stringify({
+						ok: true,
+						tweetId: "tweet_quote_korean",
+						targetLanguage: "zh-CN",
+						sourceLanguage: "Korean",
+						translated: true,
+						translatedText: "这是一条引用帖子。",
+						cached: false,
+					}),
+					{ status: 200 },
+				);
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(
+			<TimelineCard
+				item={{
+					...item,
+					text: "这是主帖。",
+					entities: {},
+					media: [],
+					mediaCount: 0,
+					replyToTweet: null,
+					quotedTweet: {
+						...item.quotedTweet,
+						id: "tweet_quote_korean",
+						text: "인용된 게시물입니다.",
+					},
+				}}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		expect(await screen.findByText("这是一条引用帖子。")).toBeInTheDocument();
+		expect(screen.queryByText("인용된 게시물입니다.")).toBeNull();
+		expect(fetchMock).toHaveBeenCalledOnce();
+		expect(
+			screen.getByRole("button", { name: "Show conversation" }),
+		).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "显示引用原文" }));
+		expect(screen.getByText("인용된 게시물입니다.")).toBeInTheDocument();
+		expect(screen.queryByText("这是一条引用帖子。")).toBeNull();
+		expect(
+			screen.queryByRole("button", { name: "Hide conversation" }),
+		).toBeNull();
+		expect(
+			screen.getByRole("button", { name: "Show conversation" }),
+		).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "显示引用翻译" }));
+		expect(screen.getByText("这是一条引用帖子。")).toBeInTheDocument();
+		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
 	it("links the displayed avatar to a local author timeline without opening the thread", () => {
 		const fetchMock = vi.fn();
 		vi.stubGlobal("fetch", fetchMock);
