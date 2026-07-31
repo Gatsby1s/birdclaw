@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.47 - 2026-07-31
+
+### Fixed
+
+- Automatically translate non-Chinese quoted posts inside timeline cards instead of translating only the surrounding post.
+- Give each quoted post its own “显示原文 / 显示翻译” control while preserving links, mentions, hashtags, responsive layout, and the parent thread state.
+
 ## 0.8.46 - 2026-07-31
 
 ### Added
