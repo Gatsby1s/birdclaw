@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 0.8.49 - 2026-07-31
+
+### Added
+
+- Prefer the Mac's authenticated local Bird collector while it is healthy, then automatically hand collection to 6551 after three minutes without a completed local upload.
+- Upload watched-account posts, complete target threads, and quote tweets to the cloud through a dedicated authenticated bridge with bounded replay, adaptive batches, and idempotent cursors.
+
+### Fixed
+
+- Keep local and 6551 data in one account scope across handoffs, including safe migration of legacy timeline edges, bookmarks, collections, and profile identities.
+- Keep 6551 active until the local backlog is fully caught up, recover best-effort target-conversation replies, and clean up failover workers safely after startup or runtime errors.
+
 ## 0.8.48 - 2026-07-31
 
 ### Added
