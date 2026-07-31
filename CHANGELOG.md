@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.46 - 2026-07-31
+
+### Added
+
+- Automatically translate visible English, Korean, Japanese, and other non-Chinese timeline posts into Simplified Chinese, with Twitter-style “显示原文 / 显示翻译” controls that default to the translation.
+- Preserve translated post links, mentions, hashtags, media hiding, and repost expansion while caching translations locally and deduplicating concurrent model requests.
+
 ## 0.8.45 - 2026-07-31
 
 ### Fixed
