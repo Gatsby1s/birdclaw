@@ -26,6 +26,32 @@ describe("local cloud bridge", () => {
 		});
 		home.db
 			.prepare(
+				`insert into xremark_profile_notes (
+					identifier, additional_name, given_name, remark, description,
+					tags_json, category_name, source_updated_at, imported_at
+				) values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				"profile:test",
+				"test",
+				"Test Profile",
+				"Do not follow directly",
+				"Followed as a reverse indicator",
+				JSON.stringify(["反指"]),
+				"风险观察",
+				1_752_499_700_000,
+				"2026-07-31T08:00:00.000Z",
+			);
+		home.db
+			.prepare(
+				`insert into xremark_import_state (
+					id, backup_id, backup_time, source_version, imported_at,
+					annotation_count
+				) values (1, ?, ?, ?, ?, ?)`,
+			)
+			.run("backup:test", 1_752_499_800_000, 1, "2026-07-31T08:00:00.000Z", 1);
+		home.db
+			.prepare(
 				`
 				insert into tweet_account_edges (
 					account_id, tweet_id, kind, first_seen_at, last_seen_at,
@@ -61,6 +87,17 @@ describe("local cloud bridge", () => {
 			text: "local bridge tweet",
 		});
 		expect(batch.profiles[0]).toMatchObject({ id: "profile:test" });
+		expect(batch.xRemarkSnapshot).toMatchObject({
+			backupId: "backup:test",
+			annotations: [
+				{
+					identifier: "profile:test",
+					tags: ["反指"],
+					remark: "Do not follow directly",
+					description: "Followed as a reverse indicator",
+				},
+			],
+		});
 
 		home.switchHome();
 		await importLocalCloudBridgeBatch(batch);
@@ -81,6 +118,28 @@ describe("local cloud bridge", () => {
 				.prepare("select count(*) as count from tweets_fts where tweet_id = ?")
 				.get("tweet:test"),
 		).toEqual({ count: 1 });
+		expect(
+			home.db
+				.prepare(
+					"select tags_json as tagsJson, remark, description from xremark_profile_notes where identifier = ?",
+				)
+				.get("profile:test"),
+		).toEqual({
+			tagsJson: JSON.stringify(["反指"]),
+			remark: "Do not follow directly",
+			description: "Followed as a reverse indicator",
+		});
+		await importLocalCloudBridgeBatch({
+			...batch,
+			xRemarkSnapshot: batch.xRemarkSnapshot
+				? { ...batch.xRemarkSnapshot, annotations: [] }
+				: null,
+		});
+		expect(
+			home.db
+				.prepare("select count(*) as count from xremark_profile_notes")
+				.get(),
+		).toEqual({ count: 0 });
 	});
 
 	it("does not send a heartbeat until local collection is healthy", async () => {

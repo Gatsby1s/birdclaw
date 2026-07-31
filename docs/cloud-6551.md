@@ -79,10 +79,20 @@ MCP at `/mcp`. It deliberately provides no Ask page or hosted answer model:
 ChatGPT supplies the conversation and reasoning, while BirdClaw supplies two
 retrieval tools:
 
-- `search(query)` returns up to 10 stable tweet document IDs and canonical X
-  source URLs.
+- `search(query)` returns up to 10 stable tweet document IDs, canonical X
+  source URLs, and mandatory author judgment context from X Remark.
 - `fetch(id)` returns the archived tweet plus available parent, quote, and reply
-  context for grounded answers and citations.
+  context for grounded answers and citations. Every included author carries
+  their own X Remark category, tags, personal note, and follow reason. An
+  author without a record is explicitly marked `unlabeled`; missing annotation
+  context must never be silently presented as neutral.
+
+The local cloud bridge sends the authoritative X Remark snapshot after it has
+caught up with tweet uploads, so cloud retrieval keeps labels such as `反指`
+even when the author has not posted recently. Any future embedding/chunk index
+must copy this author context into every chunk and include it in the chunk
+content hash. Editing an author annotation must therefore invalidate and
+rebuild affected derived chunks.
 
 Private archive access uses a separate OAuth 2.1 resource-server boundary. Do
 not reuse `BIRDCLAW_WEB_TOKEN` or the local bridge token. Configure an
