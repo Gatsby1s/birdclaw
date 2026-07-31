@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 0.8.48 - 2026-07-31
+
+### Added
+
+- Run BirdClaw continuously in Railway with a persistent SQLite volume, a private signed-cookie login, health checks, graceful shutdown, and secure fail-closed remote access.
+- Ingest watched-account activity from 6551 through validated REST and WebSocket adapters, with a durable event inbox, reconnect recovery, idempotent writes, manual sync, and live status in Settings.
+- Use BirdClaw comfortably from phones with touch-sized bottom navigation, safe-area spacing, responsive layouts, and automated portrait and landscape checks.
+
+### Fixed
+
+- Preserve rich profile bios and metrics when later tweet events only contain partial author data.
+- Keep failed or out-of-scope 6551 events from corrupting timelines, reply state, or existing profiles.
+
 ## 0.8.47 - 2026-07-31
 
 ### Fixed
