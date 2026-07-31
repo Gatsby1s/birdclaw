@@ -203,6 +203,21 @@ function enrichEmbeddedTweet(tweet: EmbeddedTweet, maps: AnnotationMaps) {
 	};
 }
 
+export function createXRemarkAnnotationResolver(
+	db: Database = getReadDb({ seedDemoData: false }),
+) {
+	const maps = listAnnotationMaps(db);
+	return (lookup: { handle?: string; identifier?: string }) => {
+		if (lookup.identifier) {
+			const annotation = identifierCandidates(lookup.identifier)
+				.map((identifier) => maps.byIdentifier.get(identifier))
+				.find(Boolean);
+			if (annotation) return annotation;
+		}
+		return maps.byHandle.get(normalizedHandle(lookup.handle)) ?? null;
+	};
+}
+
 export function enrichTimelineItemsWithXRemark(
 	items: TimelineItem[],
 	db: Database = getReadDb(),
@@ -358,7 +373,6 @@ export function getXRemarkSyncStatus(
 				.get() as { count?: number } | undefined
 		)?.count ?? 0,
 	);
-	const maps = listAnnotationMaps(db);
 	const normalizedLookupHandle = normalizedHandle(lookup.handle);
 	const storedProfile =
 		!lookup.identifier && normalizedLookupHandle
@@ -367,11 +381,10 @@ export function getXRemarkSyncStatus(
 					.get(normalizedLookupHandle) as { id?: string } | undefined)
 			: undefined;
 	const resolvedIdentifier = lookup.identifier ?? storedProfile?.id;
-	const annotation = resolvedIdentifier
-		? (identifierCandidates(resolvedIdentifier)
-				.map((identifier) => maps.byIdentifier.get(identifier))
-				.find(Boolean) ?? maps.byHandle.get(normalizedHandle(lookup.handle)))
-		: maps.byHandle.get(normalizedLookupHandle);
+	const annotation = createXRemarkAnnotationResolver(db)({
+		...(resolvedIdentifier ? { identifier: resolvedIdentifier } : {}),
+		...(normalizedLookupHandle ? { handle: normalizedLookupHandle } : {}),
+	});
 	const backupTime = timestampToIso(state?.backup_time);
 
 	return {

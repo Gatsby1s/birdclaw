@@ -24,9 +24,9 @@ import {
 } from "./rag-mcp-store";
 
 const SEARCH_DESCRIPTION =
-	"Search the private BirdClaw tweet archive. Use this before fetch to find stable tweet document IDs relevant to a question. Returns at most 10 results with canonical source URLs.";
+	"Search the private BirdClaw tweet archive. Use this before fetch to find stable tweet document IDs relevant to a question. Every result includes mandatory author_context from the owner's X Remark records (labels, personal note, and why the author is followed). Always surface this context when judging a claim, especially warning labels such as 反指. Returns at most 10 results with canonical source URLs.";
 const FETCH_DESCRIPTION =
-	"Fetch one BirdClaw tweet document by the stable ID returned from search. Returns the full archived tweet plus available parent, quote, and reply context and a canonical source URL for citations.";
+	"Fetch one BirdClaw tweet document by the stable ID returned from search. Returns the full archived tweet plus available parent, quote, and reply context, mandatory author judgment context for every included author, and a canonical source URL for citations. Never omit recorded labels, notes, or follow reasons when presenting the source.";
 const packageVersion = (
 	JSON.parse(
 		readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
@@ -65,8 +65,37 @@ const searchTool = {
 						id: { type: "string" },
 						title: { type: "string" },
 						url: { type: "string", format: "uri" },
+						author_context: {
+							type: "object",
+							properties: {
+								handle: { type: "string" },
+								display_name: { type: "string" },
+								label_status: {
+									type: "string",
+									enum: ["recorded", "unlabeled"],
+								},
+								labels: { type: "array", items: { type: "string" } },
+								tags: { type: "array", items: { type: "string" } },
+								category: { type: ["string", "null"] },
+								personal_note: { type: ["string", "null"] },
+								follow_reason: { type: ["string", "null"] },
+								source_updated_at: { type: ["string", "null"] },
+							},
+							required: [
+								"handle",
+								"display_name",
+								"label_status",
+								"labels",
+								"tags",
+								"category",
+								"personal_note",
+								"follow_reason",
+								"source_updated_at",
+							],
+							additionalProperties: false,
+						},
 					},
-					required: ["id", "title", "url"],
+					required: ["id", "title", "url", "author_context"],
 					additionalProperties: false,
 				},
 			},

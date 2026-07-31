@@ -86,6 +86,27 @@ const bridgeEdgeSchema = z.object({
 	updatedAt: z.string().max(64),
 });
 
+const bridgeXRemarkAnnotationSchema = z.object({
+	identifier: z.string().min(1).max(256),
+	handle: z.string().max(256),
+	displayName: z.string().max(512),
+	remark: z.string().max(10_000),
+	description: z.string().max(100_000),
+	tags: z.array(z.string().max(200)).max(200),
+	categoryName: z.string().max(200).nullable(),
+	sourceCreatedAt: z.number().finite().nonnegative().nullable(),
+	sourceUpdatedAt: z.number().finite().nonnegative().nullable(),
+	importedAt: z.string().max(64),
+});
+
+const bridgeXRemarkSnapshotSchema = z.object({
+	backupId: z.string().max(256).nullable(),
+	backupTime: z.number().finite().nonnegative().nullable(),
+	sourceVersion: z.number().int().nonnegative(),
+	importedAt: z.string().max(64),
+	annotations: z.array(bridgeXRemarkAnnotationSchema).max(50_000),
+});
+
 export const localCloudBridgeBatchSchema = z.object({
 	version: z.literal(1),
 	sentAt: z.string().max(64),
@@ -95,6 +116,10 @@ export const localCloudBridgeBatchSchema = z.object({
 	profiles: z.array(bridgeProfileSchema).max(MAX_BATCH_SIZE * 2),
 	tweets: z.array(bridgeTweetSchema).max(MAX_BATCH_SIZE * 2),
 	edges: z.array(bridgeEdgeSchema).max(MAX_BATCH_SIZE),
+	xRemarkSnapshot: bridgeXRemarkSnapshotSchema
+		.nullable()
+		.optional()
+		.default(null),
 });
 
 export type LocalCloudBridgeCursor = z.infer<typeof bridgeCursorSchema>;
@@ -192,6 +217,65 @@ function writeBridgeCursor(
 	).run(bridgeCacheKey(url), JSON.stringify(cursor), now.toISOString());
 }
 
+function parseStoredTags(value: string) {
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return Array.isArray(parsed)
+			? parsed.filter((entry): entry is string => typeof entry === "string")
+			: [];
+	} catch {
+		return [];
+	}
+}
+
+function buildXRemarkSnapshot(db: Database) {
+	const state = db
+		.prepare(
+			`select backup_id as backupId, backup_time as backupTime,
+			        source_version as sourceVersion, imported_at as importedAt
+			 from xremark_import_state where id = 1`,
+		)
+		.get() as
+		| {
+				backupId: string | null;
+				backupTime: number | null;
+				sourceVersion: number;
+				importedAt: string;
+		  }
+		| undefined;
+	if (!state) return null;
+	const rows = db
+		.prepare(
+			`select identifier, additional_name as handle,
+			        given_name as displayName, remark, description,
+			        tags_json as tagsJson, category_name as categoryName,
+			        source_created_at as sourceCreatedAt,
+			        source_updated_at as sourceUpdatedAt,
+			        imported_at as importedAt
+			 from xremark_profile_notes
+			 order by identifier`,
+		)
+		.all() as Array<{
+		identifier: string;
+		handle: string;
+		displayName: string;
+		remark: string;
+		description: string;
+		tagsJson: string;
+		categoryName: string | null;
+		sourceCreatedAt: number | null;
+		sourceUpdatedAt: number | null;
+		importedAt: string;
+	}>;
+	return bridgeXRemarkSnapshotSchema.parse({
+		...state,
+		annotations: rows.map(({ tagsJson, ...row }) => ({
+			...row,
+			tags: parseStoredTags(tagsJson),
+		})),
+	});
+}
+
 export function buildLocalCloudBridgeBatch({
 	cursor,
 	lookbackHours = DEFAULT_LOOKBACK_HOURS,
@@ -252,6 +336,7 @@ export function buildLocalCloudBridgeBatch({
 			safeLimit,
 		) as LocalCloudBridgeBatch["edges"];
 	const lastEdge = edges.at(-1);
+	const caughtUp = edges.length < safeLimit;
 	const nextCursor = lastEdge
 		? {
 				updatedAt: lastEdge.updatedAt,
@@ -340,18 +425,38 @@ export function buildLocalCloudBridgeBatch({
 	return localCloudBridgeBatchSchema.parse({
 		version: 1,
 		sentAt: now.toISOString(),
-		caughtUp: edges.length < safeLimit,
+		caughtUp,
 		cursor: nextCursor,
 		accounts,
 		profiles,
 		tweets,
 		edges,
+		xRemarkSnapshot: caughtUp ? buildXRemarkSnapshot(db) : null,
 	});
 }
 
 export async function importLocalCloudBridgeBatch(input: unknown) {
 	const batch = localCloudBridgeBatchSchema.parse(input);
 	const result = await enqueueDatabaseWrite((db) => {
+		const replaceXRemarkState = db.prepare(`
+			insert into xremark_import_state (
+				id, backup_id, backup_time, source_version, imported_at,
+				annotation_count
+			) values (1, ?, ?, ?, ?, ?)
+			on conflict(id) do update set
+				backup_id = excluded.backup_id,
+				backup_time = excluded.backup_time,
+				source_version = excluded.source_version,
+				imported_at = excluded.imported_at,
+				annotation_count = excluded.annotation_count
+		`);
+		const insertXRemarkAnnotation = db.prepare(`
+			insert into xremark_profile_notes (
+				identifier, additional_name, given_name, remark, description,
+				tags_json, category_name, source_created_at, source_updated_at,
+				imported_at
+			) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`);
 		const upsertAccount = db.prepare(`
 			insert into accounts (
 				id, name, handle, external_user_id, transport, is_default, created_at
@@ -687,12 +792,37 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 				row.updatedAt,
 			);
 		}
+		if (batch.xRemarkSnapshot) {
+			db.prepare("delete from xremark_profile_notes").run();
+			for (const annotation of batch.xRemarkSnapshot.annotations) {
+				insertXRemarkAnnotation.run(
+					annotation.identifier,
+					annotation.handle,
+					annotation.displayName,
+					annotation.remark,
+					annotation.description,
+					JSON.stringify(annotation.tags),
+					annotation.categoryName,
+					annotation.sourceCreatedAt,
+					annotation.sourceUpdatedAt,
+					annotation.importedAt,
+				);
+			}
+			replaceXRemarkState.run(
+				batch.xRemarkSnapshot.backupId,
+				batch.xRemarkSnapshot.backupTime,
+				batch.xRemarkSnapshot.sourceVersion,
+				batch.xRemarkSnapshot.importedAt,
+				batch.xRemarkSnapshot.annotations.length,
+			);
+		}
 		return {
 			caughtUp: batch.caughtUp,
 			accounts: batch.accounts.length,
 			profiles: batch.profiles.length,
 			tweets: batch.tweets.length,
 			edges: batch.edges.length,
+			xRemarkAnnotations: batch.xRemarkSnapshot?.annotations.length ?? 0,
 			cursor: batch.cursor,
 		};
 	});

@@ -1,6 +1,8 @@
 import { getReadDb } from "./db";
 import { toFtsSearchQuery } from "./query-read-model-shared";
 import type { Database } from "./sqlite";
+import type { XRemarkAnnotation } from "./types";
+import { createXRemarkAnnotationResolver } from "./xremark";
 
 const MAX_SEARCH_RESULTS = 10;
 const MAX_SEARCH_CANDIDATES = 160;
@@ -59,8 +61,10 @@ interface SearchCandidateRow {
 	text: string;
 	created_at: string;
 	like_count: number;
+	author_profile_id: string;
 	handle: string;
 	display_name: string;
+	annotation_search_text: string;
 	bookmarked: number;
 	liked: number;
 }
@@ -75,6 +79,7 @@ export interface RagSearchResult {
 	id: string;
 	title: string;
 	url: string;
+	author_context: RagAuthorContext;
 }
 
 export interface RagFetchResult {
@@ -83,6 +88,18 @@ export interface RagFetchResult {
 	text: string;
 	url: string;
 	metadata: Record<string, unknown>;
+}
+
+export interface RagAuthorContext {
+	handle: string;
+	display_name: string;
+	label_status: "recorded" | "unlabeled";
+	labels: string[];
+	tags: string[];
+	category: string | null;
+	personal_note: string | null;
+	follow_reason: string | null;
+	source_updated_at: string | null;
 }
 
 function normalizeHandle(handle: string) {
@@ -119,9 +136,78 @@ function makeSnippet(text: string, terms: string[]) {
 	return `${start > 0 ? "…" : ""}${snippet}${codePointLength(compact) > start + 180 ? "…" : ""}`;
 }
 
-function titleForTweet(row: SearchCandidateRow, terms: string[] = []) {
+function compactContextValue(value: string, limit = 140) {
+	const compact = compactText(value);
+	return codePointLength(compact) > limit
+		? `${sliceCodePoints(compact, 0, limit)}…`
+		: compact;
+}
+
+function authorContextForRow(
+	resolveAnnotation: (lookup: {
+		identifier?: string;
+		handle?: string;
+	}) => XRemarkAnnotation | null,
+	row: Pick<
+		SearchCandidateRow,
+		"author_profile_id" | "handle" | "display_name"
+	>,
+): RagAuthorContext {
+	const annotation = resolveAnnotation({
+		identifier: row.author_profile_id,
+		handle: row.handle,
+	});
+	if (!annotation) {
+		return {
+			handle: normalizeHandle(row.handle),
+			display_name: row.display_name,
+			label_status: "unlabeled",
+			labels: [],
+			tags: [],
+			category: null,
+			personal_note: null,
+			follow_reason: null,
+			source_updated_at: null,
+		};
+	}
+	const category = annotation.category?.trim() || null;
+	const tags = unique(annotation.tags.map((tag) => tag.trim()).filter(Boolean));
+	return {
+		handle: normalizeHandle(row.handle),
+		display_name: row.display_name,
+		label_status: "recorded",
+		labels: unique([...(category ? [category] : []), ...tags]),
+		tags,
+		category,
+		personal_note: annotation.remark.trim() || null,
+		follow_reason: annotation.description.trim() || null,
+		source_updated_at: annotation.sourceUpdatedAt ?? null,
+	};
+}
+
+function authorContextSummary(context: RagAuthorContext) {
+	if (context.label_status === "unlabeled") return "作者标注：未标注";
+	const parts = [
+		context.labels.length > 0
+			? `标签：${context.labels.join(" / ")}`
+			: "标签：无",
+		context.personal_note
+			? `备注：${compactContextValue(context.personal_note)}`
+			: "",
+		context.follow_reason
+			? `关注原因：${compactContextValue(context.follow_reason)}`
+			: "",
+	].filter(Boolean);
+	return `作者标注：${parts.join("；")}`;
+}
+
+function titleForTweet(
+	row: SearchCandidateRow,
+	terms: string[],
+	authorContext: RagAuthorContext,
+) {
 	const date = row.created_at.slice(0, 10);
-	return `@${normalizeHandle(row.handle)} · ${date} — ${makeSnippet(row.text, terms)}`;
+	return `@${normalizeHandle(row.handle)} · ${date} · ${authorContextSummary(authorContext)} — ${makeSnippet(row.text, terms)}`;
 }
 
 function unique<T>(items: T[]) {
@@ -203,8 +289,10 @@ function searchFts(db: Database, query: string) {
 				t.text,
 				t.created_at,
 				t.like_count,
+				t.author_profile_id,
 				p.handle,
 				p.display_name,
+				'' as annotation_search_text,
 				${collectionStateSelect()},
 				bm25(tweets_fts) as fts_rank
 			from tweets_fts
@@ -249,23 +337,46 @@ function searchSubstrings(db: Database, query: string) {
 	return db
 		.prepare(
 			`
-			with candidates as (
+			with annotated_profiles as (
+				select
+					p.*,
+					lower(coalesce((
+						select coalesce(note.category_name, '') || ' ' || note.tags_json || ' ' ||
+						       note.remark || ' ' || note.description
+						from xremark_profile_notes note
+						where p.id = note.identifier
+						   or p.id = 'profile_user_' || note.identifier
+						   or (
+							lower(p.handle) = lower(note.additional_name)
+							and not exists (
+								select 1 from profiles stable
+								where stable.id = note.identifier
+								   or stable.id = 'profile_user_' || note.identifier
+							)
+						   )
+						limit 1
+					), '')) as annotation_search_text
+				from profiles p
+			), candidates as (
 				select
 					t.id,
 					t.text,
 					t.created_at,
 					t.like_count,
+					t.author_profile_id,
 					p.handle,
 					p.display_name,
+					p.annotation_search_text,
 					${collectionStateSelect()},
-					lower(t.text || ' ' || p.handle || ' ' || p.display_name) as search_text
+					lower(t.text || ' ' || p.handle || ' ' || p.display_name ||
+					      ' ' || p.annotation_search_text) as search_text
 				from tweets t
-				join profiles p on p.id = t.author_profile_id
+				join annotated_profiles p on p.id = t.author_profile_id
 			), ranked as (
 				select *, ${score} as term_score from candidates
 			)
-			select id, text, created_at, like_count, handle, display_name,
-				bookmarked, liked
+			select id, text, created_at, like_count, author_profile_id, handle, display_name,
+				annotation_search_text, bookmarked, liked
 			from ranked
 			where term_score > 0
 			order by term_score desc, bookmarked desc, liked desc, like_count desc,
@@ -282,7 +393,7 @@ function relevanceScore(
 	terms: string[],
 ) {
 	const haystack =
-		`${row.text} ${row.handle} ${row.display_name}`.toLocaleLowerCase();
+		`${row.text} ${row.handle} ${row.display_name} ${row.annotation_search_text}`.toLocaleLowerCase();
 	const exact = compactText(query).toLocaleLowerCase();
 	let score =
 		exact.length >= 3 &&
@@ -304,6 +415,7 @@ export function searchRagTweets(query: string): RagSearchResult[] {
 	const normalized = compactText(query);
 	if (!normalized) return [];
 	const db = getReadDb({ seedDemoData: false });
+	const resolveAnnotation = createXRemarkAnnotationResolver(db);
 	const terms = extractSearchTerms(normalized);
 	const candidates = new Map<string, SearchCandidateRow>();
 	for (const row of [
@@ -322,11 +434,15 @@ export function searchRagTweets(query: string): RagSearchResult[] {
 				right.row.created_at.localeCompare(left.row.created_at),
 		)
 		.slice(0, MAX_SEARCH_RESULTS)
-		.map(({ row }) => ({
-			id: `tweet:${row.id}`,
-			title: titleForTweet(row, terms),
-			url: tweetUrl(row),
-		}));
+		.map(({ row }) => {
+			const authorContext = authorContextForRow(resolveAnnotation, row);
+			return {
+				id: `tweet:${row.id}`,
+				title: titleForTweet(row, terms, authorContext),
+				url: tweetUrl(row),
+				author_context: authorContext,
+			};
+		});
 }
 
 function getTweetDocumentRow(db: Database, tweetId: string) {
@@ -341,6 +457,7 @@ function getTweetDocumentRow(db: Database, tweetId: string) {
 				t.quoted_tweet_id,
 				t.like_count,
 				t.media_count,
+				t.author_profile_id,
 				p.handle,
 				p.display_name,
 				${collectionStateSelect()}
@@ -388,6 +505,7 @@ function getReplyRows(db: Database, tweetId: string) {
 				t.quoted_tweet_id,
 				t.like_count,
 				t.media_count,
+				t.author_profile_id,
 				p.handle,
 				p.display_name,
 				${collectionStateSelect()}
@@ -401,10 +519,39 @@ function getReplyRows(db: Database, tweetId: string) {
 		.all(tweetId, MAX_CONTEXT_REPLIES) as TweetDocumentRow[];
 }
 
-function formatTweetSection(row: TweetDocumentRow, heading: string) {
+function formatAuthorContext(context: RagAuthorContext) {
+	if (context.label_status === "unlabeled") {
+		return [
+			"### Author judgment context (must not be omitted)",
+			"- Label status: unlabeled in X Remark",
+			"- Labels: none recorded",
+		].join("\n");
+	}
+	return [
+		"### Author judgment context (must not be omitted)",
+		"- Label status: recorded",
+		`- Labels: ${context.labels.length > 0 ? context.labels.join(", ") : "none recorded"}`,
+		`- Category: ${context.category ?? "none recorded"}`,
+		`- Tags: ${context.tags.length > 0 ? context.tags.join(", ") : "none recorded"}`,
+		`- Personal note: ${context.personal_note ?? "none recorded"}`,
+		`- Why followed / context: ${context.follow_reason ?? "none recorded"}`,
+		...(context.source_updated_at
+			? [`- Annotation updated at: ${context.source_updated_at}`]
+			: []),
+	].join("\n");
+}
+
+function formatTweetSection(
+	resolveAnnotation: ReturnType<typeof createXRemarkAnnotationResolver>,
+	row: TweetDocumentRow,
+	heading: string,
+) {
+	const authorContext = authorContextForRow(resolveAnnotation, row);
 	return [
 		`## ${heading}`,
 		`@${normalizeHandle(row.handle)} (${row.display_name}) · ${row.created_at}`,
+		"",
+		formatAuthorContext(authorContext),
 		"",
 		row.text.trim(),
 		"",
@@ -425,6 +572,7 @@ export function fetchRagTweet(id: string): RagFetchResult | null {
 	const tweetId = normalizeFetchId(id);
 	if (!tweetId) return null;
 	const db = getReadDb({ seedDemoData: false });
+	const resolveAnnotation = createXRemarkAnnotationResolver(db);
 	const row = getTweetDocumentRow(db, tweetId);
 	if (!row) return null;
 	const parents = getParentRows(db, row);
@@ -432,8 +580,11 @@ export function fetchRagTweet(id: string): RagFetchResult | null {
 		? getTweetDocumentRow(db, row.quoted_tweet_id)
 		: undefined;
 	const replies = getReplyRows(db, row.id);
+	const authorContext = authorContextForRow(resolveAnnotation, row);
 	const sections = [
 		`# @${normalizeHandle(row.handle)} — ${row.created_at}`,
+		"",
+		formatAuthorContext(authorContext),
 		"",
 		row.text.trim(),
 		"",
@@ -445,7 +596,11 @@ export function fetchRagTweet(id: string): RagFetchResult | null {
 			"# Parent context",
 			"",
 			...parents.map((parent, index) =>
-				formatTweetSection(parent, `Parent ${String(index + 1)}`),
+				formatTweetSection(
+					resolveAnnotation,
+					parent,
+					`Parent ${String(index + 1)}`,
+				),
 			),
 		);
 	}
@@ -454,7 +609,7 @@ export function fetchRagTweet(id: string): RagFetchResult | null {
 			"",
 			"# Quoted tweet",
 			"",
-			formatTweetSection(quoted, "Quote"),
+			formatTweetSection(resolveAnnotation, quoted, "Quote"),
 		);
 	}
 	if (replies.length > 0) {
@@ -463,7 +618,11 @@ export function fetchRagTweet(id: string): RagFetchResult | null {
 			"# Replies in the archive",
 			"",
 			...replies.map((reply, index) =>
-				formatTweetSection(reply, `Reply ${String(index + 1)}`),
+				formatTweetSection(
+					resolveAnnotation,
+					reply,
+					`Reply ${String(index + 1)}`,
+				),
 			),
 		);
 	}
@@ -477,7 +636,7 @@ export function fetchRagTweet(id: string): RagFetchResult | null {
 
 	return {
 		id: `tweet:${row.id}`,
-		title: titleForTweet(row),
+		title: titleForTweet(row, [], authorContext),
 		text: sections.join("\n"),
 		url: tweetUrl(row),
 		metadata: {
@@ -485,6 +644,28 @@ export function fetchRagTweet(id: string): RagFetchResult | null {
 			tweet_id: row.id,
 			author: row.display_name,
 			handle: normalizeHandle(row.handle),
+			author_context: authorContext,
+			context_authors: [
+				...parents.map((contextRow) => ({
+					relation: "parent",
+					tweet_id: contextRow.id,
+					author_context: authorContextForRow(resolveAnnotation, contextRow),
+				})),
+				...(quoted
+					? [
+							{
+								relation: "quote",
+								tweet_id: quoted.id,
+								author_context: authorContextForRow(resolveAnnotation, quoted),
+							},
+						]
+					: []),
+				...replies.map((contextRow) => ({
+					relation: "reply",
+					tweet_id: contextRow.id,
+					author_context: authorContextForRow(resolveAnnotation, contextRow),
+				})),
+			],
 			created_at: row.created_at,
 			like_count: row.like_count,
 			media_count: row.media_count,
