@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { getAuthenticatedBirdAccountEffect } from "./bird";
 import { getTwitter6551Config, resolveProfileAnalysisSource } from "./config";
 import { getNativeDb } from "./db";
+import { getTwitter6551RuntimeStatus } from "./twitter-6551";
 import type { LiveDataSourcesResponse } from "./api-contracts";
 import type {
 	LiveDataSourceAccount,
@@ -167,15 +168,27 @@ function getTwitter6551StatusEffect(): Effect.Effect<
 > {
 	return Effect.sync(() => {
 		const config = getTwitter6551Config();
+		const runtime = getTwitter6551RuntimeStatus();
+		const works =
+			runtime.connected ||
+			Boolean(runtime.lastBackfillAt && runtime.state !== "error");
 		return {
 			source: "twitter6551" as const,
 			label: "6551 Twitter API",
-			works: false,
+			works,
 			installed: true,
-			status: "warning" as const,
-			detail: config.tokenDetected
-				? `${config.tokenEnv} detected; Profile Analyse adapter pending`
-				: `${config.tokenEnv} not detected`,
+			status: (works
+				? "ok"
+				: runtime.state === "error"
+					? "error"
+					: "warning") as "ok" | "warning" | "error",
+			detail: runtime.connected
+				? `realtime connected; ${String(runtime.watchUsers.length)} watched account${runtime.watchUsers.length === 1 ? "" : "s"}`
+				: runtime.lastBackfillAt
+					? `recovery polling active; last sync ${runtime.lastBackfillAt}`
+					: config.tokenDetected
+						? (runtime.lastError ?? "token detected; worker is not connected")
+						: `${config.tokenEnv} not detected`,
 			accounts: [],
 		};
 	});

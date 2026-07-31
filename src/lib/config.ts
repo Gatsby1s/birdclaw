@@ -36,6 +36,10 @@ export interface BirdclawConfig {
 		twitter6551?: {
 			baseUrl?: string;
 			tokenEnv?: string;
+			accountId?: string;
+			watchUsers?: string[];
+			targetTweetIds?: string[];
+			backfillMinutes?: number;
 		};
 	};
 	backup?: {
@@ -161,10 +165,27 @@ export function getTwitter6551Config() {
 	const configured = getBirdclawConfig().providers?.twitter6551;
 	const tokenEnv = configured?.tokenEnv?.trim() || "TWITTER_TOKEN";
 	const baseUrl = configured?.baseUrl?.trim() || "https://ai.6551.io";
+	const normalizeList = (values: string[] | undefined) => [
+		...new Set(
+			(values ?? [])
+				.map((value) => value.trim().replace(/^@/, ""))
+				.filter(Boolean),
+		),
+	];
+	const backfillMinutes = Number(configured?.backfillMinutes);
 	return {
 		baseUrl,
 		tokenEnv,
-		tokenDetected: Boolean(process.env[tokenEnv]?.trim()),
+		tokenDetected: Boolean(
+			process.env[tokenEnv]?.trim() || process.env.OPENNEWS_TOKEN?.trim(),
+		),
+		accountId: configured?.accountId?.trim() || "acct_6551",
+		watchUsers: normalizeList(configured?.watchUsers),
+		targetTweetIds: normalizeList(configured?.targetTweetIds),
+		backfillMinutes:
+			Number.isFinite(backfillMinutes) && backfillMinutes > 0
+				? backfillMinutes
+				: 120,
 	};
 }
 

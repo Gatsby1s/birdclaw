@@ -75,6 +75,7 @@ body {
 
 html {
 	scrollbar-gutter: stable;
+	overscroll-behavior-y: none;
 }
 
 body {
@@ -107,6 +108,25 @@ input,
 textarea {
 	-webkit-user-select: text;
 	user-select: text;
+}
+
+summary::-webkit-details-marker {
+	display: none;
+}
+
+@media (max-width: 639px) {
+	html {
+		scrollbar-gutter: auto;
+	}
+
+	button,
+	[role="button"] {
+		min-height: 44px;
+	}
+
+	.birdclaw-state {
+		min-height: 45dvh;
+	}
 }
 
 /* Subtle thin scrollbar for app-owned internal scroll panes. */

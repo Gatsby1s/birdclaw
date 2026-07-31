@@ -51,6 +51,7 @@ import { Route as ApiBlocksRouteImport } from './routes/api/blocks'
 import { Route as ApiAvatarRouteImport } from './routes/api/avatar'
 import { Route as ApiActionRouteImport } from './routes/api/action'
 import { Route as ApiIntegrationsXremarkRouteImport } from './routes/api/integrations.xremark'
+import { Route as ApiIntegrationsTwitter6551RouteImport } from './routes/api/integrations.twitter6551'
 import { Route as ApiIntegrationsXremarkSnapshotRouteImport } from './routes/api/integrations.xremark.snapshot'
 
 const TodayRoute = TodayRouteImport.update({
@@ -263,6 +264,12 @@ const ApiIntegrationsXremarkRoute = ApiIntegrationsXremarkRouteImport.update({
   path: '/api/integrations/xremark',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiIntegrationsTwitter6551Route =
+  ApiIntegrationsTwitter6551RouteImport.update({
+    id: '/api/integrations/twitter6551',
+    path: '/api/integrations/twitter6551',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiIntegrationsXremarkSnapshotRoute =
   ApiIntegrationsXremarkSnapshotRouteImport.update({
     id: '/snapshot',
@@ -312,6 +319,7 @@ export interface FileRoutesByFullPath {
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
 }
@@ -357,6 +365,7 @@ export interface FileRoutesByTo {
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
 }
@@ -403,6 +412,7 @@ export interface FileRoutesById {
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
 }
@@ -450,6 +460,7 @@ export interface FileRouteTypes {
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
     | '/profiles/$handle'
+    | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
     | '/api/integrations/xremark/snapshot'
   fileRoutesByTo: FileRoutesByTo
@@ -495,6 +506,7 @@ export interface FileRouteTypes {
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
     | '/profiles/$handle'
+    | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
     | '/api/integrations/xremark/snapshot'
   id:
@@ -540,6 +552,7 @@ export interface FileRouteTypes {
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
     | '/profiles/$handle'
+    | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
     | '/api/integrations/xremark/snapshot'
   fileRoutesById: FileRoutesById
@@ -586,6 +599,7 @@ export interface RootRouteChildren {
   ApiXurlRateLimitsRoute: typeof ApiXurlRateLimitsRoute
   AuthorsHandleRoute: typeof AuthorsHandleRoute
   ProfilesHandleRoute: typeof ProfilesHandleRoute
+  ApiIntegrationsTwitter6551Route: typeof ApiIntegrationsTwitter6551Route
   ApiIntegrationsXremarkRoute: typeof ApiIntegrationsXremarkRouteWithChildren
 }
 
@@ -885,6 +899,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiIntegrationsXremarkRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/integrations/twitter6551': {
+      id: '/api/integrations/twitter6551'
+      path: '/api/integrations/twitter6551'
+      fullPath: '/api/integrations/twitter6551'
+      preLoaderRoute: typeof ApiIntegrationsTwitter6551RouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/integrations/xremark/snapshot': {
       id: '/api/integrations/xremark/snapshot'
       path: '/snapshot'
@@ -951,6 +972,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiXurlRateLimitsRoute: ApiXurlRateLimitsRoute,
   AuthorsHandleRoute: AuthorsHandleRoute,
   ProfilesHandleRoute: ProfilesHandleRoute,
+  ApiIntegrationsTwitter6551Route: ApiIntegrationsTwitter6551Route,
   ApiIntegrationsXremarkRoute: ApiIntegrationsXremarkRouteWithChildren,
 }
 export const routeTree = rootRouteImport

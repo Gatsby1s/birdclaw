@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { Effect } from "effect";
 import { runEffectPromise, tryPromise } from "./effect-runtime";
 
@@ -57,6 +58,74 @@ function configuredWebToken() {
 	return token || null;
 }
 
+const WEB_SESSION_COOKIE = "birdclaw_session";
+const WEB_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+function constantTimeEqual(left: string, right: string) {
+	const leftBuffer = Buffer.from(left);
+	const rightBuffer = Buffer.from(right);
+	if (leftBuffer.length !== rightBuffer.length) return false;
+	return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function sessionSignature(expiresAt: string, token: string) {
+	return createHmac("sha256", token)
+		.update(`birdclaw-web-session:${expiresAt}`)
+		.digest("base64url");
+}
+
+export function verifyBirdclawWebToken(candidate: string) {
+	const token = configuredWebToken();
+	return Boolean(token && constantTimeEqual(candidate, token));
+}
+
+export function hasValidBirdclawWebSession(request: Request) {
+	const token = configuredWebToken();
+	if (!token) return false;
+	const value = requestCookie(request, WEB_SESSION_COOKIE).value;
+	if (!value) return false;
+	const [expiresAt, signature] = value.split(".");
+	if (!expiresAt || !signature || !/^\d+$/.test(expiresAt)) return false;
+	if (Number(expiresAt) <= Math.floor(Date.now() / 1000)) return false;
+	return constantTimeEqual(signature, sessionSignature(expiresAt, token));
+}
+
+export function createBirdclawWebSessionCookie({
+	secure,
+}: {
+	secure: boolean;
+}) {
+	const token = configuredWebToken();
+	if (!token) throw new Error("BIRDCLAW_WEB_TOKEN is not configured");
+	const expiresAt = String(
+		Math.floor(Date.now() / 1000) + WEB_SESSION_TTL_SECONDS,
+	);
+	const value = `${expiresAt}.${sessionSignature(expiresAt, token)}`;
+	return [
+		`${WEB_SESSION_COOKIE}=${encodeURIComponent(value)}`,
+		"Path=/",
+		"HttpOnly",
+		"SameSite=Lax",
+		`Max-Age=${String(WEB_SESSION_TTL_SECONDS)}`,
+		...(secure ? ["Secure"] : []),
+	].join("; ");
+}
+
+export function clearBirdclawWebSessionCookie({ secure }: { secure: boolean }) {
+	return [
+		`${WEB_SESSION_COOKIE}=`,
+		"Path=/",
+		"HttpOnly",
+		"SameSite=Lax",
+		"Max-Age=0",
+		...(secure ? ["Secure"] : []),
+	].join("; ");
+}
+
+export function isBirdclawWebTokenConfigured() {
+	return Boolean(configuredWebToken());
+}
+
 function requestWebTokenStatus(request: Request) {
 	const token = configuredWebToken();
 	if (!token)
@@ -68,13 +137,22 @@ function requestWebTokenStatus(request: Request) {
 		};
 	const headerToken = request.headers.get("x-birdclaw-token");
 	const cookieToken = requestCookie(request, "birdclaw_token");
-	const provided = headerToken !== null || cookieToken.found;
+	const sessionCookie = requestCookie(request, WEB_SESSION_COOKIE);
+	const provided =
+		headerToken !== null || cookieToken.found || sessionCookie.found;
 	const cookieValue = cookieToken.value;
-	const valid = headerToken === token || cookieValue === token;
+	const sessionValid = hasValidBirdclawWebSession(request);
+	const valid =
+		(headerToken !== null && constantTimeEqual(headerToken, token)) ||
+		(cookieValue !== null && constantTimeEqual(cookieValue, token)) ||
+		sessionValid;
 	return {
 		configured: true,
 		valid,
-		fromCookie: cookieValue === token && headerToken !== token,
+		fromCookie:
+			((cookieValue !== null && constantTimeEqual(cookieValue, token)) ||
+				sessionValid) &&
+			!(headerToken !== null && constantTimeEqual(headerToken, token)),
 		provided,
 	};
 }

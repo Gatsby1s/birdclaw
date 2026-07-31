@@ -8,16 +8,124 @@ import { startProductionServer } from "./production-server";
 
 const tempDirs: string[] = [];
 const originalLocalWeb = process.env.BIRDCLAW_LOCAL_WEB;
+const originalWebToken = process.env.BIRDCLAW_WEB_TOKEN;
+const originalAllowRemoteWeb = process.env.BIRDCLAW_ALLOW_REMOTE_WEB;
 
 afterEach(() => {
 	if (originalLocalWeb === undefined) delete process.env.BIRDCLAW_LOCAL_WEB;
 	else process.env.BIRDCLAW_LOCAL_WEB = originalLocalWeb;
+	if (originalWebToken === undefined) delete process.env.BIRDCLAW_WEB_TOKEN;
+	else process.env.BIRDCLAW_WEB_TOKEN = originalWebToken;
+	if (originalAllowRemoteWeb === undefined)
+		delete process.env.BIRDCLAW_ALLOW_REMOTE_WEB;
+	else process.env.BIRDCLAW_ALLOW_REMOTE_WEB = originalAllowRemoteWeb;
 	for (const directory of tempDirs.splice(0)) {
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
 
 describe("production server", () => {
+	it("protects remote pages with the signed mobile login flow", async () => {
+		process.env.BIRDCLAW_WEB_TOKEN = "correct horse battery staple";
+		process.env.BIRDCLAW_ALLOW_REMOTE_WEB = "1";
+		const packageRoot = mkdtempSync(
+			path.join(os.tmpdir(), "birdclaw-production-login-"),
+		);
+		tempDirs.push(packageRoot);
+		const clientDir = path.join(packageRoot, "client");
+		mkdirSync(clientDir, { recursive: true });
+		const serverEntry = path.join(packageRoot, "server.mjs");
+		writeFileSync(
+			serverEntry,
+			`export default { fetch(request) { return new Response("private " + new URL(request.url).pathname); } };`,
+		);
+		const server = await startProductionServer({
+			packageRoot,
+			clientDir,
+			serverEntry,
+			port: 0,
+		});
+		const address = server.address();
+		if (!address || typeof address === "string") throw new Error("no address");
+		const baseUrl = `http://127.0.0.1:${String(address.port)}`;
+		const proxyHeaders = {
+			"x-forwarded-for": "203.0.113.8",
+			"x-forwarded-host": "birdclaw.example",
+			"x-forwarded-proto": "https",
+		};
+
+		const denied = await fetch(`${baseUrl}/private`, {
+			headers: proxyHeaders,
+			redirect: "manual",
+		});
+		expect(denied.status).toBe(303);
+		expect(denied.headers.get("location")).toContain("/login?next=");
+
+		const login = await fetch(`${baseUrl}/login`, {
+			headers: proxyHeaders,
+		});
+		expect(login.status).toBe(200);
+		expect(await login.text()).toContain("访问口令");
+
+		const accepted = await fetch(`${baseUrl}/login`, {
+			method: "POST",
+			headers: {
+				...proxyHeaders,
+				"content-type": "application/x-www-form-urlencoded",
+				origin: "https://birdclaw.example",
+			},
+			body: new URLSearchParams({
+				token: "correct horse battery staple",
+				next: encodeURIComponent("/private"),
+			}),
+			redirect: "manual",
+		});
+		expect(accepted.status).toBe(303);
+		expect(accepted.headers.get("location")).toBe("/private");
+		const cookie = accepted.headers.get("set-cookie");
+		expect(cookie).toContain("birdclaw_session=");
+		expect(cookie).toContain("HttpOnly");
+		expect(cookie).toContain("Secure");
+
+		const privatePage = await fetch(`${baseUrl}/private`, {
+			headers: {
+				...proxyHeaders,
+				cookie: cookie?.split(";")[0] ?? "",
+			},
+		});
+		expect(await privatePage.text()).toBe("private /private");
+
+		await new Promise<void>((resolve, reject) =>
+			server.close((error) => (error ? reject(error) : resolve())),
+		);
+	});
+
+	it("refuses public binding when the web token is missing", async () => {
+		delete process.env.BIRDCLAW_WEB_TOKEN;
+		process.env.BIRDCLAW_ALLOW_REMOTE_WEB = "1";
+		const packageRoot = mkdtempSync(
+			path.join(os.tmpdir(), "birdclaw-production-no-token-"),
+		);
+		tempDirs.push(packageRoot);
+		const clientDir = path.join(packageRoot, "client");
+		mkdirSync(clientDir, { recursive: true });
+		const serverEntry = path.join(packageRoot, "server.mjs");
+		writeFileSync(
+			serverEntry,
+			`export default { fetch() { return new Response("private"); } };`,
+		);
+
+		await expect(
+			startProductionServer({
+				packageRoot,
+				clientDir,
+				serverEntry,
+				host: "0.0.0.0",
+				port: 0,
+			}),
+		).rejects.toThrow("BIRDCLAW_WEB_TOKEN");
+	});
+
 	it("serves built assets before delegating requests to the SSR handler", async () => {
 		const packageRoot = mkdtempSync(
 			path.join(os.tmpdir(), "birdclaw-production-server-"),

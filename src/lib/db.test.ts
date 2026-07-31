@@ -397,7 +397,21 @@ describe("database init", () => {
 				"deleted_at",
 			]),
 		);
-		expect(db.pragma("user_version", { simple: true })).toBe(7);
+		expect(
+			db
+				.prepare("pragma table_info(twitter6551_events)")
+				.all()
+				.map((column) => (column as { name: string }).name),
+		).toEqual(
+			expect.arrayContaining([
+				"event_id",
+				"event_type",
+				"raw_json",
+				"processed_at",
+				"error",
+			]),
+		);
+		expect(db.pragma("user_version", { simple: true })).toBe(8);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -426,7 +440,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(7);
+		expect(db.pragma("user_version", { simple: true })).toBe(8);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

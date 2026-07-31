@@ -9,7 +9,6 @@ import {
 	resolveAnalysisModelSettings,
 } from "./analysis-runtime";
 import {
-	getTwitter6551Config,
 	resolveProfileAnalysisSource,
 	type ProfileAnalysisSource,
 } from "./config";
@@ -44,6 +43,12 @@ import {
 	lookupUsersByHandlesEffect,
 	searchRecentByConversationIdEffect,
 } from "./xurl";
+import {
+	getTwitter6551RuntimeConfig,
+	ingestTwitter6551Tweets,
+	Twitter6551Client,
+	twitter6551UserToXurl,
+} from "./twitter-6551";
 
 export interface ProfileAnalysisOptions {
 	handle: string;
@@ -1202,15 +1207,52 @@ export function collectProfileAnalysisContextEffect(
 			);
 		}
 		if (source === "6551") {
-			const config = getTwitter6551Config();
-			const tokenState = config.tokenDetected
-				? `${config.tokenEnv} is detected`
-				: `${config.tokenEnv} is not detected`;
-			return yield* Effect.fail(
-				new Error(
-					`6551 refresh is selected, but the Profile Analyse 6551 adapter is not wired yet (${tokenState}). Choose Local or XURL refresh in Settings.`,
-				),
+			const config = getTwitter6551RuntimeConfig();
+			if (!config.token) {
+				return yield* Effect.fail(
+					new Error(`${config.tokenEnv} is not detected`),
+				);
+			}
+			emitStatus(handlers, "Resolving profile through 6551", `@${handle}`);
+			yield* abortIfRequestedEffect(options.signal);
+			const client = new Twitter6551Client({
+				token: config.token,
+				baseUrl: config.baseUrl,
+			});
+			const user = yield* tryProfilePromise(() => client.getUser(handle));
+			yield* abortIfRequestedEffect(options.signal);
+			emitStatus(
+				handlers,
+				"Fetching profile tweets through 6551",
+				`@${handle}`,
 			);
+			const tweets = yield* tryProfilePromise(() =>
+				client.getUserTweets(handle, Math.min(100, maxTweets)),
+			);
+			yield* tryProfileSync(() => {
+				upsertProfileFromXUser(db, twitter6551UserToXurl(user));
+				ingestTwitter6551Tweets(
+					db,
+					account.id,
+					tweets.slice(0, maxTweets),
+					"profile",
+				);
+			});
+			const context = yield* tryProfileSync(() =>
+				buildContextFromLocalStore({
+					account,
+					handle: user.screenName,
+					maxTweets,
+					maxConversations,
+					maxConversationPages,
+					db,
+				}),
+			);
+			return {
+				...context,
+				source: "6551" as const,
+				fetchCached: false,
+			};
 		}
 		const contextKey = contextCacheKey({
 			source,

@@ -799,6 +799,23 @@ function ensureXRemarkLiveSyncTable(db: Database) {
   `);
 }
 
+function ensureTwitter6551EventTable(db: Database) {
+	db.exec(`
+    create table if not exists twitter6551_events (
+      event_id text primary key,
+      event_type text not null,
+      watch_user text not null,
+      tweet_id text,
+      raw_json text not null,
+      received_at text not null,
+      processed_at text,
+      error text
+    );
+    create index if not exists idx_twitter6551_events_pending
+      on twitter6551_events(processed_at, received_at);
+  `);
+}
+
 function backfillTweetCollections(db: Database) {
 	const missingKinds = (
 		[
@@ -1005,6 +1022,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add local tweet bookmark overrides and author timeline index",
 		up: (db) => {
 			ensureLocalTweetBookmarksTable(db);
+		},
+	},
+	{
+		version: 8,
+		name: "add durable 6551 realtime event inbox",
+		up: (db) => {
+			ensureTwitter6551EventTable(db);
 		},
 	},
 ];

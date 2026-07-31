@@ -87,9 +87,14 @@ See [Backup](backup.md). When `autoSync` is enabled, read commands pull + merge 
 | `BIRDCLAW_PORT`                | Port for the production `birdclaw serve` listener; defaults to `3000`                                                                                |
 | `BIRDCLAW_ALLOWED_HOSTS`       | Comma-separated extra hostnames accepted by the source `pnpm dev` server                                                                             |
 | `BIRDCLAW_LOCAL_WEB`           | Internal local-server mode; production derives local access from the peer socket, while forwarded/proxied requests still require remote-token config |
-| `BIRDCLAW_WEB_TOKEN`           | Optional app-level token for remote web API access; send as `x-birdclaw-token` or `birdclaw_token`                                                   |
+| `BIRDCLAW_WEB_TOKEN`           | App-level token for remote login; browsers receive a signed HttpOnly session, while API clients may send `x-birdclaw-token`                           |
 | `BIRDCLAW_ALLOW_REMOTE_WEB`    | Set to `1` to allow remote access through a trusted private proxy                                                                                    |
 | `BIRDCLAW_DISABLE_LIVE_WRITES` | Set to `1` to block any live mutation (used by tests and CI)                                                                                         |
+| `BIRDCLAW_6551_ENABLED`        | Set to `1` to run the 6551 realtime worker in the production web process                                                                             |
+| `BIRDCLAW_6551_WATCH_USERS`    | Comma-separated X handles to monitor and recovery-sync                                                                                               |
+| `BIRDCLAW_6551_TARGET_TWEETS`  | Comma-separated tweet IDs to preserve and refresh with quote tweets                                                                                  |
+| `BIRDCLAW_6551_BACKFILL_MINUTES` | Minutes between latest-100 recovery polls; defaults to `120`                                                                                       |
+| `TWITTER_TOKEN`                | 6551 Bearer token; `OPENNEWS_TOKEN` is accepted as a compatibility fallback                                                                          |
 | `BIRDCLAW_BACKUP_AUTO_SYNC`    | Set to `0` to disable auto-sync for one process                                                                                                      |
 | `NO_COLOR`                     | Disable ANSI color in human output                                                                                                                   |
 | `OPENAI_API_KEY`               | Enable inbox scoring and low-signal filtering                                                                                                        |

@@ -540,6 +540,31 @@ export type ProfileAnalysisSourceSetting = z.infer<
 	typeof profileAnalysisSourceSchema
 >;
 
+export const twitter6551RuntimeStatusSchema = z.object({
+	enabled: z.boolean(),
+	state: z.enum([
+		"disabled",
+		"starting",
+		"connecting",
+		"connected",
+		"degraded",
+		"error",
+		"stopped",
+	]),
+	connected: z.boolean(),
+	watchUsers: z.array(z.string()),
+	targetTweetIds: z.array(z.string()),
+	lastConnectedAt: z.string().nullable(),
+	lastEventAt: z.string().nullable(),
+	lastBackfillAt: z.string().nullable(),
+	lastError: z.string().nullable(),
+	reconnectCount: z.number(),
+	ingestedCount: z.number(),
+});
+export type Twitter6551RuntimeStatus = z.infer<
+	typeof twitter6551RuntimeStatusSchema
+>;
+
 export const birdclawSettingsSchema = z.object({
 	analysis: z.object({
 		profileSource: profileAnalysisSourceSchema,
@@ -549,6 +574,23 @@ export const birdclawSettingsSchema = z.object({
 			baseUrl: z.string(),
 			tokenEnv: z.string(),
 			tokenDetected: z.boolean(),
+			accountId: z.string().default("acct_6551"),
+			watchUsers: z.array(z.string()).default([]),
+			targetTweetIds: z.array(z.string()).default([]),
+			backfillMinutes: z.number().default(120),
+			runtime: twitter6551RuntimeStatusSchema.default({
+				enabled: false,
+				state: "disabled",
+				connected: false,
+				watchUsers: [],
+				targetTweetIds: [],
+				lastConnectedAt: null,
+				lastEventAt: null,
+				lastBackfillAt: null,
+				lastError: null,
+				reconnectCount: 0,
+				ingestedCount: 0,
+			}),
 		}),
 	}),
 });

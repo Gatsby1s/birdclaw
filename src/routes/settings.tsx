@@ -7,6 +7,7 @@ import {
 	Database,
 	KeyRound,
 	Radio,
+	RefreshCw,
 	Route as RouteIcon,
 	Settings2,
 	StickyNote,
@@ -18,6 +19,7 @@ import {
 	birdclawSettingsSchema,
 	type BirdclawSettings,
 	type ProfileAnalysisSourceSetting,
+	twitter6551RuntimeStatusSchema,
 	xRemarkLiveSyncStatusSchema,
 	xRemarkPairingResultSchema,
 	xRemarkSyncStatusSchema,
@@ -87,6 +89,15 @@ async function updateProfileSource(
 		},
 		birdclawSettingsSchema,
 		"Settings update failed",
+	);
+}
+
+async function syncTwitter6551() {
+	return fetchJson(
+		"/api/integrations/twitter6551",
+		{ method: "POST" },
+		twitter6551RuntimeStatusSchema,
+		"6551 sync failed",
 	);
 }
 
@@ -163,6 +174,8 @@ function SettingsRoute() {
 	const settingsQuery = useQuery({
 		queryKey: queryKeys.settings,
 		queryFn: fetchSettings,
+		refetchInterval: 5_000,
+		staleTime: 0,
 	});
 	const xRemarkQuery = useQuery({
 		queryKey: queryKeys.xRemark,
@@ -197,10 +210,19 @@ function SettingsRoute() {
 			queryClient.setQueryData(queryKeys.xRemarkLive, data);
 		},
 	});
+	const twitter6551Mutation = useMutation({
+		mutationFn: syncTwitter6551,
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: queryKeys.settings });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.dataSources });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.timelines });
+		},
+	});
 	const currentSource = settings?.analysis.profileSource;
 	const pendingSource = mutation.variables;
 	const saving = mutation.isPending;
 	const twitter6551 = settings?.providers.twitter6551;
+	const twitter6551Runtime = twitter6551Mutation.data ?? twitter6551?.runtime;
 	const xRemarkStatus = xRemarkMutation.data ?? xRemarkQuery.data;
 	const xRemarkLiveStatus = xRemarkLiveQuery.data ?? xRemarkLiveMutation.data;
 	const pairingToken =
@@ -246,6 +268,13 @@ function SettingsRoute() {
 					{xRemarkLiveMutation.error instanceof Error
 						? xRemarkLiveMutation.error.message
 						: "X Remark live sync update failed"}
+				</div>
+			) : null}
+			{twitter6551Mutation.error ? (
+				<div className={errorCopyClass}>
+					{twitter6551Mutation.error instanceof Error
+						? twitter6551Mutation.error.message
+						: "6551 sync failed"}
 				</div>
 			) : null}
 			{settings ? (
@@ -412,18 +441,65 @@ function SettingsRoute() {
 								<p className="mt-1 break-all text-[13px] text-[var(--ink-soft)]">
 									{twitter6551?.baseUrl} · {twitter6551?.tokenEnv}
 								</p>
+								<p className="mt-1 text-[13px] text-[var(--ink-soft)]">
+									{twitter6551Runtime?.state ?? "disabled"} ·{" "}
+									{String(twitter6551?.watchUsers.length ?? 0)} watched accounts
+									· {String(twitter6551?.targetTweetIds.length ?? 0)} pinned
+									posts
+								</p>
+								{twitter6551Runtime?.lastBackfillAt ? (
+									<p className="mt-1 text-[12px] text-[var(--ink-soft)]">
+										Last recovery sync:{" "}
+										{new Date(
+											twitter6551Runtime.lastBackfillAt,
+										).toLocaleString()}
+									</p>
+								) : null}
+								{twitter6551Runtime?.lastError ? (
+									<p className="mt-1 text-[12px] text-[var(--alert)]">
+										{twitter6551Runtime.lastError}
+									</p>
+								) : null}
 							</div>
-							<span
-								className={cx(
-									"inline-flex w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-bold",
-									twitter6551?.tokenDetected
-										? "border-[color:color-mix(in_srgb,#22c55e_45%,var(--line))] text-[var(--ink)]"
-										: "border-[var(--line)] text-[var(--ink-soft)]",
-								)}
-							>
-								<CheckCircle2 className="size-4" strokeWidth={2} />
-								{twitter6551?.tokenDetected ? "Token detected" : "No token"}
-							</span>
+							<div className="flex shrink-0 flex-wrap items-center gap-2">
+								<span
+									className={cx(
+										"inline-flex min-h-8 w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-bold",
+										twitter6551Runtime?.connected
+											? "border-[color:color-mix(in_srgb,#22c55e_45%,var(--line))] text-[var(--ink)]"
+											: "border-[var(--line)] text-[var(--ink-soft)]",
+									)}
+								>
+									<CheckCircle2 className="size-4" strokeWidth={2} />
+									{twitter6551Runtime?.connected
+										? "Live"
+										: !twitter6551?.tokenDetected
+											? "No token"
+											: !twitter6551Runtime?.enabled
+												? "Disabled"
+												: twitter6551Runtime.state === "error"
+													? "Error"
+													: "Recovery polling"}
+								</span>
+								<button
+									className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1 text-[13px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)] disabled:opacity-55"
+									disabled={
+										!twitter6551Runtime?.enabled ||
+										twitter6551Mutation.isPending
+									}
+									onClick={() => twitter6551Mutation.mutate()}
+									type="button"
+								>
+									<RefreshCw
+										className={cx(
+											"size-4",
+											twitter6551Mutation.isPending && "animate-spin",
+										)}
+										strokeWidth={2}
+									/>
+									Sync now
+								</button>
+							</div>
 						</div>
 					</section>
 				</div>

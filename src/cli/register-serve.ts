@@ -15,12 +15,13 @@ export function registerServeCommand(
 		.option(
 			"--host <host>",
 			"Host interface to bind",
-			process.env.BIRDCLAW_HOST ?? "127.0.0.1",
+			process.env.BIRDCLAW_HOST ??
+				(process.env.RAILWAY_ENVIRONMENT ? "0.0.0.0" : "127.0.0.1"),
 		)
 		.option(
 			"--port <port>",
 			"TCP port (0 selects an available port)",
-			process.env.BIRDCLAW_PORT ?? "3000",
+			process.env.BIRDCLAW_PORT ?? process.env.PORT ?? "3000",
 		)
 		.action(async (options) => {
 			const host = String(options.host).trim();

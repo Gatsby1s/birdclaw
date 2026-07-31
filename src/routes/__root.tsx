@@ -6,7 +6,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { AppNav } from "#/components/AppNav";
+import { AppNav, MobileAppNav } from "#/components/AppNav";
 import { XRemarkLiveUpdater } from "#/components/XRemarkLiveUpdater";
 import { BirdclawQueryProvider } from "#/lib/query-client";
 import { ThemeProvider, themeScript } from "#/lib/theme";
@@ -79,6 +79,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 							<main className={wideMain ? mainColumnDmClass : mainColumnClass}>
 								{children}
 							</main>
+							<MobileAppNav />
 						</div>
 					</ThemeProvider>
 				</BirdclawQueryProvider>

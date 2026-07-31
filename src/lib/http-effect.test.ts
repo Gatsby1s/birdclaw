@@ -1,6 +1,8 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+	createBirdclawWebSessionCookie,
+	hasValidBirdclawWebSession,
 	jsonResponse,
 	LOCAL_WEB_PEER_HEADER,
 	parseBoundedInteger,
@@ -10,6 +12,29 @@ import {
 } from "./http-effect";
 
 describe("http Effect helpers", () => {
+	it("creates a signed HttpOnly web session without storing the raw token", () => {
+		const originalToken = process.env.BIRDCLAW_WEB_TOKEN;
+		process.env.BIRDCLAW_WEB_TOKEN = "a-web-token-that-must-not-leak";
+		try {
+			const cookie = createBirdclawWebSessionCookie({ secure: true });
+			expect(cookie).toContain("birdclaw_session=");
+			expect(cookie).toContain("HttpOnly");
+			expect(cookie).toContain("Secure");
+			expect(cookie).toContain("SameSite=Lax");
+			expect(cookie).not.toContain(process.env.BIRDCLAW_WEB_TOKEN);
+			expect(
+				hasValidBirdclawWebSession(
+					new Request("https://birdclaw.example/", {
+						headers: { cookie: cookie.split(";")[0] ?? "" },
+					}),
+				),
+			).toBe(true);
+		} finally {
+			if (originalToken === undefined) delete process.env.BIRDCLAW_WEB_TOKEN;
+			else process.env.BIRDCLAW_WEB_TOKEN = originalToken;
+		}
+	});
+
 	it("serializes json responses and preserves custom init headers", async () => {
 		const response = jsonResponse(
 			{ ok: true },

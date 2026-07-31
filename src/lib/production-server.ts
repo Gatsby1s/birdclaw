@@ -8,7 +8,19 @@ import {
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
-import { LOCAL_WEB_PEER_HEADER } from "./http-effect";
+import {
+	clearBirdclawWebSessionCookie,
+	createBirdclawWebSessionCookie,
+	hasValidBirdclawWebSession,
+	isBirdclawWebTokenConfigured,
+	LOCAL_WEB_PEER_HEADER,
+	verifyBirdclawWebToken,
+} from "./http-effect";
+import {
+	getTwitter6551RuntimeStatus,
+	startTwitter6551Worker,
+	stopTwitter6551Worker,
+} from "./twitter-6551";
 
 interface FetchHandler {
 	fetch(request: Request): Response | Promise<Response>;
@@ -40,10 +52,35 @@ const CONTENT_TYPES: Record<string, string> = {
 	".woff2": "font/woff2",
 };
 
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const LOGIN_WINDOW_MS = 15 * 60_000;
+const LOGIN_MAX_ATTEMPTS = 8;
+const MAX_LOGIN_RATE_KEYS = 10_000;
+
 function isLoopbackAddress(address: string | undefined) {
 	if (!address) return false;
 	const normalized = address.toLowerCase().replace(/^::ffff:/, "");
 	return normalized === "::1" || normalized.startsWith("127.");
+}
+
+function isLoopbackHost(host: string) {
+	const normalized = host
+		.trim()
+		.toLowerCase()
+		.replace(/^\[|\]$/g, "");
+	return normalized === "localhost" || isLoopbackAddress(normalized);
+}
+
+function assertRemoteWebAuthentication(host: string) {
+	const remoteAccessRequested =
+		Boolean(process.env.RAILWAY_ENVIRONMENT) ||
+		process.env.BIRDCLAW_ALLOW_REMOTE_WEB === "1" ||
+		!isLoopbackHost(host);
+	if (remoteAccessRequested && !isBirdclawWebTokenConfigured()) {
+		throw new Error(
+			"Refusing to start remote BirdClaw without BIRDCLAW_WEB_TOKEN",
+		);
+	}
 }
 
 function requestHeaders(request: IncomingMessage) {
@@ -82,6 +119,10 @@ function toWebRequest(request: IncomingMessage, signal: AbortSignal) {
 async function sendWebResponse(response: Response, target: ServerResponse) {
 	target.statusCode = response.status;
 	if (response.statusText) target.statusMessage = response.statusText;
+	applySecurityHeaders(target);
+	if (!response.headers.has("cache-control")) {
+		target.setHeader("cache-control", "private, no-store");
+	}
 	const setCookies = response.headers.getSetCookie();
 	for (const [name, value] of response.headers) {
 		if (name !== "set-cookie") target.setHeader(name, value);
@@ -120,6 +161,269 @@ async function sendWebResponse(response: Response, target: ServerResponse) {
 	});
 }
 
+function applySecurityHeaders(target: ServerResponse) {
+	target.setHeader("x-content-type-options", "nosniff");
+	target.setHeader("x-frame-options", "DENY");
+	target.setHeader("referrer-policy", "same-origin");
+	target.setHeader(
+		"permissions-policy",
+		"camera=(), microphone=(), geolocation=()",
+	);
+	target.setHeader(
+		"content-security-policy",
+		"default-src 'self'; img-src 'self' data: https:; media-src 'self' https: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self' https: wss:",
+	);
+}
+
+function sendText(
+	target: ServerResponse,
+	status: number,
+	body: string,
+	contentType = "text/plain; charset=utf-8",
+	headers: Record<string, string> = {},
+) {
+	target.statusCode = status;
+	target.setHeader("content-type", contentType);
+	target.setHeader("cache-control", "private, no-store");
+	applySecurityHeaders(target);
+	for (const [name, value] of Object.entries(headers)) {
+		target.setHeader(name, value);
+	}
+	target.end(body);
+}
+
+function requestUsesHttps(request: IncomingMessage) {
+	const forwarded = request.headers["x-forwarded-proto"];
+	const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+	return value?.split(",")[0]?.trim().toLowerCase() === "https";
+}
+
+function requestNeedsLogin(request: IncomingMessage) {
+	if (!isBirdclawWebTokenConfigured()) return false;
+	if (hasForwardingHeaders(request)) return true;
+	return !isLoopbackAddress(request.socket.remoteAddress);
+}
+
+function hasForwardingHeaders(request: IncomingMessage) {
+	return Boolean(
+		request.headers.forwarded ||
+		request.headers["x-forwarded-for"] ||
+		request.headers["x-forwarded-proto"] ||
+		request.headers["x-forwarded-host"],
+	);
+}
+
+function safeNextPath(value: string | null) {
+	return value?.startsWith("/") && !value.startsWith("//") ? value : "/";
+}
+
+function decodedNextPath(value: string | null) {
+	try {
+		return safeNextPath(decodeURIComponent(value ?? "/"));
+	} catch {
+		return "/";
+	}
+}
+
+function loginHtml({ next, error }: { next: string; error?: string }) {
+	return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>登录 BirdClaw</title>
+<style>
+:root{color-scheme:light dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:#0b0f14;color:#e7edf3}
+main{width:min(100%,420px);border:1px solid #2c3844;border-radius:22px;padding:28px;background:#111820;box-shadow:0 18px 55px #0006}
+h1{margin:0;font-size:25px}p{color:#9aa8b5;line-height:1.55}.error{color:#ff8b96}
+label{display:block;margin:22px 0 8px;font-size:14px;font-weight:700}
+input,button{width:100%;min-height:48px;border-radius:14px;font:inherit}
+input{border:1px solid #465665;background:#0b0f14;color:#fff;padding:0 14px}
+button{margin-top:14px;border:0;background:#1d9bf0;color:#fff;font-weight:800;cursor:pointer}
+small{display:block;margin-top:16px;color:#71808e}
+</style>
+</head>
+<body><main>
+<h1>BirdClaw</h1>
+<p>这是皇上的私人云端推文资料库。</p>
+${error ? `<p class="error">${error}</p>` : ""}
+<form method="post" action="/login">
+<input type="hidden" name="next" value="${encodeURIComponent(next)}">
+<label for="token">访问口令</label>
+<input id="token" name="token" type="password" autocomplete="current-password" required autofocus>
+<button type="submit">进入 BirdClaw</button>
+</form>
+<small>登录状态会安全保存在本设备 30 天。</small>
+</main></body></html>`;
+}
+
+async function readSmallForm(request: IncomingMessage) {
+	const chunks: Buffer[] = [];
+	let size = 0;
+	for await (const chunk of request) {
+		const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+		size += buffer.length;
+		if (size > 16_384) throw new Error("Login request is too large");
+		chunks.push(buffer);
+	}
+	return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+}
+
+function loginRateKey(request: IncomingMessage) {
+	const realIp = request.headers["x-real-ip"];
+	const realIpValue = Array.isArray(realIp) ? realIp.at(-1) : realIp;
+	if (realIpValue?.trim()) return realIpValue.trim();
+	const forwarded = request.headers["x-forwarded-for"];
+	const value = Array.isArray(forwarded) ? forwarded.at(-1) : forwarded;
+	return (
+		value?.split(",").at(-1)?.trim() ||
+		request.socket.remoteAddress ||
+		"unknown"
+	);
+}
+
+function loginRateLimited(request: IncomingMessage) {
+	const key = loginRateKey(request);
+	const now = Date.now();
+	if (loginAttempts.size >= MAX_LOGIN_RATE_KEYS) {
+		for (const [candidate, attempt] of loginAttempts) {
+			if (attempt.resetAt <= now) loginAttempts.delete(candidate);
+		}
+		if (loginAttempts.size >= MAX_LOGIN_RATE_KEYS) {
+			const oldest = loginAttempts.keys().next().value as string | undefined;
+			if (oldest) loginAttempts.delete(oldest);
+		}
+	}
+	const current = loginAttempts.get(key);
+	if (!current || current.resetAt <= now) {
+		loginAttempts.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+		return false;
+	}
+	current.count += 1;
+	return current.count > LOGIN_MAX_ATTEMPTS;
+}
+
+function loginOriginAllowed(request: IncomingMessage) {
+	const origin = request.headers.origin;
+	if (!origin) return true;
+	const host =
+		(Array.isArray(request.headers["x-forwarded-host"])
+			? request.headers["x-forwarded-host"][0]
+			: request.headers["x-forwarded-host"]) ?? request.headers.host;
+	const protocol = requestUsesHttps(request) ? "https" : "http";
+	return Boolean(host && origin === `${protocol}://${host}`);
+}
+
+async function handlePrivateWebGate(
+	request: IncomingMessage,
+	response: ServerResponse,
+) {
+	const url = new URL(request.url ?? "/", "http://local");
+	if (url.pathname === "/healthz") {
+		const worker = getTwitter6551RuntimeStatus();
+		sendText(
+			response,
+			200,
+			JSON.stringify({
+				ok: true,
+				worker: worker.enabled ? worker.state : "disabled",
+			}),
+			"application/json; charset=utf-8",
+		);
+		return true;
+	}
+	if (!requestNeedsLogin(request)) return false;
+	const webRequest = toWebRequest(request, new AbortController().signal);
+	const signedIn = hasValidBirdclawWebSession(webRequest);
+	if (url.pathname === "/logout") {
+		sendText(response, 303, "", "text/plain; charset=utf-8", {
+			location: "/login",
+			"set-cookie": clearBirdclawWebSessionCookie({
+				secure: requestUsesHttps(request),
+			}),
+		});
+		return true;
+	}
+	if (url.pathname === "/login" && request.method === "GET") {
+		if (signedIn) {
+			sendText(response, 303, "", "text/plain; charset=utf-8", {
+				location: safeNextPath(url.searchParams.get("next")),
+			});
+		} else {
+			sendText(
+				response,
+				200,
+				loginHtml({ next: safeNextPath(url.searchParams.get("next")) }),
+				"text/html; charset=utf-8",
+			);
+		}
+		return true;
+	}
+	if (url.pathname === "/login" && request.method === "POST") {
+		if (!loginOriginAllowed(request)) {
+			sendText(response, 403, "Cross-origin login is disabled");
+			return true;
+		}
+		if (loginRateLimited(request)) {
+			sendText(
+				response,
+				429,
+				loginHtml({
+					next: "/",
+					error: "尝试次数过多，请稍后再试。",
+				}),
+				"text/html; charset=utf-8",
+			);
+			return true;
+		}
+		const form = await readSmallForm(request);
+		const next = decodedNextPath(form.get("next"));
+		if (!verifyBirdclawWebToken(form.get("token") ?? "")) {
+			sendText(
+				response,
+				401,
+				loginHtml({ next, error: "口令不正确。" }),
+				"text/html; charset=utf-8",
+			);
+			return true;
+		}
+		loginAttempts.delete(loginRateKey(request));
+		sendText(response, 303, "", "text/plain; charset=utf-8", {
+			location: next,
+			"set-cookie": createBirdclawWebSessionCookie({
+				secure: requestUsesHttps(request),
+			}),
+		});
+		return true;
+	}
+	if (
+		url.pathname.startsWith("/assets/") ||
+		url.pathname === "/favicon.ico" ||
+		url.pathname === "/birdclaw-live-version.json"
+	) {
+		return false;
+	}
+	if (!signedIn) {
+		if (url.pathname.startsWith("/api/")) {
+			sendText(
+				response,
+				401,
+				JSON.stringify({ ok: false, message: "Authentication required" }),
+				"application/json; charset=utf-8",
+			);
+		} else {
+			sendText(response, 303, "", "text/plain; charset=utf-8", {
+				location: `/login?next=${encodeURIComponent(
+					safeNextPath(url.pathname + url.search),
+				)}`,
+			});
+		}
+		return true;
+	}
+	return false;
+}
+
 async function sendStaticFile(
 	request: IncomingMessage,
 	target: ServerResponse,
@@ -145,6 +449,7 @@ async function sendStaticFile(
 	if (!fileStats?.isFile()) return false;
 
 	target.statusCode = 200;
+	applySecurityHeaders(target);
 	target.setHeader("content-length", String(fileStats.size));
 	target.setHeader(
 		"content-type",
@@ -175,6 +480,7 @@ export async function startProductionServer({
 	clientDir = path.join(packageRoot, "dist", "client"),
 	serverEntry = path.join(packageRoot, "dist", "server", "server.js"),
 }: ProductionServerOptions) {
+	assertRemoteWebAuthentication(host);
 	process.env.BIRDCLAW_LOCAL_WEB = "socket";
 	const loaded = (await import(pathToFileURL(serverEntry).href)) as {
 		default?: FetchHandler;
@@ -185,6 +491,11 @@ export async function startProductionServer({
 		);
 	}
 	const handler = loaded.default;
+	void startTwitter6551Worker().catch((error) => {
+		console.error(
+			`6551 worker startup failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	});
 	const server = createServer(async (request, response) => {
 		const requestAbort = new AbortController();
 		const abortRequest = () => requestAbort.abort();
@@ -194,6 +505,7 @@ export async function startProductionServer({
 		request.once("aborted", abortRequest);
 		response.once("close", abortClosedResponse);
 		try {
+			if (await handlePrivateWebGate(request, response)) return;
 			if (await sendStaticFile(request, response, clientDir)) return;
 			await sendWebResponse(
 				await handler.fetch(toWebRequest(request, requestAbort.signal)),
@@ -210,6 +522,9 @@ export async function startProductionServer({
 			request.off("aborted", abortRequest);
 			response.off("close", abortClosedResponse);
 		}
+	});
+	server.once("close", () => {
+		void stopTwitter6551Worker();
 	});
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
@@ -235,8 +550,10 @@ export async function runProductionServer(options: ProductionServerOptions) {
 		};
 		const stop = (signal: NodeJS.Signals) => {
 			removeHandlers();
-			server.close(() => process.kill(process.pid, signal));
-			server.closeAllConnections();
+			void stopTwitter6551Worker().finally(() => {
+				server.close(() => process.kill(process.pid, signal));
+				server.closeAllConnections();
+			});
 		};
 		for (const signal of signals) process.on(signal, stop);
 		server.once("error", (error) => {

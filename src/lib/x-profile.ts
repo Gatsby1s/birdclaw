@@ -102,13 +102,21 @@ function updateExistingProfileFromUser(
 		? (currentHandle?.handle ?? username)
 		: username;
 	const displayName = String(user.name ?? "").trim() || username;
-	const followersCount = Number(user.public_metrics?.followers_count ?? 0);
+	const hasFollowersCount =
+		typeof user.public_metrics?.followers_count === "number";
+	const followersCount = hasFollowersCount
+		? (user.public_metrics?.followers_count ?? null)
+		: null;
 	const hasFollowingCount =
 		typeof user.public_metrics?.following_count === "number";
 	const followingCount = hasFollowingCount
 		? (user.public_metrics?.following_count ?? null)
 		: null;
-	const bio = String(user.description ?? "");
+	const hasDescription = typeof user.description === "string";
+	const bio = hasDescription ? user.description : null;
+	const hasPublicMetrics =
+		user.public_metrics !== undefined &&
+		Object.keys(user.public_metrics).length > 0;
 	const avatarUrl = normalizeAvatarUrl(user.profile_image_url);
 	const metadata = buildProfileMetadata(user);
 
@@ -118,10 +126,16 @@ function updateExistingProfileFromUser(
     update profiles
     set handle = ?,
         display_name = ?,
-        bio = ?,
-        followers_count = ?,
+        bio = coalesce(?, bio),
+        followers_count = coalesce(?, followers_count),
         following_count = coalesce(?, following_count),
-        public_metrics_json = ?,
+        public_metrics_json = case
+          when ? then json_patch(
+            coalesce(nullif(profiles.public_metrics_json, ''), '{}'),
+            ?
+          )
+          else profiles.public_metrics_json
+        end,
         avatar_url = coalesce(?, avatar_url),
         location = coalesce(?, location),
         url = coalesce(?, url),
@@ -139,6 +153,7 @@ function updateExistingProfileFromUser(
 		bio,
 		followersCount,
 		followingCount,
+		hasPublicMetrics ? 1 : 0,
 		JSON.stringify(user.public_metrics ?? {}),
 		avatarUrl,
 		metadata.location,

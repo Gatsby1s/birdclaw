@@ -280,6 +280,10 @@ Use the Sync button in Home, Mentions, Likes, Bookmarks, or DMs to run the match
 `BIRDCLAW_ALLOWED_HOSTS` applies only to the source `pnpm dev` server, not the
 built server started by `birdclaw serve`.
 
+For a persistent Railway deployment with 6551 realtime monitoring, secure
+mobile login, restart recovery, and a SQLite volume, see
+[`docs/cloud-6551.md`](docs/cloud-6551.md).
+
 First moderation pass:
 
 ```bash

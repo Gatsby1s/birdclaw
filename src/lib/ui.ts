@@ -7,13 +7,13 @@ export const bodyClass =
 
 /* App shell — sidebar left, single feed column center, optional aside right. */
 export const siteShellClass =
-	"mx-auto flex min-h-screen w-full max-w-[1280px] gap-0";
+	"mx-auto flex min-h-screen w-full max-w-[1280px] gap-0 pb-[calc(4.5rem+env(safe-area-inset-bottom))] min-[900px]:pb-0";
 
 export const sidebarShellClass =
-	"sticky top-0 z-30 flex h-screen w-[72px] shrink-0 flex-col justify-between border-r border-[var(--line)] bg-[var(--bg)] px-2 py-3 min-[1100px]:w-[260px] min-[1100px]:px-3";
+	"custom-scrollbar sticky top-0 z-30 hidden h-dvh w-[72px] shrink-0 flex-col justify-between overflow-y-auto border-r border-[var(--line)] bg-[var(--bg)] px-2 py-3 min-[900px]:flex min-[1100px]:w-[260px] min-[1100px]:px-3";
 
 export const sidebarShellCompactClass =
-	"sticky top-0 z-30 flex h-screen w-[72px] shrink-0 flex-col justify-between border-r border-[var(--line)] bg-[var(--bg)] px-2 py-3";
+	"custom-scrollbar sticky top-0 z-30 hidden h-dvh w-[72px] shrink-0 flex-col justify-between overflow-y-auto border-r border-[var(--line)] bg-[var(--bg)] px-2 py-3 min-[900px]:flex";
 
 export const sidebarBrandClass =
 	"flex items-center gap-2.5 px-2 py-2 text-[var(--ink)] min-[1100px]:px-3";
@@ -49,10 +49,10 @@ export const navLinkLabelCompactClass = "sr-only";
 
 /* Main column. */
 export const mainColumnClass =
-	"flex w-full min-w-0 max-w-[680px] flex-1 flex-col border-x border-[var(--line)] bg-[var(--bg)]";
+	"flex w-full min-w-0 max-w-[680px] flex-1 flex-col bg-[var(--bg)] min-[640px]:border-x min-[640px]:border-[var(--line)]";
 
 export const mainColumnDmClass =
-	"flex w-full min-w-0 flex-1 flex-col border-x border-[var(--line)] bg-[var(--bg)]";
+	"flex w-full min-w-0 flex-1 flex-col bg-[var(--bg)] min-[640px]:border-x min-[640px]:border-[var(--line)]";
 
 /* Sticky page header at top of the main column. */
 export const pageHeaderClass =

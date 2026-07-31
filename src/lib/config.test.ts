@@ -253,7 +253,7 @@ describe("config", () => {
 			}),
 		);
 
-		expect(getTwitter6551Config()).toEqual({
+		expect(getTwitter6551Config()).toMatchObject({
 			baseUrl: "https://example.test",
 			tokenEnv: "BIRDCLAW_6551_TOKEN",
 			tokenDetected: true,

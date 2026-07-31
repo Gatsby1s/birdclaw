@@ -168,10 +168,45 @@ describe("x profile sync helpers", () => {
 		expect(
 			db
 				.prepare(
-					"select followers_count, following_count from profiles where id = ?",
+					"select followers_count, following_count, public_metrics_json from profiles where id = ?",
 				)
 				.get("profile_sam"),
-		).toEqual({ followers_count: 999, following_count: 123 });
+		).toEqual({
+			followers_count: 999,
+			following_count: 123,
+			public_metrics_json: JSON.stringify({
+				followers_count: 999,
+				following_count: 123,
+			}),
+		});
+	});
+
+	it("preserves an existing bio and follower count when a later payload omits them", () => {
+		const db = makeTempHome();
+
+		upsertProfileFromXUser(db, {
+			id: "42",
+			username: "sam",
+			name: "Sam Altman",
+			description: "valuable bio",
+			public_metrics: {
+				followers_count: 999,
+				following_count: 123,
+			},
+		});
+		const updated = upsertProfileFromXUser(db, {
+			id: "42",
+			username: "sam",
+			name: "Sam Updated",
+		});
+
+		expect(updated.profile).toEqual(
+			expect.objectContaining({
+				bio: "valuable bio",
+				followersCount: 999,
+				followingCount: 123,
+			}),
+		);
 	});
 
 	it("persists rich profile metadata from x user payloads", () => {

@@ -22,6 +22,7 @@ vi.mock("#/components/AppNav", () => ({
 		appNavProps.push(props);
 		return <nav>birdclaw nav {props.compact ? "compact" : "full"}</nav>;
 	},
+	MobileAppNav: () => <nav>birdclaw mobile nav</nav>,
 }));
 
 import { LiveVersionReloader, Route } from "./__root";
