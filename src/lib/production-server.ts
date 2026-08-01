@@ -529,7 +529,20 @@ async function sendStaticFile(
 		return true;
 	}
 	const fileStats = await stat(filePath).catch(() => undefined);
-	if (!fileStats?.isFile()) return false;
+	if (!fileStats?.isFile()) {
+		const railwayCommit = process.env.RAILWAY_GIT_COMMIT_SHA?.trim();
+		if (pathname !== "/birdclaw-live-version.json" || !railwayCommit) {
+			return false;
+		}
+		const body = `${JSON.stringify({ commit: railwayCommit })}\n`;
+		target.statusCode = 200;
+		applySecurityHeaders(target);
+		target.setHeader("cache-control", "private, no-store");
+		target.setHeader("content-length", String(Buffer.byteLength(body)));
+		target.setHeader("content-type", "application/json; charset=utf-8");
+		target.end(request.method === "HEAD" ? undefined : body);
+		return true;
+	}
 
 	target.statusCode = 200;
 	applySecurityHeaders(target);
