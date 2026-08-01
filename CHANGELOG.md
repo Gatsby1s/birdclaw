@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.59 - 2026-08-02
+
+### Fixed
+
+- Reload older cloud tabs when the live-version manifest recovers from a missing or failed initial response, while avoiding duplicate reloads and out-of-order polling races.
+
 ## 0.8.58 - 2026-08-01
 
 ### Fixed
