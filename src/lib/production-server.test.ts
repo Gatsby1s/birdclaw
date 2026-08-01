@@ -11,6 +11,7 @@ const tempDirs: string[] = [];
 const originalLocalWeb = process.env.BIRDCLAW_LOCAL_WEB;
 const originalWebToken = process.env.BIRDCLAW_WEB_TOKEN;
 const originalAllowRemoteWeb = process.env.BIRDCLAW_ALLOW_REMOTE_WEB;
+const originalRailwayGitCommitSha = process.env.RAILWAY_GIT_COMMIT_SHA;
 
 afterEach(() => {
 	if (originalLocalWeb === undefined) delete process.env.BIRDCLAW_LOCAL_WEB;
@@ -20,12 +21,66 @@ afterEach(() => {
 	if (originalAllowRemoteWeb === undefined)
 		delete process.env.BIRDCLAW_ALLOW_REMOTE_WEB;
 	else process.env.BIRDCLAW_ALLOW_REMOTE_WEB = originalAllowRemoteWeb;
+	if (originalRailwayGitCommitSha === undefined)
+		delete process.env.RAILWAY_GIT_COMMIT_SHA;
+	else process.env.RAILWAY_GIT_COMMIT_SHA = originalRailwayGitCommitSha;
 	for (const directory of tempDirs.splice(0)) {
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
 
 describe("production server", () => {
+	it("serves the Railway deployment commit as a public live version manifest", async () => {
+		process.env.BIRDCLAW_WEB_TOKEN = "correct horse battery staple";
+		process.env.BIRDCLAW_ALLOW_REMOTE_WEB = "1";
+		process.env.RAILWAY_GIT_COMMIT_SHA =
+			"0123456789abcdef0123456789abcdef01234567";
+		const packageRoot = mkdtempSync(
+			path.join(os.tmpdir(), "birdclaw-production-version-"),
+		);
+		tempDirs.push(packageRoot);
+		const clientDir = path.join(packageRoot, "client");
+		mkdirSync(clientDir, { recursive: true });
+		const serverEntry = path.join(packageRoot, "server.mjs");
+		writeFileSync(
+			serverEntry,
+			`export default { fetch() { return new Response("SSR fallback", { status: 404 }); } };`,
+		);
+		const server = await startProductionServer({
+			packageRoot,
+			clientDir,
+			serverEntry,
+			port: 0,
+		});
+		try {
+			const address = server.address();
+			if (!address || typeof address === "string") {
+				throw new Error("no address");
+			}
+			const url = `http://127.0.0.1:${String(address.port)}/birdclaw-live-version.json`;
+			const headers = {
+				"x-forwarded-for": "203.0.113.8",
+				"x-forwarded-host": "birdclaw.example",
+				"x-forwarded-proto": "https",
+			};
+			const response = await fetch(url, { headers });
+			expect(response.status).toBe(200);
+			expect(response.headers.get("content-type")).toBe(
+				"application/json; charset=utf-8",
+			);
+			expect(response.headers.get("cache-control")).toBe("private, no-store");
+			await expect(response.json()).resolves.toEqual({
+				commit: "0123456789abcdef0123456789abcdef01234567",
+			});
+
+			const head = await fetch(url, { method: "HEAD", headers });
+			expect(head.status).toBe(200);
+			expect(await head.text()).toBe("");
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	});
+
 	it("protects remote pages with the signed mobile login flow", async () => {
 		process.env.BIRDCLAW_WEB_TOKEN = "correct horse battery staple";
 		process.env.BIRDCLAW_ALLOW_REMOTE_WEB = "1";

@@ -130,7 +130,7 @@ export function LiveVersionReloader({
 					reloadPage();
 				}
 			} catch {
-				// The manifest only exists for source-served local installs.
+				// Builds without a live version manifest can safely skip auto-reload.
 			}
 		}
 

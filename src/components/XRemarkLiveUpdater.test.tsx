@@ -1,9 +1,10 @@
+// @vitest-environment-options {"url":"https://birdclaw-production.up.railway.app/"}
 import { cleanup, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { queryKeys } from "#/lib/query-client";
 import { renderWithQueryClient } from "#/test/render";
 import type { XRemarkLiveSyncStatus } from "#/lib/types";
-import { XRemarkLiveUpdater } from "./XRemarkLiveUpdater";
+import { isLoopbackHostname, XRemarkLiveUpdater } from "./XRemarkLiveUpdater";
 
 afterEach(() => {
 	cleanup();
@@ -11,6 +12,18 @@ afterEach(() => {
 });
 
 describe("XRemarkLiveUpdater", () => {
+	it("recognizes browser loopback hostnames", () => {
+		expect(isLoopbackHostname("localhost")).toBe(true);
+		expect(isLoopbackHostname("birdclaw.localhost")).toBe(true);
+		expect(isLoopbackHostname("127.0.0.1")).toBe(true);
+		expect(isLoopbackHostname("127.255.255.255")).toBe(true);
+		expect(isLoopbackHostname("127.example.com")).toBe(false);
+		expect(isLoopbackHostname("[::1]")).toBe(true);
+		expect(isLoopbackHostname("birdclaw-production.up.railway.app")).toBe(
+			false,
+		);
+	});
+
 	it("invalidates visible note-bearing queries when a live snapshot arrives", async () => {
 		const fetchStatus = vi
 			.fn<() => Promise<XRemarkLiveSyncStatus>>()
@@ -30,7 +43,7 @@ describe("XRemarkLiveUpdater", () => {
 				lastSnapshotAt: "2026-07-19T12:00:00.000Z",
 			});
 		const { queryClient } = renderWithQueryClient(
-			<XRemarkLiveUpdater fetchStatus={fetchStatus} pollMs={10} />,
+			<XRemarkLiveUpdater enabled fetchStatus={fetchStatus} pollMs={10} />,
 		);
 		const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
@@ -43,5 +56,17 @@ describe("XRemarkLiveUpdater", () => {
 		expect(invalidate).toHaveBeenCalledWith({
 			queryKey: queryKeys.conversations,
 		});
+	});
+
+	it("does not poll X Remark from a remote deployment", async () => {
+		vi.useFakeTimers();
+		const fetchStatus = vi.fn<() => Promise<XRemarkLiveSyncStatus>>();
+
+		renderWithQueryClient(
+			<XRemarkLiveUpdater fetchStatus={fetchStatus} pollMs={10} />,
+		);
+
+		await vi.advanceTimersByTimeAsync(100);
+		expect(fetchStatus).not.toHaveBeenCalled();
 	});
 });
