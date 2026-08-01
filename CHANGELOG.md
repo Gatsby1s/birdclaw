@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.57 - 2026-08-01
+
+### Fixed
+
+- Keep Today and saved daily digest prose in Simplified Chinese by default on both the local app and Railway, without relying on a machine-specific language environment variable.
+- Use the Chinese language in digest cache identities so an older language-unspecified English result is not reused after the fix.
+
 ## 0.8.56 - 2026-08-01
 
 ### Added
