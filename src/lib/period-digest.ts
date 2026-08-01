@@ -133,6 +133,7 @@ const PeriodDigestSchema = z.object({
 });
 
 const MAX_DIGEST_LANGUAGE_LENGTH = 64;
+const DEFAULT_DIGEST_LANGUAGE = "zh-CN";
 
 export function normalizeDigestLanguage(
 	value: string | undefined,
@@ -619,7 +620,9 @@ export function collectPeriodDigestContext(
 
 function languageFromOptions(options: PeriodDigestOptions) {
 	return normalizeDigestLanguage(
-		options.language ?? process.env.BIRDCLAW_DIGEST_LANGUAGE,
+		options.language ??
+			process.env.BIRDCLAW_DIGEST_LANGUAGE ??
+			DEFAULT_DIGEST_LANGUAGE,
 	);
 }
 
