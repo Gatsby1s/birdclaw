@@ -213,4 +213,81 @@ describe("root route", () => {
 		expect(fetchManifest).toHaveBeenCalledTimes(2);
 		expect(reloadPage).not.toHaveBeenCalled();
 	});
+
+	it("reloads an old tab when the live manifest becomes available", async () => {
+		vi.useFakeTimers();
+		const fetchManifest = vi
+			.fn()
+			.mockResolvedValueOnce(new Response("Not Found", { status: 404 }))
+			.mockResolvedValue(versionResponse("commit-b"));
+		const reloadPage = vi.fn();
+
+		render(
+			<LiveVersionReloader
+				fetchManifest={fetchManifest as unknown as typeof fetch}
+				pollMs={1_000}
+				reloadPage={reloadPage}
+			/>,
+		);
+
+		await act(async () => {
+			await flushPromises();
+		});
+		expect(reloadPage).not.toHaveBeenCalled();
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1_000);
+			await flushPromises();
+		});
+
+		expect(fetchManifest).toHaveBeenCalledTimes(2);
+		expect(reloadPage).toHaveBeenCalledTimes(1);
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1_000);
+			await flushPromises();
+		});
+
+		expect(fetchManifest).toHaveBeenCalledTimes(3);
+		expect(reloadPage).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not reload when a later check completes before the initial check", async () => {
+		vi.useFakeTimers();
+		let resolveInitial: (response: Response) => void = () => undefined;
+		const initialResponse = new Promise<Response>((resolve) => {
+			resolveInitial = resolve;
+		});
+		const fetchManifest = vi
+			.fn()
+			.mockReturnValueOnce(initialResponse)
+			.mockResolvedValue(versionResponse("commit-a"));
+		const reloadPage = vi.fn();
+
+		render(
+			<LiveVersionReloader
+				fetchManifest={fetchManifest as unknown as typeof fetch}
+				pollMs={1_000}
+				reloadPage={reloadPage}
+			/>,
+		);
+
+		await act(async () => {
+			await flushPromises();
+			await vi.advanceTimersByTimeAsync(1_000);
+			await flushPromises();
+		});
+		expect(fetchManifest).toHaveBeenCalledTimes(2);
+		expect(reloadPage).not.toHaveBeenCalled();
+
+		await act(async () => {
+			resolveInitial(new Response("Not Found", { status: 404 }));
+			await flushPromises();
+			await vi.advanceTimersByTimeAsync(1_000);
+			await flushPromises();
+		});
+
+		expect(fetchManifest).toHaveBeenCalledTimes(3);
+		expect(reloadPage).not.toHaveBeenCalled();
+	});
 });

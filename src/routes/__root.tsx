@@ -112,6 +112,7 @@ export function LiveVersionReloader({
 	useEffect(() => {
 		let disposed = false;
 		let currentCommit: string | undefined;
+		let hasCompletedCheck = false;
 
 		async function checkManifest() {
 			try {
@@ -123,7 +124,9 @@ export function LiveVersionReloader({
 				const nextCommit = manifestCommit(await response.json());
 				if (!nextCommit || disposed) return;
 				if (!currentCommit) {
+					const shouldReload = hasCompletedCheck;
 					currentCommit = nextCommit;
+					if (shouldReload) reloadPage();
 					return;
 				}
 				if (nextCommit !== currentCommit) {
@@ -131,6 +134,8 @@ export function LiveVersionReloader({
 				}
 			} catch {
 				// Builds without a live version manifest can safely skip auto-reload.
+			} finally {
+				hasCompletedCheck = true;
 			}
 		}
 
