@@ -175,6 +175,21 @@ describe("period digest", () => {
 		).toThrow("valid Unicode locale identifier");
 	});
 
+	it("defaults digest prose to Simplified Chinese", () => {
+		expect(__test__.languageFromOptions({})).toBe("zh-CN");
+		const context = collectPeriodDigestContext({
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			maxTweets: 20,
+		});
+		const prompt = __test__.buildPrompt(context, {
+			language: __test__.languageFromOptions({}),
+		});
+
+		expect(prompt).toContain("in zh-CN");
+		expect(__test__.digestCacheKey(context, {})).toContain("lang:zh-CN");
+	});
+
 	it("uses the environment language and keeps prompt identifiers unchanged", () => {
 		process.env.BIRDCLAW_DIGEST_LANGUAGE = "PT-br";
 		const context = collectPeriodDigestContext({
