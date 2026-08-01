@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.58 - 2026-08-01
+
+### Fixed
+
+- Serve Railway's deployed commit as a compact live-version manifest instead of returning a full SSR 404 page, so open cloud tabs can detect releases without wasteful responses.
+- Stop the local-only X Remark live-status updater from polling every two seconds on remote deployments while preserving automatic updates on loopback installations.
+
 ## 0.8.57 - 2026-08-01
 
 ### Fixed
