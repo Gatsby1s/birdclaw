@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.61 - 2026-08-02
+
+### Added
+
+- Generate and persist the previous complete Monday-through-Sunday report after each local Monday midnight, using high reasoning, independent retries, bounded weekly gap recovery, and a shared model-generation lock with daily reports.
+- Browse Daily and Weekly archives from Today, restore either report with zero model tokens, download private weekly PDFs, and preserve weekly history through text backup export and restore.
+
+### Fixed
+
+- Pin the Railway runtime to `Asia/Shanghai` so cloud daily and weekly calendar boundaries match the local app, and fence late archive responses when switching between Daily and Weekly history.
+
 ## 0.8.60 - 2026-08-02
 
 ### Fixed
