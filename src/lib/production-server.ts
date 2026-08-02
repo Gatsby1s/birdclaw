@@ -17,6 +17,7 @@ import {
 	verifyBirdclawWebToken,
 } from "./http-effect";
 import {
+	getLocalCloudBridgeArchiveStats,
 	importLocalCloudBridgeBatch,
 	isLocalCloudBridgeTokenConfigured,
 	startLocalCloudBridgeClient,
@@ -308,9 +309,9 @@ async function handleLocalCloudBridge(
 ) {
 	const url = new URL(request.url ?? "/", "http://local");
 	if (url.pathname !== "/api/integrations/local-bridge") return false;
-	if (request.method !== "POST") {
+	if (request.method !== "GET" && request.method !== "POST") {
 		sendText(response, 405, "Method not allowed", "text/plain; charset=utf-8", {
-			allow: "POST",
+			allow: "GET, POST",
 		});
 		return true;
 	}
@@ -326,11 +327,20 @@ async function handleLocalCloudBridge(
 		sendText(response, 401, "Unauthorized");
 		return true;
 	}
+	if (request.method === "GET") {
+		sendText(
+			response,
+			200,
+			JSON.stringify({ ok: true, counts: getLocalCloudBridgeArchiveStats() }),
+			"application/json; charset=utf-8",
+		);
+		return true;
+	}
 	try {
 		const result = await importLocalCloudBridgeBatch(
 			await readLocalBridgeJson(request),
 		);
-		if (result.caughtUp) {
+		if (result.purpose === "live" && result.caughtUp) {
 			await recordTwitter6551LocalHeartbeat(result.edges);
 		}
 		sendText(
