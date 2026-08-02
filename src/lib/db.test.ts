@@ -411,7 +411,7 @@ describe("database init", () => {
 				"error",
 			]),
 		);
-		expect(db.pragma("user_version", { simple: true })).toBe(9);
+		expect(db.pragma("user_version", { simple: true })).toBe(10);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -440,7 +440,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(9);
+		expect(db.pragma("user_version", { simple: true })).toBe(10);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

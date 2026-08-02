@@ -96,6 +96,7 @@ export class ImportRepository {
 
 	clearBackupImport() {
 		this.db.exec(`
+	  delete from weekly_digest_history;
 	  delete from period_digest_history;
 	  delete from discussion_history;
       delete from follow_events;

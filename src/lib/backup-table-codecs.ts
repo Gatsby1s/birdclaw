@@ -958,6 +958,82 @@ const definitions = {
 			],
 		},
 	},
+	weekly_digest_history: {
+		exportSql: `
+      select id, week_start, week_end, timezone, status, attempt_count,
+        window_since, window_until, include_dms, provider, model,
+        reasoning_effort, service_tier, context_hash, counts_json,
+        digest_json, markdown, tweets_json, dms_json, links_json, error,
+        started_at, finished_at, created_at, updated_at
+      from weekly_digest_history
+      where status = 'ready'
+      order by week_start, id
+    `,
+		...fixedShard("data/digests/weekly-history.jsonl", "weekly_digest_history"),
+		merge: {
+			order: 23,
+			sql: `
+      insert into weekly_digest_history (
+        id, week_start, week_end, timezone, status, attempt_count,
+        window_since, window_until, include_dms, provider, model,
+        reasoning_effort, service_tier, context_hash, counts_json,
+        digest_json, markdown, tweets_json, dms_json, links_json, error,
+        started_at, finished_at, created_at, updated_at
+      ) values (?, ?, ?, ?, 'ready', coalesce(?, 1), ?, ?, coalesce(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
+      on conflict(week_start) do update set
+        week_end = excluded.week_end,
+        timezone = excluded.timezone,
+        status = 'ready',
+        attempt_count = max(weekly_digest_history.attempt_count, excluded.attempt_count),
+        window_since = excluded.window_since,
+        window_until = excluded.window_until,
+        include_dms = excluded.include_dms,
+        provider = excluded.provider,
+        model = excluded.model,
+        reasoning_effort = excluded.reasoning_effort,
+        service_tier = excluded.service_tier,
+        context_hash = excluded.context_hash,
+        counts_json = excluded.counts_json,
+        digest_json = excluded.digest_json,
+        markdown = excluded.markdown,
+        tweets_json = excluded.tweets_json,
+        dms_json = excluded.dms_json,
+        links_json = excluded.links_json,
+        error = null,
+        started_at = excluded.started_at,
+        finished_at = excluded.finished_at,
+        created_at = min(weekly_digest_history.created_at, excluded.created_at),
+        updated_at = excluded.updated_at
+      where excluded.updated_at >= weekly_digest_history.updated_at
+      `,
+			columns: [
+				"id",
+				"week_start",
+				"week_end",
+				"timezone",
+				"attempt_count",
+				"window_since",
+				"window_until",
+				"include_dms",
+				"provider",
+				"model",
+				"reasoning_effort",
+				"service_tier",
+				"context_hash",
+				"counts_json",
+				"digest_json",
+				"markdown",
+				"tweets_json",
+				"dms_json",
+				"links_json",
+				"error",
+				"started_at",
+				"finished_at",
+				"created_at",
+				"updated_at",
+			],
+		},
+	},
 	follow_snapshots: {
 		exportSql: `
       select id, account_id, direction, source, status, page_count,

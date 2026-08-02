@@ -10,15 +10,15 @@ import {
 import { redactProviderError } from "./openai-response-runtime";
 import type { Database } from "./sqlite";
 
-export type PeriodDigestHistoryStatus = "pending" | "ready" | "failed";
+export type WeeklyDigestHistoryStatus = "pending" | "ready" | "failed";
 
-export interface PeriodDigestHistoryMetadata {
+export interface WeeklyDigestHistoryMetadata {
 	id: string;
-	kind: "daily";
+	kind: "weekly";
 	date: string;
 	endDate: string;
 	timezone: string;
-	status: PeriodDigestHistoryStatus;
+	status: WeeklyDigestHistoryStatus;
 	title: string;
 	summary: string;
 	counts: PeriodDigestRunResult["context"]["counts"];
@@ -32,14 +32,15 @@ export interface PeriodDigestHistoryMetadata {
 	pdfAvailable: boolean;
 }
 
-export interface PeriodDigestHistoryDetail {
-	metadata: PeriodDigestHistoryMetadata;
+export interface WeeklyDigestHistoryDetail {
+	metadata: WeeklyDigestHistoryMetadata;
 	result: PeriodDigestRunResult;
 }
 
-interface PeriodDigestHistoryRow extends Record<string, unknown> {
+interface WeeklyDigestHistoryRow extends Record<string, unknown> {
 	id: string;
-	digest_date: string;
+	week_start: string;
+	week_end: string;
 	timezone: string;
 	status: string;
 	claim_token: string;
@@ -84,34 +85,94 @@ function parseJson<T>(value: string, fallback: T): T {
 	}
 }
 
-function statusFromRow(value: string): PeriodDigestHistoryStatus {
+function statusFromRow(value: string): WeeklyDigestHistoryStatus {
 	return value === "ready" || value === "failed" ? value : "pending";
 }
 
-export function dailyDigestPdfPath(date: string) {
+function localDateKey(date: Date) {
+	const year = String(date.getFullYear()).padStart(4, "0");
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `${year}-${month}-${day}`;
+}
+
+function parseLocalDateKey(value: string) {
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+	if (!match) throw new Error("Weekly digest date must use YYYY-MM-DD");
+	const year = Number(match[1]);
+	const month = Number(match[2]);
+	const day = Number(match[3]);
+	const date = new Date(year, month - 1, day);
+	if (
+		date.getFullYear() !== year ||
+		date.getMonth() !== month - 1 ||
+		date.getDate() !== day
+	) {
+		throw new Error("Weekly digest date is invalid");
+	}
+	return date;
+}
+
+export function localWeekStartKey(date = new Date()) {
+	const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+	const daysSinceMonday = (start.getDay() + 6) % 7;
+	start.setDate(start.getDate() - daysSinceMonday);
+	return localDateKey(start);
+}
+
+export function previousCompletedWeekStartKey(date = new Date()) {
+	const currentWeekStart = parseLocalDateKey(localWeekStartKey(date));
+	currentWeekStart.setDate(currentWeekStart.getDate() - 7);
+	return localDateKey(currentWeekStart);
+}
+
+export function localWindowForWeekStart(weekStart: string) {
+	const since = parseLocalDateKey(weekStart);
+	if (since.getDay() !== 1) {
+		throw new Error("Weekly digest must start on a local Monday");
+	}
+	const until = new Date(
+		since.getFullYear(),
+		since.getMonth(),
+		since.getDate() + 7,
+	);
+	const end = new Date(
+		until.getFullYear(),
+		until.getMonth(),
+		until.getDate() - 1,
+	);
+	return {
+		since: since.toISOString(),
+		until: until.toISOString(),
+		endDate: localDateKey(end),
+	};
+}
+
+export function weeklyDigestPdfPath(weekStart: string) {
 	return path.join(
 		getBirdclawPaths().rootDir,
 		"reports",
-		"daily",
-		`BirdClaw-${date}-digest.pdf`,
+		"weekly",
+		`BirdClaw-${weekStart}-weekly-digest.pdf`,
 	);
 }
 
 function metadataFromRow(
-	row: PeriodDigestHistoryRow,
-): PeriodDigestHistoryMetadata {
+	row: WeeklyDigestHistoryRow,
+): WeeklyDigestHistoryMetadata {
 	const digest = parseJson<PeriodDigestRunResult["digest"] | null>(
 		row.digest_json,
 		null,
 	);
 	return {
 		id: row.id,
-		kind: "daily",
-		date: row.digest_date,
-		endDate: row.digest_date,
+		kind: "weekly",
+		date: row.week_start,
+		endDate: row.week_end,
 		timezone: row.timezone,
 		status: statusFromRow(row.status),
-		title: digest?.title ?? `Daily digest · ${row.digest_date}`,
+		title:
+			digest?.title ?? `Weekly digest · ${row.week_start} – ${row.week_end}`,
 		summary:
 			digest?.summary ??
 			(row.status === "failed"
@@ -129,13 +190,13 @@ function metadataFromRow(
 		updatedAt: row.updated_at,
 		...(row.finished_at ? { finishedAt: row.finished_at } : {}),
 		pdfAvailable:
-			row.status === "ready" && existsSync(dailyDigestPdfPath(row.digest_date)),
+			row.status === "ready" && existsSync(weeklyDigestPdfPath(row.week_start)),
 	};
 }
 
 function detailFromRow(
-	row: PeriodDigestHistoryRow,
-): PeriodDigestHistoryDetail | null {
+	row: WeeklyDigestHistoryRow,
+): WeeklyDigestHistoryDetail | null {
 	if (row.status !== "ready") return null;
 	const digest = parseJson<PeriodDigestRunResult["digest"] | null>(
 		row.digest_json,
@@ -148,7 +209,7 @@ function detailFromRow(
 		result: {
 			context: {
 				window: {
-					label: row.digest_date,
+					label: `${row.week_start} – ${row.week_end}`,
 					since: row.window_since,
 					until: row.window_until,
 				},
@@ -173,60 +234,26 @@ function detailFromRow(
 
 function rowById(id: string, db: Database) {
 	return db
-		.prepare("select * from period_digest_history where id = ?")
-		.get(id) as PeriodDigestHistoryRow | undefined;
+		.prepare("select * from weekly_digest_history where id = ?")
+		.get(id) as WeeklyDigestHistoryRow | undefined;
 }
 
-export function listPeriodDigestHistory(
+export function listWeeklyDigestHistory(
 	options: { limit?: number } = {},
 	db = getReadDb(),
 ) {
-	const limit = Math.max(1, Math.min(366, Math.trunc(options.limit ?? 90)));
+	const limit = Math.max(1, Math.min(260, Math.trunc(options.limit ?? 52)));
 	const rows = db
 		.prepare(
-			"select * from period_digest_history order by digest_date desc limit ?",
+			"select * from weekly_digest_history order by week_start desc limit ?",
 		)
-		.all(limit) as PeriodDigestHistoryRow[];
+		.all(limit) as WeeklyDigestHistoryRow[];
 	return rows.map(metadataFromRow);
 }
 
-export function getPeriodDigestHistory(id: string, db = getReadDb()) {
+export function getWeeklyDigestHistory(id: string, db = getReadDb()) {
 	const row = rowById(id, db);
 	return row ? detailFromRow(row) : null;
-}
-
-export function localDateKey(date = new Date()) {
-	const year = String(date.getFullYear()).padStart(4, "0");
-	const month = String(date.getMonth() + 1).padStart(2, "0");
-	const day = String(date.getDate()).padStart(2, "0");
-	return `${year}-${month}-${day}`;
-}
-
-export function previousLocalDateKey(date = new Date()) {
-	const previous = new Date(
-		date.getFullYear(),
-		date.getMonth(),
-		date.getDate() - 1,
-	);
-	return localDateKey(previous);
-}
-
-export function localWindowForDateKey(dateKey: string) {
-	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
-	if (!match) throw new Error("Daily digest date must use YYYY-MM-DD");
-	const year = Number(match[1]);
-	const month = Number(match[2]);
-	const day = Number(match[3]);
-	const since = new Date(year, month - 1, day);
-	if (
-		since.getFullYear() !== year ||
-		since.getMonth() !== month - 1 ||
-		since.getDate() !== day
-	) {
-		throw new Error("Daily digest date is invalid");
-	}
-	const until = new Date(year, month - 1, day + 1);
-	return { since: since.toISOString(), until: until.toISOString() };
 }
 
 function compactContext(result: PeriodDigestRunResult) {
@@ -256,15 +283,15 @@ function compactContext(result: PeriodDigestRunResult) {
 	};
 }
 
-export function claimPeriodDigestDate(date: string, db = getNativeDb()) {
-	const { since, until } = localWindowForDateKey(date);
+export function claimWeeklyDigest(weekStart: string, db = getNativeDb()) {
+	const { since, until, endDate } = localWindowForWeekStart(weekStart);
 	const now = new Date().toISOString();
 	const staleBefore = new Date(Date.now() - CLAIM_STALE_MS).toISOString();
 	return db.transaction(() => {
 		const claimToken = randomUUID();
 		const existing = db
-			.prepare("select * from period_digest_history where digest_date = ?")
-			.get(date) as PeriodDigestHistoryRow | undefined;
+			.prepare("select * from weekly_digest_history where week_start = ?")
+			.get(weekStart) as WeeklyDigestHistoryRow | undefined;
 		if (
 			existing?.status === "ready" ||
 			(existing?.status === "pending" && existing.updated_at > staleBefore)
@@ -279,12 +306,12 @@ export function claimPeriodDigestDate(date: string, db = getNativeDb()) {
 			const timezone =
 				Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
 			db.prepare(
-				`update period_digest_history
+				`update weekly_digest_history
 				 set status = 'pending', claim_token = ?, attempt_count = attempt_count + 1,
-				     timezone = ?, window_since = ?, window_until = ?, error = null,
-				     started_at = ?, finished_at = null, updated_at = ?
+				     week_end = ?, timezone = ?, window_since = ?, window_until = ?,
+				     error = null, started_at = ?, finished_at = null, updated_at = ?
 				 where id = ?`,
-			).run(claimToken, timezone, since, until, now, now, existing.id);
+			).run(claimToken, endDate, timezone, since, until, now, now, existing.id);
 			return {
 				claimed: true as const,
 				id: existing.id,
@@ -294,13 +321,14 @@ export function claimPeriodDigestDate(date: string, db = getNativeDb()) {
 		}
 		const id = randomUUID();
 		db.prepare(
-			`insert into period_digest_history (
-			 id, digest_date, timezone, status, claim_token, attempt_count, window_since,
-			 window_until, started_at, created_at, updated_at
-			) values (?, ?, ?, 'pending', ?, 1, ?, ?, ?, ?, ?)`,
+			`insert into weekly_digest_history (
+			 id, week_start, week_end, timezone, status, claim_token, attempt_count,
+			 window_since, window_until, started_at, created_at, updated_at
+			) values (?, ?, ?, ?, 'pending', ?, 1, ?, ?, ?, ?, ?)`,
 		).run(
 			id,
-			date,
+			weekStart,
+			endDate,
 			Intl.DateTimeFormat().resolvedOptions().timeZone || "local",
 			claimToken,
 			since,
@@ -313,7 +341,7 @@ export function claimPeriodDigestDate(date: string, db = getNativeDb()) {
 	})();
 }
 
-export function completePeriodDigestHistory(
+export function completeWeeklyDigestHistory(
 	id: string,
 	claimToken: string,
 	result: PeriodDigestRunResult,
@@ -323,7 +351,7 @@ export function completePeriodDigestHistory(
 	const now = new Date().toISOString();
 	const changed = db
 		.prepare(
-			`update period_digest_history set
+			`update weekly_digest_history set
 			 status = 'ready', include_dms = ?, provider = ?, model = ?,
 			 reasoning_effort = ?, service_tier = ?, context_hash = ?,
 			 counts_json = ?, digest_json = ?, markdown = ?, tweets_json = ?,
@@ -351,7 +379,7 @@ export function completePeriodDigestHistory(
 	return changed > 0;
 }
 
-export function failPeriodDigestHistory(
+export function failWeeklyDigestHistory(
 	id: string,
 	claimToken: string,
 	error: unknown,
@@ -364,7 +392,7 @@ export function failPeriodDigestHistory(
 	return (
 		db
 			.prepare(
-				`update period_digest_history
+				`update weekly_digest_history
 				 set status = 'failed', error = ?, finished_at = ?, updated_at = ?
 				 where id = ? and claim_token = ? and status = 'pending'`,
 			)
@@ -372,29 +400,31 @@ export function failPeriodDigestHistory(
 	);
 }
 
-export async function archivePeriodDigestDate(
-	date: string,
+export async function archiveWeeklyDigest(
+	weekStart: string,
 	{ signal }: { signal?: AbortSignal } = {},
 ) {
-	const claim = claimPeriodDigestDate(date);
+	const claim = claimWeeklyDigest(weekStart);
 	if (!claim.claimed) {
 		return { generated: false as const, id: claim.id, status: claim.status };
 	}
-	const window = localWindowForDateKey(date);
+	const window = localWindowForWeekStart(weekStart);
 	try {
 		const result = await streamPeriodDigest({
-			period: "yesterday",
+			period: "week",
 			since: window.since,
 			until: window.until,
 			includeDms: false,
 			refresh: false,
+			reasoningEffort: "high",
+			serviceTier: "priority",
 			maxTweets: 5_000,
 			maxLinks: 25,
 			liveSync: false,
 			signal,
 			bufferModelDeltasUntilSuccess: true,
 		});
-		const completed = completePeriodDigestHistory(
+		const completed = completeWeeklyDigestHistory(
 			claim.id,
 			claim.claimToken,
 			result,
@@ -404,7 +434,7 @@ export async function archivePeriodDigestDate(
 		}
 		return { generated: true as const, id: claim.id, status: "ready" as const };
 	} catch (error) {
-		failPeriodDigestHistory(claim.id, claim.claimToken, error);
+		failWeeklyDigestHistory(claim.id, claim.claimToken, error);
 		throw error;
 	}
 }

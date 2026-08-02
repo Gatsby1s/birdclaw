@@ -11,9 +11,17 @@ import {
 	getPeriodDigestHistory,
 	type PeriodDigestHistoryDetail,
 } from "./period-digest-history";
+import {
+	getWeeklyDigestHistory,
+	weeklyDigestPdfPath,
+	type WeeklyDigestHistoryDetail,
+} from "./weekly-digest-history";
 
 const execFilePromise = promisify(execFile);
 const renders = new Map<string, Promise<string>>();
+type DigestHistoryDetail =
+	| PeriodDigestHistoryDetail
+	| WeeklyDigestHistoryDetail;
 
 const CHROME_CANDIDATES = [
 	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -45,10 +53,11 @@ async function validPdf(filePath: string) {
 	}
 }
 
-function pdfFingerprint(detail: PeriodDigestHistoryDetail) {
+function pdfFingerprint(detail: DigestHistoryDetail) {
 	return createHash("sha256")
 		.update(
 			JSON.stringify({
+				kind: detail.metadata.kind,
 				date: detail.metadata.date,
 				updatedAt: detail.metadata.updatedAt,
 				contextHash: detail.result.context.hash,
@@ -63,10 +72,7 @@ function pdfMetadataPath(filePath: string) {
 	return `${filePath}.meta.json`;
 }
 
-async function validCachedPdf(
-	filePath: string,
-	detail: PeriodDigestHistoryDetail,
-) {
+async function validCachedPdf(filePath: string, detail: DigestHistoryDetail) {
 	if (!(await validPdf(filePath))) return false;
 	try {
 		const raw = await fs.readFile(pdfMetadataPath(filePath), "utf8");
@@ -79,7 +85,7 @@ async function validCachedPdf(
 
 async function writePdfCacheMetadata(
 	filePath: string,
-	detail: PeriodDigestHistoryDetail,
+	detail: DigestHistoryDetail,
 ) {
 	const metadataPath = pdfMetadataPath(filePath);
 	const temporaryPath = `${metadataPath}.${String(process.pid)}.${String(Date.now())}.tmp`;
@@ -120,8 +126,14 @@ function markdownLines(markdown: string) {
 		.join("\n");
 }
 
-function dailyDigestHtml(detail: PeriodDigestHistoryDetail) {
+function dailyDigestHtml(detail: DigestHistoryDetail) {
 	const { metadata, result } = detail;
+	const weekly = metadata.kind === "weekly";
+	const archiveLabel = weekly ? "Weekly archive" : "Daily archive";
+	const dateLabel = weekly
+		? `${metadata.date} – ${metadata.endDate}`
+		: metadata.date;
+	const footerLabel = weekly ? "weekly" : "daily";
 	return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${escapeHtml(metadata.title)}</title>
 <style>
@@ -141,11 +153,11 @@ p { margin: 4px 0; white-space: pre-wrap; }
 .space { height: 7px; }
 footer { border-top: 1px solid #d9e0e7; color: #738092; font-size: 10px; margin-top: 28px; padding-top: 10px; }
 </style></head><body>
-<header><div class="brand">BirdClaw · Daily archive</div><h1>${escapeHtml(metadata.title)}</h1>
-<div class="meta">${escapeHtml(metadata.date)} · ${escapeHtml(metadata.timezone)} · ${escapeHtml(result.provider ?? "openai")} / ${escapeHtml(result.model)}</div>
+<header><div class="brand">BirdClaw · ${archiveLabel}</div><h1>${escapeHtml(metadata.title)}</h1>
+<div class="meta">${escapeHtml(dateLabel)} · ${escapeHtml(metadata.timezone)} · ${escapeHtml(result.provider ?? "openai")} / ${escapeHtml(result.model)}</div>
 <div class="summary">${escapeHtml(metadata.summary)}</div></header>
 <main>${markdownLines(result.markdown)}</main>
-<footer>Saved daily history · Restoring and downloading this report uses 0 model tokens.</footer>
+<footer>Saved ${footerLabel} history · Restoring and downloading this report uses 0 model tokens.</footer>
 </body></html>`;
 }
 
@@ -154,7 +166,7 @@ async function renderDailyDigestPdf({
 	detail,
 }: {
 	date: string;
-	detail: PeriodDigestHistoryDetail;
+	detail: DigestHistoryDetail;
 }) {
 	const chrome = chromeExecutable();
 	if (!chrome) {
@@ -162,7 +174,10 @@ async function renderDailyDigestPdf({
 			"Google Chrome, Microsoft Edge, or Chromium is required for direct PDF downloads",
 		);
 	}
-	const target = dailyDigestPdfPath(date);
+	const target =
+		detail.metadata.kind === "weekly"
+			? weeklyDigestPdfPath(date)
+			: dailyDigestPdfPath(date);
 	if (await validCachedPdf(target, detail)) return target;
 	const profileDir = await fs.mkdtemp(
 		path.join(os.tmpdir(), "birdclaw-daily-pdf-profile-"),
@@ -219,6 +234,22 @@ export async function ensureDailyDigestPdf({ id }: { id: string }) {
 		detail,
 	}).finally(() => renders.delete(id));
 	renders.set(id, render);
+	return render;
+}
+
+export async function ensureWeeklyDigestPdf({ id }: { id: string }) {
+	const detail = getWeeklyDigestHistory(id);
+	if (!detail) throw new Error("Weekly digest history not found");
+	const target = weeklyDigestPdfPath(detail.metadata.date);
+	if (await validCachedPdf(target, detail)) return target;
+	const renderKey = `weekly:${id}`;
+	const existing = renders.get(renderKey);
+	if (existing) return existing;
+	const render = renderDailyDigestPdf({
+		date: detail.metadata.date,
+		detail,
+	}).finally(() => renders.delete(renderKey));
+	renders.set(renderKey, render);
 	return render;
 }
 

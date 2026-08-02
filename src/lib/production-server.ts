@@ -32,6 +32,10 @@ import {
 	startPeriodDigestScheduler,
 	stopPeriodDigestScheduler,
 } from "./period-digest-scheduler";
+import {
+	startWeeklyDigestScheduler,
+	stopWeeklyDigestScheduler,
+} from "./weekly-digest-scheduler";
 import { handleRagMcpHttpRequest } from "./rag-mcp-server";
 import {
 	getTwitter6551RuntimeStatus,
@@ -628,6 +632,7 @@ export async function startProductionServer({
 	});
 	server.once("close", () => {
 		stopPeriodDigestScheduler();
+		stopWeeklyDigestScheduler();
 		stopLocalCloudBridgeClient();
 		stopLocalTwitterCollector();
 		void stopTwitter6551WorkerManager();
@@ -638,6 +643,7 @@ export async function startProductionServer({
 	});
 	try {
 		startPeriodDigestScheduler();
+		startWeeklyDigestScheduler();
 		startLocalTwitterCollector();
 		startLocalCloudBridgeClient();
 		void startTwitter6551WorkerManager().catch((error) => {
@@ -670,6 +676,7 @@ export async function runProductionServer(options: ProductionServerOptions) {
 		const stop = (signal: NodeJS.Signals) => {
 			removeHandlers();
 			stopPeriodDigestScheduler();
+			stopWeeklyDigestScheduler();
 			stopLocalCloudBridgeClient();
 			stopLocalTwitterCollector();
 			void stopTwitter6551WorkerManager().finally(() => {

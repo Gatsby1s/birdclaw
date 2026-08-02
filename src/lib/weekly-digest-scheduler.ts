@@ -1,28 +1,29 @@
 import path from "node:path";
 import { getBirdclawPaths } from "./config";
-import { ensureDailyDigestPdf } from "./daily-digest-pdf";
-import {
-	archivePeriodDigestDate,
-	listPeriodDigestHistory,
-	localDateKey,
-	previousLocalDateKey,
-} from "./period-digest-history";
+import { ensureWeeklyDigestPdf } from "./daily-digest-pdf";
 import { redactProviderError } from "./openai-response-runtime";
 import {
 	acquireScheduledJobLock,
 	appendScheduledJobAudit,
 	startScheduledJobRun,
 } from "./scheduled-job";
+import {
+	archiveWeeklyDigest,
+	listWeeklyDigestHistory,
+	localWeekStartKey,
+	previousCompletedWeekStartKey,
+} from "./weekly-digest-history";
 
 const LOCK_STALE_MS = 2 * 60 * 60_000;
 const RETRY_DELAY_MS = 5 * 60_000;
+const MAX_BACKFILL_WEEKS = 12;
 
-interface DailyDigestSchedulerDependencies {
-	archive: typeof archivePeriodDigestDate;
-	ensurePdf: typeof ensureDailyDigestPdf;
+interface WeeklyDigestSchedulerDependencies {
+	archive: typeof archiveWeeklyDigest;
+	ensurePdf: typeof ensureWeeklyDigestPdf;
 }
 
-let activeManager: DailyDigestScheduler | undefined;
+let activeManager: WeeklyDigestScheduler | undefined;
 
 function nextLocalMidnightDelay(now = new Date()) {
 	const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
@@ -34,20 +35,20 @@ function dateFromKey(value: string) {
 	return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1, 12);
 }
 
-function startupDigestDates(now = new Date()) {
-	const yesterdayKey = previousLocalDateKey(now);
-	const items = listPeriodDigestHistory({ limit: 366 });
-	if (items.length === 0) return [yesterdayKey];
-	const yesterday = dateFromKey(yesterdayKey);
+export function startupDigestWeeks(now = new Date()) {
+	const previousWeekKey = previousCompletedWeekStartKey(now);
+	const items = listWeeklyDigestHistory({ limit: 260 });
+	if (items.length === 0) return [previousWeekKey];
+	const previousWeek = dateFromKey(previousWeekKey);
 	const cap = new Date(
-		yesterday.getFullYear(),
-		yesterday.getMonth(),
-		yesterday.getDate() - 30,
+		previousWeek.getFullYear(),
+		previousWeek.getMonth(),
+		previousWeek.getDate() - (MAX_BACKFILL_WEEKS - 1) * 7,
 		12,
 	);
 	const oldest = items.reduce(
 		(current, item) => (item.date < current ? item.date : current),
-		items[0]?.date ?? yesterdayKey,
+		items[0]?.date ?? previousWeekKey,
 	);
 	const oldestDate = dateFromKey(oldest);
 	const start = oldestDate > cap ? oldestDate : cap;
@@ -57,38 +58,38 @@ function startupDigestDates(now = new Date()) {
 	const missing: string[] = [];
 	for (
 		let cursor = start;
-		cursor <= yesterday;
+		cursor <= previousWeek;
 		cursor = new Date(
 			cursor.getFullYear(),
 			cursor.getMonth(),
-			cursor.getDate() + 1,
+			cursor.getDate() + 7,
 			12,
 		)
 	) {
-		const key = localDateKey(cursor);
+		const key = localWeekStartKey(cursor);
 		if (!complete.has(key)) missing.push(key);
 	}
 	return missing;
 }
 
-class DailyDigestScheduler {
+class WeeklyDigestScheduler {
 	private midnightTimer: ReturnType<typeof setTimeout> | undefined;
 	private retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private stopped = false;
 	private inFlight: Promise<void> | undefined;
-	private pendingDates = new Set<string>();
+	private pendingWeeks = new Set<string>();
 	private activeAbort: AbortController | undefined;
 
 	constructor(
-		private readonly dependencies: DailyDigestSchedulerDependencies = {
-			archive: archivePeriodDigestDate,
-			ensurePdf: ensureDailyDigestPdf,
+		private readonly dependencies: WeeklyDigestSchedulerDependencies = {
+			archive: archiveWeeklyDigest,
+			ensurePdf: ensureWeeklyDigestPdf,
 		},
 	) {}
 
 	start() {
 		this.scheduleMidnight();
-		for (const date of startupDigestDates()) this.queue(date);
+		for (const weekStart of startupDigestWeeks()) this.queue(weekStart);
 	}
 
 	stop() {
@@ -96,7 +97,7 @@ class DailyDigestScheduler {
 		if (this.midnightTimer) clearTimeout(this.midnightTimer);
 		for (const timer of this.retryTimers.values()) clearTimeout(timer);
 		this.retryTimers.clear();
-		this.activeAbort?.abort(new Error("Daily digest scheduler stopped"));
+		this.activeAbort?.abort(new Error("Weekly digest scheduler stopped"));
 		this.activeAbort = undefined;
 		this.midnightTimer = undefined;
 	}
@@ -105,58 +106,60 @@ class DailyDigestScheduler {
 		if (this.stopped) return;
 		this.midnightTimer = setTimeout(() => {
 			this.scheduleMidnight();
-			for (const date of startupDigestDates()) this.queue(date);
+			for (const weekStart of startupDigestWeeks()) this.queue(weekStart);
 		}, nextLocalMidnightDelay());
 		this.midnightTimer.unref?.();
 	}
 
-	private scheduleRetry(date: string) {
-		if (this.stopped || this.retryTimers.has(date)) return;
+	private scheduleRetry(weekStart: string) {
+		if (this.stopped || this.retryTimers.has(weekStart)) return;
 		const timer = setTimeout(() => {
-			this.retryTimers.delete(date);
-			this.queue(date);
+			this.retryTimers.delete(weekStart);
+			this.queue(weekStart);
 		}, RETRY_DELAY_MS);
-		this.retryTimers.set(date, timer);
+		this.retryTimers.set(weekStart, timer);
 		timer.unref?.();
 	}
 
-	private queue(date: string) {
+	private queue(weekStart: string) {
 		if (this.stopped) return;
-		this.pendingDates.add(date);
+		this.pendingWeeks.add(weekStart);
 		this.drain();
 	}
 
 	private drain() {
 		if (this.stopped || this.inFlight) return;
-		const date = this.pendingDates.values().next().value as string | undefined;
-		if (!date) return;
-		this.pendingDates.delete(date);
-		this.inFlight = this.run(date)
-			.catch(() => this.scheduleRetry(date))
+		const weekStart = this.pendingWeeks.values().next().value as
+			| string
+			| undefined;
+		if (!weekStart) return;
+		this.pendingWeeks.delete(weekStart);
+		this.inFlight = this.run(weekStart)
+			.catch(() => this.scheduleRetry(weekStart))
 			.finally(() => {
 				this.inFlight = undefined;
 				this.drain();
 			});
 	}
 
-	private async run(date: string) {
+	private async run(weekStart: string) {
 		const { rootDir } = getBirdclawPaths();
 		const lockPath = path.join(
 			rootDir,
 			"locks",
 			"period-digest-generation.lock",
 		);
-		const auditPath = path.join(rootDir, "logs", "daily-digest.jsonl");
+		const auditPath = path.join(rootDir, "logs", "weekly-digest.jsonl");
 		const release = await acquireScheduledJobLock(lockPath, LOCK_STALE_MS);
 		if (!release) {
-			this.scheduleRetry(date);
+			this.scheduleRetry(weekStart);
 			return;
 		}
 		const job = startScheduledJobRun();
 		const abort = new AbortController();
 		this.activeAbort = abort;
 		try {
-			const outcome = await this.dependencies.archive(date, {
+			const outcome = await this.dependencies.archive(weekStart, {
 				signal: abort.signal,
 			});
 			let pdf: "ready" | "deferred" = "deferred";
@@ -169,24 +172,24 @@ class DailyDigestScheduler {
 				}
 			}
 			await appendScheduledJobAudit(auditPath, {
-				job: "daily-period-digest",
-				date,
+				job: "weekly-period-digest",
+				weekStart,
 				outcome,
 				pdf,
 				...job.finish(),
 			});
-			if (outcome.status === "pending") this.scheduleRetry(date);
+			if (outcome.status === "pending") this.scheduleRetry(weekStart);
 		} catch (error) {
 			await appendScheduledJobAudit(auditPath, {
-				job: "daily-period-digest",
-				date,
+				job: "weekly-period-digest",
+				weekStart,
 				status: "failed",
 				error: redactProviderError(
 					error instanceof Error ? error.message : String(error),
 				),
 				...job.finish(),
 			});
-			this.scheduleRetry(date);
+			this.scheduleRetry(weekStart);
 		} finally {
 			if (this.activeAbort === abort) this.activeAbort = undefined;
 			await release();
@@ -194,20 +197,20 @@ class DailyDigestScheduler {
 	}
 }
 
-export function startPeriodDigestScheduler() {
+export function startWeeklyDigestScheduler() {
 	if (activeManager) return activeManager;
-	activeManager = new DailyDigestScheduler();
+	activeManager = new WeeklyDigestScheduler();
 	activeManager.start();
 	return activeManager;
 }
 
-export function stopPeriodDigestScheduler() {
+export function stopWeeklyDigestScheduler() {
 	activeManager?.stop();
 	activeManager = undefined;
 }
 
 export const __test__ = {
-	DailyDigestScheduler,
+	WeeklyDigestScheduler,
 	nextLocalMidnightDelay,
-	startupDigestDates,
+	startupDigestWeeks,
 };

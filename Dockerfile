@@ -15,6 +15,7 @@ FROM node:26-bookworm-slim AS runtime
 ENV NODE_ENV=production
 ENV BIRDCLAW_HOME=/data
 ENV BIRDCLAW_HOST=0.0.0.0
+ENV TZ=Asia/Shanghai
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends ca-certificates git \
 	&& rm -rf /var/lib/apt/lists/*

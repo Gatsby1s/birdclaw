@@ -12,7 +12,7 @@ import {
 describe("backup table codecs", () => {
 	it("owns every portable table and path exactly once", () => {
 		expect(assertBackupTableCodecRegistry()).toBe(true);
-		expect(BACKUP_TABLE_CODECS).toHaveLength(23);
+		expect(BACKUP_TABLE_CODECS).toHaveLength(24);
 		expect(BACKUP_TABLE_CODECS.map((codec) => codec.name)).toEqual([
 			"accounts",
 			"profiles",
@@ -33,6 +33,7 @@ describe("backup table codecs", () => {
 			"ai_scores",
 			"discussion_history",
 			"period_digest_history",
+			"weekly_digest_history",
 			"follow_snapshots",
 			"follow_snapshot_members",
 			"follow_edges",
@@ -42,7 +43,7 @@ describe("backup table codecs", () => {
 			BACKUP_TABLE_CODECS.map((codec) => codec.merge.order).sort(
 				(left, right) => left - right,
 			),
-		).toEqual(Array.from({ length: 23 }, (_, index) => index));
+		).toEqual(Array.from({ length: 24 }, (_, index) => index));
 
 		const sample = { created_at: "2026-01-02T00:00:00.000Z", kind: "likes" };
 		for (const codec of BACKUP_TABLE_CODECS) {
