@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	insertTestAccount,
 	insertTestProfile,
@@ -12,6 +12,23 @@ import {
 } from "../test/test-home";
 import { startProductionServer } from "./production-server";
 import { getTwitter6551RuntimeStatus } from "./twitter-6551";
+
+const schedulerMocks = vi.hoisted(() => ({
+	startDaily: vi.fn(),
+	stopDaily: vi.fn(),
+	startWeekly: vi.fn(),
+	stopWeekly: vi.fn(),
+}));
+
+vi.mock("./period-digest-scheduler", () => ({
+	startPeriodDigestScheduler: schedulerMocks.startDaily,
+	stopPeriodDigestScheduler: schedulerMocks.stopDaily,
+}));
+
+vi.mock("./weekly-digest-scheduler", () => ({
+	startWeeklyDigestScheduler: schedulerMocks.startWeekly,
+	stopWeeklyDigestScheduler: schedulerMocks.stopWeekly,
+}));
 
 const tempDirs: string[] = [];
 const originalLocalWeb = process.env.BIRDCLAW_LOCAL_WEB;
@@ -33,6 +50,7 @@ afterEach(() => {
 	for (const directory of tempDirs.splice(0)) {
 		rmSync(directory, { recursive: true, force: true });
 	}
+	vi.clearAllMocks();
 });
 
 describe("production server", () => {
@@ -58,6 +76,8 @@ describe("production server", () => {
 			serverEntry,
 			port: 0,
 		});
+		expect(schedulerMocks.startDaily).toHaveBeenCalledTimes(1);
+		expect(schedulerMocks.startWeekly).toHaveBeenCalledTimes(1);
 		try {
 			const address = server.address();
 			if (!address || typeof address === "string") {
@@ -85,6 +105,8 @@ describe("production server", () => {
 		} finally {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
+		expect(schedulerMocks.stopDaily).toHaveBeenCalledTimes(1);
+		expect(schedulerMocks.stopWeekly).toHaveBeenCalledTimes(1);
 	});
 
 	it("protects remote pages with the signed mobile login flow", async () => {
