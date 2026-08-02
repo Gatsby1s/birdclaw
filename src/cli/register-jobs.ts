@@ -7,6 +7,9 @@ import {
 	installBookmarkSyncLaunchAgent,
 	runBookmarkSyncJob,
 } from "#/lib/bookmark-sync-job";
+import { getBirdclawPaths } from "#/lib/config";
+import { migrateLegacyScheduledJobLock } from "#/lib/scheduled-job";
+import path from "node:path";
 import type { TimelineCollectionMode } from "#/lib/timeline-collections-live";
 import type { CliCommandContext } from "./command-context";
 
@@ -14,6 +17,57 @@ export function registerJobCommands({ program, print }: CliCommandContext) {
 	const jobsCommand = program
 		.command("jobs")
 		.description("Run and install background Birdclaw jobs");
+
+	jobsCommand
+		.command("migrate-legacy-lock <name>")
+		.description(
+			"Inspect or archive a pre-v0.8.63 job lock after its older process is stopped",
+		)
+		.option(
+			"--confirm-drained",
+			"Confirm every older server, CLI job, and LaunchAgent using this data root and lock is stopped",
+		)
+		.action(async (name: string, options) => {
+			const knownLocks: Record<
+				string,
+				{ file: string; drainRequired: string }
+			> = {
+				"period-digest": {
+					file: "period-digest-generation.lock",
+					drainRequired:
+						"Stop every older BirdClaw server using this data root before confirming.",
+				},
+				"account-sync": {
+					file: "account-sync.lock",
+					drainRequired:
+						"Stop every account-sync CLI job and unload its LaunchAgent before confirming.",
+				},
+				"bookmarks-sync": {
+					file: "bookmarks-sync.lock",
+					drainRequired:
+						"Stop every bookmarks-sync CLI job and unload its LaunchAgent before confirming.",
+				},
+			};
+			const knownLock = knownLocks[name];
+			if (!knownLock) {
+				throw new Error(
+					"Unknown lock name. Use period-digest, account-sync, or bookmarks-sync.",
+				);
+			}
+			const lockPath = path.join(
+				getBirdclawPaths().rootDir,
+				"locks",
+				knownLock.file,
+			);
+			const result = await migrateLegacyScheduledJobLock(
+				lockPath,
+				Boolean(options.confirmDrained),
+			);
+			print(
+				{ lockPath, drainRequired: knownLock.drainRequired, ...result },
+				true,
+			);
+		});
 
 	jobsCommand
 		.command("sync-account")

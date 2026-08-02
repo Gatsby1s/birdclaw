@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
+import { lock as acquireLease } from "proper-lockfile";
 import { tryPromise } from "./effect-runtime";
 
 export interface ScheduledJobRunMetadata {
@@ -19,13 +21,23 @@ export interface ScheduledJobRun {
 
 export type ScheduledJobLockRelease = () => Promise<void>;
 
-function isFileExistsError(error: unknown) {
+export interface LegacyScheduledJobLockMigration {
+	status: "absent" | "lease" | "legacy";
+	migrated: boolean;
+	archivedPath?: string;
+}
+
+function hasErrorCode(error: unknown, code: string) {
 	return (
 		typeof error === "object" &&
 		error !== null &&
 		"code" in error &&
-		error.code === "EEXIST"
+		error.code === code
 	);
+}
+
+function leaseStaleMs(requestedMs: number) {
+	return Math.min(Math.max(requestedMs, 2_000), 30_000);
 }
 
 export function startScheduledJobRun(started = Date.now()): ScheduledJobRun {
@@ -50,6 +62,25 @@ export async function appendScheduledJobAudit(logPath: string, entry: unknown) {
 	await fs.appendFile(logPath, `${JSON.stringify(entry)}\n`, "utf8");
 }
 
+export async function migrateLegacyScheduledJobLock(
+	lockPath: string,
+	confirmedDrained = false,
+): Promise<LegacyScheduledJobLockMigration> {
+	const existing = await fs.lstat(lockPath).catch((error: unknown) => {
+		if (hasErrorCode(error, "ENOENT")) return undefined;
+		throw error;
+	});
+	if (!existing) return { status: "absent", migrated: false };
+	if (existing.isDirectory()) return { status: "lease", migrated: false };
+	if (!confirmedDrained) return { status: "legacy", migrated: false };
+
+	const archivedPath = `${lockPath}.legacy-${new Date()
+		.toISOString()
+		.replaceAll(/[^0-9]/g, "")}-${randomUUID()}`;
+	await fs.rename(lockPath, archivedPath);
+	return { status: "legacy", migrated: true, archivedPath };
+}
+
 export function appendScheduledJobAuditEffect(logPath: string, entry: unknown) {
 	return tryPromise(() => appendScheduledJobAudit(logPath, entry));
 }
@@ -59,28 +90,25 @@ export async function acquireScheduledJobLock(
 	staleMs: number,
 ): Promise<ScheduledJobLockRelease | undefined> {
 	await fs.mkdir(path.dirname(lockPath), { recursive: true });
+	const existing = await fs.lstat(lockPath).catch((error: unknown) => {
+		if (hasErrorCode(error, "ENOENT")) return undefined;
+		throw error;
+	});
+	// Releases before v0.8.63 used a regular file at this path. Never unlink it
+	// here: its owner may still be running during a rolling upgrade.
+	if (existing && !existing.isDirectory()) return undefined;
+
+	const stale = leaseStaleMs(staleMs);
 	try {
-		const handle = await fs.open(lockPath, "wx");
-		try {
-			await handle.writeFile(
-				`${JSON.stringify({
-					pid: process.pid,
-					host: os.hostname(),
-					startedAt: new Date().toISOString(),
-				})}\n`,
-				"utf8",
-			);
-		} finally {
-			await handle.close();
-		}
-		return () => fs.rm(lockPath, { force: true });
+		return await acquireLease(lockPath, {
+			lockfilePath: lockPath,
+			realpath: false,
+			retries: 0,
+			stale,
+			update: Math.max(1_000, Math.floor(stale / 3)),
+		});
 	} catch (error) {
-		if (!isFileExistsError(error)) throw error;
-		const stats = await fs.stat(lockPath).catch(() => undefined);
-		if (stats && Date.now() - stats.mtimeMs > staleMs) {
-			await fs.rm(lockPath, { force: true });
-			return acquireScheduledJobLock(lockPath, staleMs);
-		}
+		if (!hasErrorCode(error, "ELOCKED")) throw error;
 		return undefined;
 	}
 }
@@ -101,3 +129,5 @@ export function acquireScheduledJobLockEffect(
 		),
 	);
 }
+
+export const __test__ = { leaseStaleMs };
