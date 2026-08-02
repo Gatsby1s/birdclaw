@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.60 - 2026-08-02
+
+### Fixed
+
+- Resume a one-time, full-history cloud bridge replay with an independent cursor after live sync catches up, so older Home tweets omitted by the original 24-hour bootstrap are uploaded without rewinding normal incremental sync.
+- Expose authenticated aggregate bridge counts for verifying cloud archive completeness, while keeping historical batches from falsely refreshing the live-collector heartbeat.
+
 ## 0.8.59 - 2026-08-02
 
 ### Fixed
