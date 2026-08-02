@@ -28,6 +28,7 @@ import { Route as ProfilesHandleRouteImport } from './routes/profiles.$handle'
 import { Route as AuthorsHandleRouteImport } from './routes/authors.$handle'
 import { Route as ApiXurlRateLimitsRouteImport } from './routes/api/xurl-rate-limits'
 import { Route as ApiXremarkRouteImport } from './routes/api/xremark'
+import { Route as ApiWeeklyDigestHistoryRouteImport } from './routes/api/weekly-digest-history'
 import { Route as ApiTweetVideoRouteImport } from './routes/api/tweet-video'
 import { Route as ApiTweetTranslationRouteImport } from './routes/api/tweet-translation'
 import { Route as ApiTweetExpandRouteImport } from './routes/api/tweet-expand'
@@ -148,6 +149,11 @@ const ApiXurlRateLimitsRoute = ApiXurlRateLimitsRouteImport.update({
 const ApiXremarkRoute = ApiXremarkRouteImport.update({
   id: '/api/xremark',
   path: '/api/xremark',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWeeklyDigestHistoryRoute = ApiWeeklyDigestHistoryRouteImport.update({
+  id: '/api/weekly-digest-history',
+  path: '/api/weekly-digest-history',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTweetVideoRoute = ApiTweetVideoRouteImport.update({
@@ -322,6 +328,7 @@ export interface FileRoutesByFullPath {
   '/api/tweet-expand': typeof ApiTweetExpandRoute
   '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
+  '/api/weekly-digest-history': typeof ApiWeeklyDigestHistoryRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
@@ -369,6 +376,7 @@ export interface FileRoutesByTo {
   '/api/tweet-expand': typeof ApiTweetExpandRoute
   '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
+  '/api/weekly-digest-history': typeof ApiWeeklyDigestHistoryRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
@@ -417,6 +425,7 @@ export interface FileRoutesById {
   '/api/tweet-expand': typeof ApiTweetExpandRoute
   '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
+  '/api/weekly-digest-history': typeof ApiWeeklyDigestHistoryRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
@@ -466,6 +475,7 @@ export interface FileRouteTypes {
     | '/api/tweet-expand'
     | '/api/tweet-translation'
     | '/api/tweet-video'
+    | '/api/weekly-digest-history'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
@@ -513,6 +523,7 @@ export interface FileRouteTypes {
     | '/api/tweet-expand'
     | '/api/tweet-translation'
     | '/api/tweet-video'
+    | '/api/weekly-digest-history'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
@@ -560,6 +571,7 @@ export interface FileRouteTypes {
     | '/api/tweet-expand'
     | '/api/tweet-translation'
     | '/api/tweet-video'
+    | '/api/weekly-digest-history'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
@@ -608,6 +620,7 @@ export interface RootRouteChildren {
   ApiTweetExpandRoute: typeof ApiTweetExpandRoute
   ApiTweetTranslationRoute: typeof ApiTweetTranslationRoute
   ApiTweetVideoRoute: typeof ApiTweetVideoRoute
+  ApiWeeklyDigestHistoryRoute: typeof ApiWeeklyDigestHistoryRoute
   ApiXremarkRoute: typeof ApiXremarkRoute
   ApiXurlRateLimitsRoute: typeof ApiXurlRateLimitsRoute
   AuthorsHandleRoute: typeof AuthorsHandleRoute
@@ -749,6 +762,13 @@ declare module '@tanstack/react-router' {
       path: '/api/xremark'
       fullPath: '/api/xremark'
       preLoaderRoute: typeof ApiXremarkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/weekly-digest-history': {
+      id: '/api/weekly-digest-history'
+      path: '/api/weekly-digest-history'
+      fullPath: '/api/weekly-digest-history'
+      preLoaderRoute: typeof ApiWeeklyDigestHistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/tweet-video': {
@@ -989,6 +1009,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTweetExpandRoute: ApiTweetExpandRoute,
   ApiTweetTranslationRoute: ApiTweetTranslationRoute,
   ApiTweetVideoRoute: ApiTweetVideoRoute,
+  ApiWeeklyDigestHistoryRoute: ApiWeeklyDigestHistoryRoute,
   ApiXremarkRoute: ApiXremarkRoute,
   ApiXurlRateLimitsRoute: ApiXurlRateLimitsRoute,
   AuthorsHandleRoute: AuthorsHandleRoute,

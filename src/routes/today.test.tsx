@@ -6,6 +6,7 @@ import {
 	waitFor,
 	within,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateTodaySearch } from "#/lib/route-search";
 import type { TweetMediaItem } from "#/lib/types";
@@ -916,6 +917,154 @@ describe("today route", () => {
 					"/api/period-digest",
 			),
 		).toBe(false);
+	});
+
+	it("restores a saved weekly report without starting a model stream", async () => {
+		const saved = digestResult(
+			"2026-07-20 – 2026-07-26",
+			"# July 20–26\n\n## What people are talking about\n\n- Restored weekly report (tweet_1)",
+		);
+		const metadata = {
+			id: "weekly_history_1",
+			kind: "weekly" as const,
+			date: "2026-07-20",
+			endDate: "2026-07-26",
+			timezone: "Asia/Shanghai",
+			status: "ready" as const,
+			title: "July 20–26",
+			summary: "Saved weekly report",
+			counts: saved.context.counts,
+			provider: "openai",
+			model: "gpt-5.5",
+			attemptCount: 1,
+			createdAt: saved.updatedAt,
+			updatedAt: saved.updatedAt,
+			finishedAt: saved.updatedAt,
+			pdfAvailable: true,
+		};
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/profile-hydrate") {
+				return Response.json({ ok: true, results: [] });
+			}
+			if (url.pathname === "/api/weekly-digest-history") {
+				return url.searchParams.has("id")
+					? Response.json({ item: { metadata, result: saved } })
+					: Response.json({ items: [metadata] });
+			}
+			throw new Error(`Unexpected request: ${url.pathname}`);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(
+			<TodayRoute
+				searchState={validateTodaySearch({
+					run: "weekly_history_1",
+					archive: "weekly",
+				})}
+				onSearchChange={vi.fn()}
+			/>,
+		);
+
+		expect(
+			await screen.findByText("Restored from weekly history · 0 token"),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "July 20–26", level: 1 }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("link", { name: "Download 2026-07-20 PDF" }),
+		).toHaveAttribute(
+			"href",
+			"/api/weekly-digest-history?id=weekly_history_1&pdf=1",
+		);
+		expect(
+			fetchMock.mock.calls.some(
+				([input]) =>
+					new URL(String(input), "http://localhost").pathname ===
+					"/api/period-digest",
+			),
+		).toBe(false);
+	});
+
+	it("clears daily rows while a delayed weekly archive is loading", async () => {
+		const live = digestResult("Today", "# Today\n\nFresh digest.");
+		const dailyMetadata = {
+			id: "daily_stale",
+			kind: "daily" as const,
+			date: "2026-07-31",
+			endDate: "2026-07-31",
+			timezone: "Asia/Shanghai",
+			status: "ready" as const,
+			title: "Stale daily archive row",
+			summary: "Must disappear during the archive switch.",
+			counts: live.context.counts,
+			provider: "openai",
+			model: "gpt-5.5",
+			attemptCount: 1,
+			createdAt: live.updatedAt,
+			updatedAt: live.updatedAt,
+			finishedAt: live.updatedAt,
+			pdfAvailable: false,
+		};
+		const weeklyMetadata = {
+			...dailyMetadata,
+			id: "weekly_fresh",
+			kind: "weekly" as const,
+			date: "2026-07-20",
+			endDate: "2026-07-26",
+			title: "Fresh weekly archive row",
+			summary: "Loaded from the weekly endpoint.",
+		};
+		let resolveWeekly: ((response: Response) => void) | undefined;
+		const weeklyResponse = new Promise<Response>((resolve) => {
+			resolveWeekly = resolve;
+		});
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/period-digest-history") {
+				return Response.json({ items: [dailyMetadata] });
+			}
+			if (url.pathname === "/api/weekly-digest-history") {
+				return weeklyResponse;
+			}
+			if (url.pathname === "/api/profile-hydrate") {
+				return Response.json({ ok: true, results: [] });
+			}
+			if (url.pathname === "/api/period-digest") {
+				return ndjsonResponse([{ type: "done", result: live }]);
+			}
+			throw new Error(`Unexpected request: ${url.pathname}`);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		function HistoryHarness() {
+			const [search, setSearch] = useState(() => validateTodaySearch({}));
+			return (
+				<TodayRoute
+					searchState={search}
+					onSearchChange={(next) => setSearch(next)}
+				/>
+			);
+		}
+
+		render(<HistoryHarness />);
+		expect(
+			await screen.findByText("Stale daily archive row"),
+		).toBeInTheDocument();
+		fireEvent.click(
+			screen.getAllByRole("button", { name: /^weekly$/i })[0] as HTMLElement,
+		);
+		expect(screen.queryByText("Stale daily archive row")).toBeNull();
+
+		await act(async () => {
+			resolveWeekly?.(Response.json({ items: [weeklyMetadata] }));
+			await weeklyResponse;
+		});
+		expect(
+			await screen.findByText("Fresh weekly archive row"),
+		).toBeInTheDocument();
+		expect(screen.queryByText("Stale daily archive row")).toBeNull();
 	});
 
 	it("shows an actionable message when the digest connection drops", async () => {

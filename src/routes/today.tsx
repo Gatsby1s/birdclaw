@@ -1158,7 +1158,7 @@ interface DailyDigestHistoryDetailResponse {
 	};
 }
 
-async function dailyHistoryResponseError(response: Response) {
+async function digestHistoryResponseError(response: Response) {
 	try {
 		const payload = (await response.json()) as { message?: unknown };
 		if (typeof payload.message === "string" && payload.message.trim()) {
@@ -1167,7 +1167,7 @@ async function dailyHistoryResponseError(response: Response) {
 	} catch {
 		// Fall through to a status-based message.
 	}
-	return `Daily history request failed (${String(response.status)})`;
+	return `Digest history request failed (${String(response.status)})`;
 }
 
 export function TodayRouteView({
@@ -1183,6 +1183,7 @@ export function TodayRouteView({
 		onSearchChange ? onSearchChange(next, options) : setLocalSearch(next);
 	const {
 		run: activeHistoryId,
+		archive: historyKind,
 		period,
 		since,
 		until,
@@ -1203,6 +1204,7 @@ export function TodayRouteView({
 		null,
 	);
 	const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+	const historyLoadSequence = useRef(0);
 	const historyButtonRef = useRef<HTMLButtonElement>(null);
 	const historyDialogRef = useRef<HTMLDivElement>(null);
 	const {
@@ -1218,24 +1220,37 @@ export function TodayRouteView({
 	} = useDigestStream(period, includeDms, since, until, !activeHistoryId);
 	const loadHistory = useCallback(async () => {
 		if (!historyEnabled) return;
+		const sequence = ++historyLoadSequence.current;
 		setHistoryLoading(true);
 		setHistoryError(null);
 		try {
-			const response = await fetch("/api/period-digest-history?limit=366", {
+			const historyEndpoint =
+				historyKind === "weekly"
+					? "/api/weekly-digest-history?limit=260"
+					: "/api/period-digest-history?limit=366";
+			const response = await fetch(historyEndpoint, {
 				cache: "no-store",
 			});
 			if (!response.ok)
-				throw new Error(await dailyHistoryResponseError(response));
+				throw new Error(await digestHistoryResponseError(response));
 			const payload = (await response.json()) as DailyDigestHistoryListResponse;
-			setHistoryItems(payload.items);
+			if (sequence === historyLoadSequence.current) {
+				setHistoryItems(payload.items);
+			}
 		} catch (cause) {
-			setHistoryError(
-				cause instanceof Error ? cause.message : "Could not load daily history",
-			);
+			if (sequence === historyLoadSequence.current) {
+				setHistoryError(
+					cause instanceof Error
+						? cause.message
+						: "Could not load digest history",
+				);
+			}
 		} finally {
-			setHistoryLoading(false);
+			if (sequence === historyLoadSequence.current) {
+				setHistoryLoading(false);
+			}
 		}
-	}, [historyEnabled]);
+	}, [historyEnabled, historyKind]);
 
 	useEffect(() => {
 		void loadHistory();
@@ -1249,13 +1264,17 @@ export function TodayRouteView({
 		const controller = new AbortController();
 		setHistoryRestoreLoading(true);
 		setHistoryRestoreError(null);
-		void fetch(
-			`/api/period-digest-history?id=${encodeURIComponent(activeHistoryId)}`,
-			{ cache: "no-store", signal: controller.signal },
-		)
+		const historyEndpoint =
+			historyKind === "weekly"
+				? "/api/weekly-digest-history"
+				: "/api/period-digest-history";
+		void fetch(`${historyEndpoint}?id=${encodeURIComponent(activeHistoryId)}`, {
+			cache: "no-store",
+			signal: controller.signal,
+		})
 			.then(async (response) => {
 				if (!response.ok) {
-					throw new Error(await dailyHistoryResponseError(response));
+					throw new Error(await digestHistoryResponseError(response));
 				}
 				return (await response.json()) as DailyDigestHistoryDetailResponse;
 			})
@@ -1268,14 +1287,14 @@ export function TodayRouteView({
 				setHistoryRestoreError(
 					cause instanceof Error
 						? cause.message
-						: "Could not restore daily history",
+						: "Could not restore digest history",
 				);
 			})
 			.finally(() => {
 				if (!controller.signal.aborted) setHistoryRestoreLoading(false);
 			});
 		return () => controller.abort();
-	}, [activeHistoryId, historyEnabled, restore]);
+	}, [activeHistoryId, historyEnabled, historyKind, restore]);
 
 	const closeHistoryDrawer = useCallback(() => {
 		setHistoryDrawerOpen(false);
@@ -1296,7 +1315,19 @@ export function TodayRouteView({
 		setHistoryDrawerOpen(false);
 		if (id === activeHistoryId) return;
 		clear();
-		updateSearch({ ...searchState, run: id });
+		updateSearch({ ...searchState, archive: historyKind, run: id });
+	}
+
+	function changeHistoryKind(kind: "daily" | "weekly") {
+		if (kind === historyKind) return;
+		historyLoadSequence.current += 1;
+		setHistoryItems([]);
+		setHistoryFilter("");
+		setHistoryError(null);
+		setHistoryRestoreError(null);
+		setHistoryRestoreLoading(false);
+		clear();
+		updateSearch({ ...searchState, archive: kind, run: "" });
 	}
 
 	function showLivePeriod(next: TodayRouteSearch) {
@@ -1545,11 +1576,11 @@ export function TodayRouteView({
 							<Sparkles className="size-4" aria-hidden="true" />
 						)}
 						{historyRestoreLoading
-							? "Restoring daily history"
+							? `Restoring ${historyKind} history`
 							: loading
 								? status
 								: activeHistoryId && result
-									? "Restored from daily history · 0 token"
+									? `Restored from ${historyKind} history · 0 token`
 									: result
 										? `${result.cached ? "Cached" : "Ready"} · ${result.context.window.label}`
 										: error
@@ -1591,8 +1622,10 @@ export function TodayRouteView({
 					error={historyError}
 					filter={historyFilter}
 					items={historyItems}
+					kind={historyKind}
 					loading={historyLoading}
 					onFilterChange={setHistoryFilter}
+					onKindChange={changeHistoryKind}
 					onSelect={selectHistory}
 				/>
 			</div>
@@ -1601,7 +1634,7 @@ export function TodayRouteView({
 				<div className="today-screen-only fixed inset-0 z-50 min-[1240px]:hidden">
 					<button
 						type="button"
-						aria-label="Close daily history overlay"
+						aria-label="Close digest history overlay"
 						className="absolute inset-0 bg-black/40"
 						onClick={closeHistoryDrawer}
 					/>
@@ -1609,7 +1642,7 @@ export function TodayRouteView({
 						ref={historyDialogRef}
 						role="dialog"
 						aria-modal="true"
-						aria-label="Daily digest history"
+						aria-label="Digest history"
 						className="absolute inset-y-0 right-0 h-full w-[min(360px,calc(100%-32px))] border-l border-[var(--line)] bg-[var(--bg)] shadow-[-12px_0_32px_rgba(0,0,0,0.18)] outline-none"
 						tabIndex={-1}
 					>
@@ -1618,9 +1651,11 @@ export function TodayRouteView({
 							error={historyError}
 							filter={historyFilter}
 							items={historyItems}
+							kind={historyKind}
 							loading={historyLoading}
 							onClose={closeHistoryDrawer}
 							onFilterChange={setHistoryFilter}
+							onKindChange={changeHistoryKind}
 							onSelect={selectHistory}
 						/>
 					</div>

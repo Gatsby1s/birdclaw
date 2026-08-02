@@ -10,7 +10,9 @@ import { cx, searchFieldIconClass, searchFieldInputClass } from "#/lib/ui";
 
 export interface DailyDigestHistoryListItem {
 	id: string;
+	kind?: "daily" | "weekly";
 	date: string;
+	endDate?: string;
 	timezone: string;
 	status: "pending" | "ready" | "failed";
 	title: string;
@@ -42,6 +44,11 @@ function displayDate(value: string) {
 		day: "numeric",
 		weekday: "short",
 	}).format(date);
+}
+
+function displayRange(item: DailyDigestHistoryListItem) {
+	if (item.kind !== "weekly" || !item.endDate) return displayDate(item.date);
+	return `${displayDate(item.date)} – ${displayDate(item.endDate)}`;
 }
 
 function providerLabel(item: DailyDigestHistoryListItem) {
@@ -81,7 +88,7 @@ function HistoryRow({
 						className="min-w-0 flex-1 text-[14px] font-bold text-[var(--ink)]"
 						dateTime={item.date}
 					>
-						{displayDate(item.date)}
+						{displayRange(item)}
 					</time>
 					<span
 						className={cx(
@@ -118,8 +125,12 @@ function HistoryRow({
 				<a
 					aria-label={`Download ${item.date} PDF`}
 					className="absolute right-2 top-2 grid size-8 place-items-center rounded-full text-[var(--ink-soft)] hover:bg-[var(--bg-active)] hover:text-[var(--accent)]"
-					download={`BirdClaw-${item.date}-digest.pdf`}
-					href={`/api/period-digest-history?id=${encodeURIComponent(item.id)}&pdf=1`}
+					download={
+						item.kind === "weekly"
+							? `BirdClaw-${item.date}-weekly-digest.pdf`
+							: `BirdClaw-${item.date}-digest.pdf`
+					}
+					href={`${item.kind === "weekly" ? "/api/weekly-digest-history" : "/api/period-digest-history"}?id=${encodeURIComponent(item.id)}&pdf=1`}
 				>
 					<Download className="size-4" aria-hidden="true" />
 				</a>
@@ -144,7 +155,9 @@ export function DailyDigestHistoryPanel({
 	loading,
 	error,
 	filter,
+	kind,
 	onFilterChange,
+	onKindChange,
 	onSelect,
 	onClose,
 }: {
@@ -153,7 +166,9 @@ export function DailyDigestHistoryPanel({
 	loading: boolean;
 	error: string | null;
 	filter: string;
+	kind: "daily" | "weekly";
 	onFilterChange: (value: string) => void;
+	onKindChange: (kind: "daily" | "weekly") => void;
 	onSelect: (id: string) => void;
 	onClose?: () => void;
 }) {
@@ -168,7 +183,7 @@ export function DailyDigestHistoryPanel({
 		: items;
 	return (
 		<aside
-			aria-label="Daily digest history"
+			aria-label="Digest history"
 			className="flex h-full min-h-0 flex-col bg-[var(--bg)]"
 		>
 			<header className="border-b border-[var(--line)] px-3 pb-3 pt-3">
@@ -179,10 +194,12 @@ export function DailyDigestHistoryPanel({
 					/>
 					<div className="min-w-0 flex-1">
 						<h2 className="text-[15px] font-bold text-[var(--ink)]">
-							Daily archive
+							{kind === "daily" ? "Daily archive" : "Weekly archive"}
 						</h2>
 						<p className="text-[10px] text-[var(--ink-soft)]">
-							Previous day generated at 00:00 local
+							{kind === "daily"
+								? "Previous day generated at 00:00 local"
+								: "Previous Monday–Sunday generated after week close"}
 						</p>
 					</div>
 					<span className="text-[11px] text-[var(--ink-soft)]">
@@ -191,7 +208,7 @@ export function DailyDigestHistoryPanel({
 					{onClose ? (
 						<button
 							type="button"
-							aria-label="Close daily history"
+							aria-label="Close digest history"
 							className="grid size-8 place-items-center rounded-full text-[var(--ink-soft)] hover:bg-[var(--bg-hover)]"
 							onClick={onClose}
 						>
@@ -199,12 +216,34 @@ export function DailyDigestHistoryPanel({
 						</button>
 					) : null}
 				</div>
+				<div
+					aria-label="Archive period"
+					className="mt-3 grid grid-cols-2 rounded-full bg-[var(--bg-active)] p-1"
+				>
+					{(["daily", "weekly"] as const).map((value) => (
+						<button
+							aria-pressed={kind === value}
+							className={cx(
+								"rounded-full px-3 py-1.5 text-[12px] font-bold capitalize text-[var(--ink-soft)]",
+								kind === value &&
+									"bg-[var(--bg)] text-[var(--accent)] shadow-sm",
+							)}
+							key={value}
+							onClick={() => onKindChange(value)}
+							type="button"
+						>
+							{value}
+						</button>
+					))}
+				</div>
 				<label className="mt-3 flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--bg-active)] px-3 py-2 focus-within:border-[var(--accent)]">
 					<Search className={searchFieldIconClass} aria-hidden="true" />
 					<input
-						aria-label="Search daily history"
+						aria-label={`Search ${kind} history`}
 						className={searchFieldInputClass}
-						placeholder="Search saved days"
+						placeholder={
+							kind === "daily" ? "Search saved days" : "Search saved weeks"
+						}
 						value={filter}
 						onChange={(event) => onFilterChange(event.currentTarget.value)}
 					/>
@@ -214,18 +253,20 @@ export function DailyDigestHistoryPanel({
 				{loading && items.length === 0 ? (
 					<div className="flex items-center gap-2 px-4 py-5 text-[13px] text-[var(--ink-soft)]">
 						<Loader2 className="size-4 animate-spin" aria-hidden="true" />
-						Loading daily archive…
+						Loading {kind} archive…
 					</div>
 				) : error ? (
 					<p className="px-4 py-5 text-[13px] text-[var(--alert)]">{error}</p>
 				) : filtered.length === 0 ? (
 					<div className="px-4 py-8 text-center">
 						<p className="text-[13px] font-semibold text-[var(--ink)]">
-							{items.length === 0 ? "No daily reports yet" : "No matches"}
+							{items.length === 0 ? `No ${kind} reports yet` : "No matches"}
 						</p>
 						<p className="mt-1 text-[12px] leading-relaxed text-[var(--ink-soft)]">
 							{items.length === 0
-								? "Yesterday’s report appears here after the next midnight run."
+								? kind === "daily"
+									? "Yesterday’s report appears here after the next midnight run."
+									: "The previous Monday–Sunday report appears after the week closes."
 								: "Try another date or report keyword."}
 						</p>
 					</div>

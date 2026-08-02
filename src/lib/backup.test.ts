@@ -47,6 +47,7 @@ function switchHome(prefix: string) {
 function clearData() {
 	const db = getNativeDb();
 	db.exec(`
+	delete from weekly_digest_history;
 	delete from period_digest_history;
     delete from discussion_history;
     delete from follow_events;
@@ -249,6 +250,23 @@ function seedBackupFixture() {
       '# Daily backup', '[]', '[]', '[]',
       '2025-01-09T00:00:00.000Z', '2025-01-09T00:01:00.000Z',
       '2025-01-09T00:00:00.000Z', '2025-01-09T00:01:00.000Z'
+    );
+
+    insert into weekly_digest_history (
+      id, week_start, week_end, timezone, status, attempt_count, window_since,
+      window_until, include_dms, provider, model, reasoning_effort,
+      service_tier, context_hash, counts_json, digest_json, markdown,
+      tweets_json, dms_json, links_json, started_at, finished_at,
+      created_at, updated_at
+    ) values (
+      'weekly_2025_01_06', '2025-01-06', '2025-01-12', 'UTC', 'ready', 1,
+      '2025-01-06T00:00:00.000Z', '2025-01-13T00:00:00.000Z', 0,
+      'openai', 'gpt-5.5', 'high', 'priority', 'weekly_hash',
+      '{"home":1,"mentions":0,"authored":0,"likes":0,"bookmarks":0,"dms":0,"links":0}',
+      '{"title":"Weekly backup","summary":"Saved weekly report","keyTopics":[],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[]}',
+      '# Weekly backup', '[]', '[]', '[]',
+      '2025-01-13T00:00:00.000Z', '2025-01-13T00:01:00.000Z',
+      '2025-01-13T00:00:00.000Z', '2025-01-13T00:01:00.000Z'
     );
 
     insert into follow_snapshots (
@@ -461,6 +479,7 @@ describe("text backup", () => {
 			ai_scores: 1,
 			discussion_history: 1,
 			period_digest_history: 1,
+			weekly_digest_history: 1,
 			follow_snapshots: 1,
 			follow_snapshot_members: 1,
 			follow_edges: 1,
@@ -522,6 +541,9 @@ describe("text backup", () => {
 		);
 		expect(
 			existsSync(path.join(repoPath, "data/discussions/history.jsonl")),
+		).toBe(true);
+		expect(
+			existsSync(path.join(repoPath, "data/digests/weekly-history.jsonl")),
 		).toBe(true);
 
 		switchHome("birdclaw-backup-dst-");
@@ -650,6 +672,20 @@ describe("text backup", () => {
 				markdown: "# Daily backup",
 			},
 		]);
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare(
+					"select week_start, week_end, status, markdown from weekly_digest_history",
+				)
+				.all(),
+		).toEqual([
+			{
+				week_start: "2025-01-06",
+				week_end: "2025-01-12",
+				status: "ready",
+				markdown: "# Weekly backup",
+			},
+		]);
 
 		const validation = await validateBackup(repoPath);
 		expect(validation.ok).toBe(true);
@@ -666,7 +702,7 @@ describe("text backup", () => {
 
 		expect(first.manifest.schemaVersion).toBe(5);
 		expect(first.manifest.backupHash).toBe(
-			"6674a724570a67aefe3c3a0d3caeca22cc6c03a19edd44b1ff149d4a080ca928",
+			"b40ee8fcb075441e1ef6dd614079298bdcbfedd1999c7ceaad963a6240b1a823",
 		);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);
@@ -807,6 +843,7 @@ describe("text backup", () => {
 			ai_scores: 1,
 			discussion_history: 1,
 			period_digest_history: 1,
+			weekly_digest_history: 1,
 			follow_snapshots: 1,
 			follow_snapshot_members: 1,
 			follow_edges: 1,

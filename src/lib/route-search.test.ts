@@ -33,6 +33,8 @@ describe("route search schemas", () => {
 			"discussion_123",
 		);
 		expect(validateTodaySearch({ period: "bad" }).period).toBe("today");
+		expect(validateTodaySearch({ archive: "bad" }).archive).toBe("daily");
+		expect(validateTodaySearch({ archive: "weekly" }).archive).toBe("weekly");
 		expect(validateNetworkMapSearch({ type: "bad" }).type).toBe("all");
 	});
 
