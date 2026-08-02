@@ -375,7 +375,11 @@ describe("local cloud bridge", () => {
 			"2026-07-31T08:01:00.000Z",
 			"2026-07-31T08:01:00.000Z",
 		);
-		const sentBatches: Array<{ caughtUp: boolean; edges: unknown[] }> = [];
+		const sentBatches: Array<{
+			purpose: "live" | "history";
+			caughtUp: boolean;
+			edges: unknown[];
+		}> = [];
 		const client = new LocalCloudBridgeClient({
 			url: "http://127.0.0.1:3000",
 			token: "bridge-secret",
@@ -389,15 +393,142 @@ describe("local cloud bridge", () => {
 
 		await client.runOnce();
 
-		expect(sentBatches.map((batch) => batch.caughtUp)).toEqual([
+		const liveBatches = sentBatches.filter((batch) => batch.purpose === "live");
+		expect(liveBatches.map((batch) => batch.caughtUp)).toEqual([
 			false,
 			false,
 			true,
 		]);
-		expect(sentBatches.map((batch) => batch.edges.length)).toEqual([1, 1, 0]);
+		expect(liveBatches.map((batch) => batch.edges.length)).toEqual([1, 1, 0]);
 		expect(client.getStatus()).toMatchObject({
 			lastError: null,
 			uploadedEdges: 2,
+			backfillCompleted: true,
+			backfilledEdges: 2,
+		});
+	});
+
+	it("resumes a one-time history backfill without rewinding the live cursor", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		const insertEdge = home.db.prepare(
+			`
+			insert into tweet_account_edges (
+				account_id, tweet_id, kind, first_seen_at, last_seen_at,
+				seen_count, source, raw_json, updated_at
+			) values ('account:test', ?, 'home', ?, ?, 1, 'bird', '{}', ?)
+			`,
+		);
+		for (const [index, tweetId] of [
+			"tweet:one",
+			"tweet:two",
+			"tweet:three",
+		].entries()) {
+			const timestamp = `2020-01-01T00:0${String(index)}:00.000Z`;
+			insertTestTweet(home.db, { id: tweetId, createdAt: timestamp });
+			insertEdge.run(tweetId, timestamp, timestamp, timestamp);
+		}
+
+		let historyRequests = 0;
+		const firstClient = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			batchSize: 1,
+			now: () => new Date("2026-08-02T00:00:00.000Z"),
+			fetchImpl: vi.fn(async (_url, init) => {
+				const batch = JSON.parse(String(init?.body)) as {
+					purpose: "live" | "history";
+				};
+				if (batch.purpose === "history") {
+					historyRequests += 1;
+					if (historyRequests === 2) {
+						return Response.json(
+							{ ok: false, message: "pause history backfill" },
+							{ status: 503 },
+						);
+					}
+				}
+				return Response.json({ ok: true });
+			}),
+		});
+
+		await firstClient.runOnce();
+
+		expect(firstClient.getStatus()).toMatchObject({
+			lastError: null,
+			backfillCompleted: false,
+			backfillLastError: "pause history backfill",
+			backfilledEdges: 1,
+		});
+		const liveRow = home.db
+			.prepare(
+				"select value_json as valueJson from sync_cache where cache_key like 'cloud-bridge:cursor:%'",
+			)
+			.get() as { valueJson: string };
+		const historyRow = home.db
+			.prepare(
+				"select value_json as valueJson from sync_cache where cache_key like 'cloud-bridge:history:%'",
+			)
+			.get() as { valueJson: string };
+		expect(JSON.parse(liveRow.valueJson)).toMatchObject({
+			updatedAt: "2026-08-01T00:00:00.000Z",
+		});
+		expect(JSON.parse(historyRow.valueJson)).toMatchObject({
+			completedAt: null,
+			cursor: { tweetId: "tweet:one" },
+		});
+
+		const resumedHistoryTweetIds: string[][] = [];
+		const resumedClient = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			batchSize: 1,
+			now: () => new Date("2026-08-02T00:01:00.000Z"),
+			fetchImpl: vi.fn(async (_url, init) => {
+				const batch = JSON.parse(String(init?.body)) as {
+					purpose: "live" | "history";
+					edges: Array<{ tweetId: string }>;
+				};
+				if (batch.purpose === "history") {
+					resumedHistoryTweetIds.push(batch.edges.map((edge) => edge.tweetId));
+				}
+				return Response.json({ ok: true });
+			}),
+		});
+
+		await resumedClient.runOnce();
+		expect(resumedHistoryTweetIds).toEqual([
+			["tweet:two"],
+			["tweet:three"],
+			[],
+		]);
+		expect(resumedClient.getStatus()).toMatchObject({
+			lastError: null,
+			backfillCompleted: true,
+			backfillLastError: null,
+			backfilledEdges: 2,
+		});
+		const completedState = home.db
+			.prepare(
+				"select value_json as valueJson from sync_cache where cache_key like 'cloud-bridge:history:%'",
+			)
+			.get() as { valueJson: string };
+		expect(JSON.parse(completedState.valueJson)).toMatchObject({
+			completedAt: "2026-08-02T00:01:00.000Z",
+			cursor: { tweetId: "tweet:three" },
+		});
+
+		const completedRequestCount = resumedHistoryTweetIds.length;
+		await resumedClient.runOnce();
+		expect(resumedHistoryTweetIds).toHaveLength(completedRequestCount);
+		const finalLiveRow = home.db
+			.prepare(
+				"select value_json as valueJson from sync_cache where cache_key like 'cloud-bridge:cursor:%'",
+			)
+			.get() as { valueJson: string };
+		expect(JSON.parse(finalLiveRow.valueJson)).toMatchObject({
+			updatedAt: "2026-08-01T00:00:00.000Z",
 		});
 	});
 

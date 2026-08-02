@@ -16,13 +16,23 @@ const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 250;
 const REQUEST_TIMEOUT_MS = 30_000;
 const CURSOR_CACHE_PREFIX = "cloud-bridge:cursor:";
+const HISTORY_CACHE_PREFIX = "cloud-bridge:history:";
 const MAX_CLIENT_BODY_BYTES = 7 * 1024 * 1024;
+const MAX_PAGES_PER_RUN = 20;
+
+const bridgePurposeSchema = z.enum(["live", "history"]);
 
 const bridgeCursorSchema = z.object({
 	updatedAt: z.string().max(64),
 	accountId: z.string().max(256),
 	tweetId: z.string().max(256),
 	kind: z.string().max(64),
+});
+
+const bridgeHistoryStateSchema = z.object({
+	version: z.literal(1),
+	cursor: bridgeCursorSchema,
+	completedAt: z.string().max(64).nullable(),
 });
 
 const bridgeAccountSchema = z.object({
@@ -109,6 +119,7 @@ const bridgeXRemarkSnapshotSchema = z.object({
 
 export const localCloudBridgeBatchSchema = z.object({
 	version: z.literal(1),
+	purpose: bridgePurposeSchema.optional().default("live"),
 	sentAt: z.string().max(64),
 	caughtUp: z.boolean(),
 	cursor: bridgeCursorSchema,
@@ -131,6 +142,19 @@ export interface LocalCloudBridgeClientStatus {
 	lastSuccessAt: string | null;
 	lastError: string | null;
 	uploadedEdges: number;
+	backfillCompleted: boolean;
+	backfillLastSuccessAt: string | null;
+	backfillLastError: string | null;
+	backfilledEdges: number;
+}
+
+export interface LocalCloudBridgeArchiveStats {
+	accounts: number;
+	profiles: number;
+	tweets: number;
+	edges: number;
+	homeEdges: number;
+	homeTweets: number;
 }
 
 interface LocalCloudBridgeClientOptions {
@@ -181,6 +205,22 @@ function bridgeCacheKey(url: string) {
 		.slice(0, 16)}`;
 }
 
+function bridgeHistoryCacheKey(url: string) {
+	return `${HISTORY_CACHE_PREFIX}${createHash("sha256")
+		.update(url)
+		.digest("hex")
+		.slice(0, 16)}`;
+}
+
+function beginningCursor() {
+	return {
+		updatedAt: "",
+		accountId: "",
+		tweetId: "",
+		kind: "",
+	} satisfies LocalCloudBridgeCursor;
+}
+
 function readBridgeCursor(
 	db: Database,
 	url: string,
@@ -215,6 +255,65 @@ function writeBridgeCursor(
 			updated_at = excluded.updated_at
 		`,
 	).run(bridgeCacheKey(url), JSON.stringify(cursor), now.toISOString());
+}
+
+function readBridgeHistoryState(db: Database, url: string) {
+	const row = db
+		.prepare("select value_json from sync_cache where cache_key = ?")
+		.get(bridgeHistoryCacheKey(url)) as { value_json?: string } | undefined;
+	if (row?.value_json) {
+		try {
+			return bridgeHistoryStateSchema.parse(JSON.parse(row.value_json));
+		} catch {
+			// Replaying from the beginning is safe because cloud imports are idempotent.
+		}
+	}
+	return {
+		version: 1,
+		cursor: beginningCursor(),
+		completedAt: null,
+	} satisfies z.infer<typeof bridgeHistoryStateSchema>;
+}
+
+function writeBridgeHistoryState(
+	db: Database,
+	url: string,
+	state: z.infer<typeof bridgeHistoryStateSchema>,
+	now: Date,
+) {
+	db.prepare(
+		`
+		insert into sync_cache (cache_key, value_json, updated_at)
+		values (?, ?, ?)
+		on conflict(cache_key) do update set
+			value_json = excluded.value_json,
+			updated_at = excluded.updated_at
+		`,
+	).run(bridgeHistoryCacheKey(url), JSON.stringify(state), now.toISOString());
+}
+
+function scalarCount(db: Database, sql: string) {
+	const row = db.prepare(sql).get() as { count?: number } | undefined;
+	return Number(row?.count ?? 0);
+}
+
+export function getLocalCloudBridgeArchiveStats(
+	db = getNativeDb({ seedDemoData: false }),
+): LocalCloudBridgeArchiveStats {
+	return {
+		accounts: scalarCount(db, "select count(*) as count from accounts"),
+		profiles: scalarCount(db, "select count(*) as count from profiles"),
+		tweets: scalarCount(db, "select count(*) as count from tweets"),
+		edges: scalarCount(db, "select count(*) as count from tweet_account_edges"),
+		homeEdges: scalarCount(
+			db,
+			"select count(*) as count from tweet_account_edges where kind = 'home'",
+		),
+		homeTweets: scalarCount(
+			db,
+			"select count(distinct tweet_id) as count from tweet_account_edges where kind = 'home'",
+		),
+	};
 }
 
 function parseStoredTags(value: string) {
@@ -278,6 +377,7 @@ function buildXRemarkSnapshot(db: Database) {
 
 export function buildLocalCloudBridgeBatch({
 	cursor,
+	purpose = "live",
 	lookbackHours = DEFAULT_LOOKBACK_HOURS,
 	limit = DEFAULT_BATCH_SIZE,
 	accountId,
@@ -285,6 +385,7 @@ export function buildLocalCloudBridgeBatch({
 	db = getNativeDb({ seedDemoData: false }),
 }: {
 	cursor?: LocalCloudBridgeCursor;
+	purpose?: z.infer<typeof bridgePurposeSchema>;
 	lookbackHours?: number;
 	limit?: number;
 	accountId?: string;
@@ -424,6 +525,7 @@ export function buildLocalCloudBridgeBatch({
 	);
 	return localCloudBridgeBatchSchema.parse({
 		version: 1,
+		purpose,
 		sentAt: now.toISOString(),
 		caughtUp,
 		cursor: nextCursor,
@@ -431,7 +533,8 @@ export function buildLocalCloudBridgeBatch({
 		profiles,
 		tweets,
 		edges,
-		xRemarkSnapshot: caughtUp ? buildXRemarkSnapshot(db) : null,
+		xRemarkSnapshot:
+			caughtUp && purpose === "live" ? buildXRemarkSnapshot(db) : null,
 	});
 }
 
@@ -817,6 +920,7 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 			);
 		}
 		return {
+			purpose: batch.purpose,
 			caughtUp: batch.caughtUp,
 			accounts: batch.accounts.length,
 			profiles: batch.profiles.length,
@@ -870,6 +974,10 @@ export class LocalCloudBridgeClient {
 		lastSuccessAt: null,
 		lastError: null,
 		uploadedEdges: 0,
+		backfillCompleted: false,
+		backfillLastSuccessAt: null,
+		backfillLastError: null,
+		backfilledEdges: 0,
 	};
 	private readonly url: string;
 	private readonly intervalSeconds: number;
@@ -920,6 +1028,133 @@ export class LocalCloudBridgeClient {
 		return { ...this.status };
 	}
 
+	private async sendBatch(
+		db: Database,
+		cursor: LocalCloudBridgeCursor,
+		purpose: z.infer<typeof bridgePurposeSchema>,
+	) {
+		let requestBatchSize = this.batchSize;
+		let batch = buildLocalCloudBridgeBatch({
+			cursor,
+			purpose,
+			lookbackHours: this.lookbackHours,
+			limit: requestBatchSize,
+			accountId: this.accountId,
+			now: this.now(),
+			db,
+		});
+		let requestBody = JSON.stringify(batch);
+		while (
+			Buffer.byteLength(requestBody) > MAX_CLIENT_BODY_BYTES &&
+			requestBatchSize > 1
+		) {
+			requestBatchSize = Math.max(1, Math.floor(requestBatchSize / 2));
+			batch = buildLocalCloudBridgeBatch({
+				cursor,
+				purpose,
+				lookbackHours: this.lookbackHours,
+				limit: requestBatchSize,
+				accountId: this.accountId,
+				now: this.now(),
+				db,
+			});
+			requestBody = JSON.stringify(batch);
+		}
+		if (Buffer.byteLength(requestBody) > MAX_CLIENT_BODY_BYTES) {
+			throw new Error("One local bridge record exceeds the safe request size");
+		}
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+		let response: Response;
+		try {
+			response = await this.fetchImpl(this.url, {
+				method: "POST",
+				headers: {
+					authorization: `Bearer ${this.options.token}`,
+					"content-type": "application/json",
+				},
+				body: requestBody,
+				signal: controller.signal,
+			});
+		} finally {
+			clearTimeout(timeout);
+		}
+		const payload = (await response.json().catch(() => null)) as {
+			ok?: boolean;
+			message?: string;
+		} | null;
+		if (!response.ok || !payload?.ok) {
+			throw new Error(
+				payload?.message ??
+					`BirdClaw cloud bridge failed (${String(response.status)})`,
+			);
+		}
+		return batch;
+	}
+
+	private async uploadLivePages() {
+		let caughtUp = false;
+		for (let page = 0; page < MAX_PAGES_PER_RUN && !this.stopped; page += 1) {
+			const db = getNativeDb({ seedDemoData: false });
+			const cursor = readBridgeCursor(
+				db,
+				this.url,
+				this.lookbackHours,
+				this.now(),
+			);
+			const batch = await this.sendBatch(db, cursor, "live");
+			await enqueueDatabaseWrite((writeDb) =>
+				writeBridgeCursor(writeDb, this.url, batch.cursor, this.now()),
+			);
+			this.status = {
+				...this.status,
+				lastSuccessAt: this.now().toISOString(),
+				lastError: null,
+				uploadedEdges: this.status.uploadedEdges + batch.edges.length,
+			};
+			caughtUp = batch.caughtUp;
+			if (caughtUp) break;
+		}
+		return caughtUp;
+	}
+
+	private async uploadHistoryPages() {
+		for (let page = 0; page < MAX_PAGES_PER_RUN && !this.stopped; page += 1) {
+			const db = getNativeDb({ seedDemoData: false });
+			const state = readBridgeHistoryState(db, this.url);
+			if (state.completedAt) {
+				this.status = {
+					...this.status,
+					backfillCompleted: true,
+					backfillLastError: null,
+				};
+				return;
+			}
+			const batch = await this.sendBatch(db, state.cursor, "history");
+			const completedAt = batch.caughtUp ? this.now().toISOString() : null;
+			await enqueueDatabaseWrite((writeDb) =>
+				writeBridgeHistoryState(
+					writeDb,
+					this.url,
+					{
+						version: 1,
+						cursor: batch.cursor,
+						completedAt,
+					},
+					this.now(),
+				),
+			);
+			this.status = {
+				...this.status,
+				backfillCompleted: batch.caughtUp,
+				backfillLastSuccessAt: this.now().toISOString(),
+				backfillLastError: null,
+				backfilledEdges: this.status.backfilledEdges + batch.edges.length,
+			};
+			if (batch.caughtUp) return;
+		}
+	}
+
 	async runOnce() {
 		if (this.stopped || this.running) return this.getStatus();
 		if (this.options.isReady && !this.options.isReady()) {
@@ -933,83 +1168,16 @@ export class LocalCloudBridgeClient {
 		this.running = true;
 		this.status = { ...this.status, running: true };
 		try {
-			for (let page = 0; page < 20 && !this.stopped; page += 1) {
-				const db = getNativeDb({ seedDemoData: false });
-				const cursor = readBridgeCursor(
-					db,
-					this.url,
-					this.lookbackHours,
-					this.now(),
-				);
-				let requestBatchSize = this.batchSize;
-				let batch = buildLocalCloudBridgeBatch({
-					cursor,
-					lookbackHours: this.lookbackHours,
-					limit: requestBatchSize,
-					accountId: this.accountId,
-					now: this.now(),
-					db,
-				});
-				let requestBody = JSON.stringify(batch);
-				while (
-					Buffer.byteLength(requestBody) > MAX_CLIENT_BODY_BYTES &&
-					requestBatchSize > 1
-				) {
-					requestBatchSize = Math.max(1, Math.floor(requestBatchSize / 2));
-					batch = buildLocalCloudBridgeBatch({
-						cursor,
-						lookbackHours: this.lookbackHours,
-						limit: requestBatchSize,
-						accountId: this.accountId,
-						now: this.now(),
-						db,
-					});
-					requestBody = JSON.stringify(batch);
-				}
-				if (Buffer.byteLength(requestBody) > MAX_CLIENT_BODY_BYTES) {
-					throw new Error(
-						"One local bridge record exceeds the safe request size",
-					);
-				}
-				const controller = new AbortController();
-				const timeout = setTimeout(
-					() => controller.abort(),
-					REQUEST_TIMEOUT_MS,
-				);
-				let response: Response;
+			const liveCaughtUp = await this.uploadLivePages();
+			if (liveCaughtUp && !this.stopped) {
 				try {
-					response = await this.fetchImpl(this.url, {
-						method: "POST",
-						headers: {
-							authorization: `Bearer ${this.options.token}`,
-							"content-type": "application/json",
-						},
-						body: requestBody,
-						signal: controller.signal,
-					});
-				} finally {
-					clearTimeout(timeout);
+					await this.uploadHistoryPages();
+				} catch (error) {
+					this.status = {
+						...this.status,
+						backfillLastError: errorMessage(error),
+					};
 				}
-				const payload = (await response.json().catch(() => null)) as {
-					ok?: boolean;
-					message?: string;
-				} | null;
-				if (!response.ok || !payload?.ok) {
-					throw new Error(
-						payload?.message ??
-							`BirdClaw cloud bridge failed (${String(response.status)})`,
-					);
-				}
-				await enqueueDatabaseWrite((writeDb) =>
-					writeBridgeCursor(writeDb, this.url, batch.cursor, this.now()),
-				);
-				this.status = {
-					...this.status,
-					lastSuccessAt: this.now().toISOString(),
-					lastError: null,
-					uploadedEdges: this.status.uploadedEdges + batch.edges.length,
-				};
-				if (batch.caughtUp) break;
 			}
 		} catch (error) {
 			this.status = { ...this.status, lastError: errorMessage(error) };
@@ -1031,6 +1199,10 @@ export function getLocalCloudBridgeClientStatus(): LocalCloudBridgeClientStatus 
 			lastSuccessAt: null,
 			lastError: null,
 			uploadedEdges: 0,
+			backfillCompleted: false,
+			backfillLastSuccessAt: null,
+			backfillLastError: null,
+			backfilledEdges: 0,
 		}
 	);
 }

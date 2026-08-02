@@ -4,8 +4,14 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { withTestHome } from "../test/test-home";
+import {
+	insertTestAccount,
+	insertTestProfile,
+	insertTestTweet,
+	withTestHome,
+} from "../test/test-home";
 import { startProductionServer } from "./production-server";
+import { getTwitter6551RuntimeStatus } from "./twitter-6551";
 
 const tempDirs: string[] = [];
 const originalLocalWeb = process.env.BIRDCLAW_LOCAL_WEB;
@@ -183,8 +189,27 @@ describe("production server", () => {
 	});
 
 	it("requires the dedicated token on the local bridge endpoint", async () => {
-		await withTestHome(async () => {
+		await withTestHome(async (home) => {
 			process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN = "bridge-secret";
+			insertTestAccount(home.db);
+			insertTestProfile(home.db);
+			insertTestTweet(home.db);
+			home.db
+				.prepare(
+					`
+					insert into tweet_account_edges (
+						account_id, tweet_id, kind, first_seen_at, last_seen_at,
+						seen_count, source, raw_json, updated_at
+					) values (?, ?, 'home', ?, ?, 1, 'bird', '{}', ?)
+					`,
+				)
+				.run(
+					"account:test",
+					"tweet:test",
+					"2026-07-31T08:00:00.000Z",
+					"2026-07-31T08:00:00.000Z",
+					"2026-07-31T08:00:00.000Z",
+				);
 			const packageRoot = mkdtempSync(
 				path.join(os.tmpdir(), "birdclaw-production-bridge-"),
 			);
@@ -231,6 +256,24 @@ describe("production server", () => {
 						body: JSON.stringify(batch),
 					}).then((response) => response.status),
 				).resolves.toBe(401);
+				await expect(
+					fetch(url).then((response) => response.status),
+				).resolves.toBe(401);
+				const stats = await fetch(url, {
+					headers: { authorization: "Bearer bridge-secret" },
+				});
+				expect(stats.status).toBe(200);
+				await expect(stats.json()).resolves.toEqual({
+					ok: true,
+					counts: {
+						accounts: 1,
+						profiles: 1,
+						tweets: 1,
+						edges: 1,
+						homeEdges: 1,
+						homeTweets: 1,
+					},
+				});
 				const accepted = await fetch(url, {
 					method: "POST",
 					headers: {
@@ -242,8 +285,28 @@ describe("production server", () => {
 				expect(accepted.status).toBe(200);
 				await expect(accepted.json()).resolves.toMatchObject({
 					ok: true,
+					purpose: "live",
 					caughtUp: true,
 					edges: 0,
+				});
+				const heartbeatAfterLive = getTwitter6551RuntimeStatus();
+				const historyAccepted = await fetch(url, {
+					method: "POST",
+					headers: {
+						authorization: "Bearer bridge-secret",
+						"content-type": "application/json",
+					},
+					body: JSON.stringify({ ...batch, purpose: "history" }),
+				});
+				expect(historyAccepted.status).toBe(200);
+				await expect(historyAccepted.json()).resolves.toMatchObject({
+					ok: true,
+					purpose: "history",
+					caughtUp: true,
+				});
+				expect(getTwitter6551RuntimeStatus()).toMatchObject({
+					lastLocalHeartbeatAt: heartbeatAfterLive.lastLocalHeartbeatAt,
+					localBridgeIngestedCount: heartbeatAfterLive.localBridgeIngestedCount,
 				});
 			} finally {
 				await new Promise<void>((resolve) => server.close(() => resolve()));
