@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.63 - 2026-08-02
+
+### Fixed
+
+- Replace scheduled-job lock files with renewable atomic leases, recovering abandoned work within 30 seconds without letting long-running reports or late releases overlap a successor.
+- Add a drain-confirmed, recoverable migration command for legacy period-digest, account-sync, and bookmarks-sync locks.
+
 ## 0.8.62 - 2026-08-02
 
 ### Fixed
