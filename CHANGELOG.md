@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.62 - 2026-08-02
+
+### Fixed
+
+- Isolate daily and weekly scheduler startup in production-server tests so test servers cannot create report claims or leave generation locks in the real BirdClaw home.
+
 ## 0.8.61 - 2026-08-02
 
 ### Added
