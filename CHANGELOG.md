@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.65 - 2026-08-04
+
+### Fixed
+
+- Stream profile-analysis Markdown into the page as it is generated instead of leaving large profiles on an empty preparing state until the entire response finishes.
+- Honor the configured primary and backup summary providers for profile analysis, including an explicit failover status, while caching only successfully completed results.
+
 ## 0.8.64 - 2026-08-03
 
 ### Changed
