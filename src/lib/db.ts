@@ -296,6 +296,7 @@ const BASE_SCHEMA_SQL = `
     status text not null default 'pending',
 	claim_token text not null default '',
     attempt_count integer not null default 0,
+    format_version integer not null default 1,
     window_since text not null default '',
     window_until text not null default '',
     include_dms integer not null default 0,
@@ -863,6 +864,7 @@ function ensureWeeklyDigestHistoryTable(db: Database) {
       status text not null default 'pending',
 	  claim_token text not null default '',
       attempt_count integer not null default 0,
+      format_version integer not null default 1,
       window_since text not null default '',
       window_until text not null default '',
       include_dms integer not null default 0,
@@ -889,6 +891,14 @@ function ensureWeeklyDigestHistoryTable(db: Database) {
     create index if not exists idx_weekly_digest_history_status
       on weekly_digest_history(status, updated_at desc);
 	`);
+}
+
+function ensureWeeklyDigestFormatVersionColumn(db: Database) {
+	if (!getColumnNames(db, "weekly_digest_history").has("format_version")) {
+		db.exec(
+			"alter table weekly_digest_history add column format_version integer not null default 1",
+		);
+	}
 }
 
 function ensureXRemarkTables(db: Database) {
@@ -1179,6 +1189,14 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add weekly period digest history",
 		up: (db) => {
 			ensureWeeklyDigestHistoryTable(db);
+		},
+	},
+	{
+		version: 11,
+		name: "version weekly period digest format",
+		up: (db) => {
+			ensureWeeklyDigestHistoryTable(db);
+			ensureWeeklyDigestFormatVersionColumn(db);
 		},
 	},
 ];

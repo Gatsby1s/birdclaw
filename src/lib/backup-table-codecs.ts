@@ -960,7 +960,7 @@ const definitions = {
 	},
 	weekly_digest_history: {
 		exportSql: `
-      select id, week_start, week_end, timezone, status, attempt_count,
+		select id, week_start, week_end, timezone, status, attempt_count, format_version,
         window_since, window_until, include_dms, provider, model,
         reasoning_effort, service_tier, context_hash, counts_json,
         digest_json, markdown, tweets_json, dms_json, links_json, error,
@@ -974,17 +974,19 @@ const definitions = {
 			order: 23,
 			sql: `
       insert into weekly_digest_history (
-        id, week_start, week_end, timezone, status, attempt_count,
+		id, week_start, week_end, timezone, status, attempt_count, format_version,
         window_since, window_until, include_dms, provider, model,
         reasoning_effort, service_tier, context_hash, counts_json,
         digest_json, markdown, tweets_json, dms_json, links_json, error,
         started_at, finished_at, created_at, updated_at
-      ) values (?, ?, ?, ?, 'ready', coalesce(?, 1), ?, ?, coalesce(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
+	  ) values (?, ?, ?, ?, 'ready', coalesce(?, 1), coalesce(?, 1), ?, ?, coalesce(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
       on conflict(week_start) do update set
-        week_end = excluded.week_end,
-        timezone = excluded.timezone,
-        status = 'ready',
-        attempt_count = max(weekly_digest_history.attempt_count, excluded.attempt_count),
+		week_end = excluded.week_end,
+		timezone = excluded.timezone,
+		status = 'ready',
+		claim_token = '',
+		attempt_count = max(weekly_digest_history.attempt_count, excluded.attempt_count),
+		format_version = excluded.format_version,
         window_since = excluded.window_since,
         window_until = excluded.window_until,
         include_dms = excluded.include_dms,
@@ -1004,7 +1006,11 @@ const definitions = {
         finished_at = excluded.finished_at,
         created_at = min(weekly_digest_history.created_at, excluded.created_at),
         updated_at = excluded.updated_at
-      where excluded.updated_at >= weekly_digest_history.updated_at
+	  where excluded.format_version > weekly_digest_history.format_version
+		or (
+			excluded.format_version = weekly_digest_history.format_version
+			and excluded.updated_at >= weekly_digest_history.updated_at
+		)
       `,
 			columns: [
 				"id",
@@ -1012,6 +1018,7 @@ const definitions = {
 				"week_end",
 				"timezone",
 				"attempt_count",
+				"format_version",
 				"window_since",
 				"window_until",
 				"include_dms",

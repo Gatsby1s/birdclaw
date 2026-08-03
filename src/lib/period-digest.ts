@@ -33,6 +33,7 @@ import type {
 } from "./types";
 
 export type PeriodDigestPreset = "today" | "yesterday" | "24h" | "week";
+export type PeriodDigestReportProfile = "standard" | "weekly-deep-dive";
 export type PeriodDigestSourceKind =
 	| "home"
 	| "mentions"
@@ -63,6 +64,8 @@ export interface PeriodDigestOptions {
 	liveMentionsMaxPages?: number;
 	liveThreadLimit?: number;
 	bufferModelDeltasUntilSuccess?: boolean;
+	reportProfile?: PeriodDigestReportProfile;
+	maxOutputTokens?: number;
 }
 
 export interface PeriodDigestWindow {
@@ -134,6 +137,8 @@ const PeriodDigestSchema = z.object({
 
 const MAX_DIGEST_LANGUAGE_LENGTH = 64;
 const DEFAULT_DIGEST_LANGUAGE = "zh-CN";
+const DEFAULT_DIGEST_MAX_OUTPUT_TOKENS = 7_000;
+const MAX_WEEKLY_PROMPT_DATA_CHARS = 600_000;
 
 export function normalizeDigestLanguage(
 	value: string | undefined,
@@ -432,6 +437,64 @@ function collectTweetsForSource(
 	}).map((item) => compactTweet(source, item));
 }
 
+function localDayWindows(window: PeriodDigestWindow) {
+	const end = Date.parse(window.until);
+	let cursor = new Date(window.since);
+	const windows: PeriodDigestWindow[] = [];
+	while (
+		Number.isFinite(end) &&
+		Number.isFinite(cursor.getTime()) &&
+		cursor.getTime() < end &&
+		windows.length < 7
+	) {
+		const next = new Date(cursor);
+		next.setDate(next.getDate() + 1);
+		const until = new Date(Math.min(end, next.getTime()));
+		windows.push({
+			label: `${window.label} · day ${String(windows.length + 1)}`,
+			since: cursor.toISOString(),
+			until: until.toISOString(),
+		});
+		cursor = until;
+	}
+	return windows.length > 0 ? windows : [window];
+}
+
+function isSevenDayWindow(window: PeriodDigestWindow) {
+	const duration = Date.parse(window.until) - Date.parse(window.since);
+	return duration >= 167 * 60 * 60_000 && duration <= 169 * 60 * 60_000;
+}
+
+function collectTweetsForDigestSource(
+	source: Exclude<PeriodDigestSourceKind, "dms">,
+	options: {
+		account?: string;
+		window: PeriodDigestWindow;
+		limit: number;
+		balanceAcrossDays: boolean;
+	},
+) {
+	if (!options.balanceAcrossDays) {
+		return collectTweetsForSource(source, options);
+	}
+	const windows = localDayWindows(options.window);
+	const perDayLimit = Math.max(1, Math.ceil(options.limit / windows.length));
+	return dedupeTweets([
+		...windows.flatMap((window) =>
+			collectTweetsForSource(source, {
+				account: options.account,
+				window,
+				limit: perDayLimit,
+			}),
+		),
+		...collectTweetsForSource(source, {
+			account: options.account,
+			window: options.window,
+			limit: options.limit,
+		}),
+	]);
+}
+
 function collectDms(options: {
 	account?: string;
 	includeDms: boolean;
@@ -544,6 +607,9 @@ export function collectPeriodDigestContext(
 	options: PeriodDigestOptions = {},
 ): PeriodDigestContext {
 	const window = resolvePeriodDigestWindow(options);
+	const weeklyDeepDive =
+		reportProfileFromOptions(options) === "weekly-deep-dive";
+	const balanceAcrossDays = weeklyDeepDive && isSevenDayWindow(window);
 	const maxTweets = Math.max(
 		20,
 		Math.trunc(options.maxTweets ?? DEFAULT_MAX_TWEETS),
@@ -552,30 +618,35 @@ export function collectPeriodDigestContext(
 		3,
 		Math.trunc(options.maxLinks ?? DEFAULT_MAX_LINKS),
 	);
-	const home = collectTweetsForSource("home", {
+	const home = collectTweetsForDigestSource("home", {
 		account: options.account,
 		window,
 		limit: maxTweets,
+		balanceAcrossDays,
 	});
-	const mentions = collectTweetsForSource("mentions", {
+	const mentions = collectTweetsForDigestSource("mentions", {
 		account: options.account,
 		window,
 		limit: maxTweets,
+		balanceAcrossDays,
 	});
-	const authored = collectTweetsForSource("authored", {
+	const authored = collectTweetsForDigestSource("authored", {
 		account: options.account,
 		window,
 		limit: maxTweets,
+		balanceAcrossDays,
 	});
-	const likes = collectTweetsForSource("likes", {
+	const likes = collectTweetsForDigestSource("likes", {
 		account: options.account,
 		window,
 		limit: maxTweets,
+		balanceAcrossDays,
 	});
-	const bookmarks = collectTweetsForSource("bookmarks", {
+	const bookmarks = collectTweetsForDigestSource("bookmarks", {
 		account: options.account,
 		window,
 		limit: maxTweets,
+		balanceAcrossDays,
 	});
 	const dms = collectDms({
 		account: options.account,
@@ -588,13 +659,18 @@ export function collectPeriodDigestContext(
 		window,
 		limit: maxLinks,
 	});
-	const tweets = dedupeTweets([
+	const candidateTweets = dedupeTweets([
 		...home,
 		...mentions,
 		...authored,
 		...likes,
 		...bookmarks,
-	]).slice(0, maxTweets);
+	]);
+	const tweets = (
+		weeklyDeepDive
+			? orderWeeklyTweets(candidateTweets, window, links)
+			: candidateTweets
+	).slice(0, maxTweets);
 	const withoutHash = {
 		window,
 		...(options.account ? { account: options.account } : {}),
@@ -623,6 +699,26 @@ function languageFromOptions(options: PeriodDigestOptions) {
 		options.language ??
 			process.env.BIRDCLAW_DIGEST_LANGUAGE ??
 			DEFAULT_DIGEST_LANGUAGE,
+	);
+}
+
+function reportProfileFromOptions(
+	options: PeriodDigestOptions,
+): PeriodDigestReportProfile {
+	return (
+		options.reportProfile ??
+		(normalizePeriod(options.period) === "week"
+			? "weekly-deep-dive"
+			: "standard")
+	);
+}
+
+function maxOutputTokensFromOptions(options: PeriodDigestOptions) {
+	return (
+		options.maxOutputTokens ??
+		(reportProfileFromOptions(options) === "weekly-deep-dive"
+			? 16_000
+			: DEFAULT_DIGEST_MAX_OUTPUT_TOKENS)
 	);
 }
 
@@ -895,6 +991,8 @@ function digestCacheKey(
 		modelFromOptions(options),
 		reasoningEffortFromOptions(options),
 		serviceTierFromOptions(options),
+		reportProfileFromOptions(options),
+		String(maxOutputTokensFromOptions(options)),
 		context.hash,
 	];
 	const lang = languageFromOptions(options);
@@ -925,6 +1023,8 @@ function latestDigestCacheKey(options: PeriodDigestOptions) {
 		language: languageFromOptions(options) ?? null,
 		reasoningEffort: reasoningEffortFromOptions(options),
 		serviceTier: serviceTierFromOptions(options),
+		reportProfile: reportProfileFromOptions(options),
+		maxOutputTokens: maxOutputTokensFromOptions(options),
 	};
 	return `period-digest-latest:v2:${createHash("sha1")
 		.update(JSON.stringify(identity))
@@ -1014,12 +1114,89 @@ function emitCachedDigest(
 	handlers.onEvent?.({ type: "done", result });
 }
 
+function weeklyPromptTweetScore(
+	tweet: CompactTweet,
+	linkedTweetIds: ReadonlySet<string>,
+) {
+	return (
+		(tweet.bookmarked ? 50_000 : 0) +
+		(tweet.liked ? 40_000 : 0) +
+		(linkedTweetIds.has(tweet.id) ? 30_000 : 0) +
+		(tweet.source === "mentions" ? 20_000 : 0) +
+		(tweet.source === "authored" ? 15_000 : 0) +
+		Math.min(10_000, Math.log10(Math.max(1, tweet.likeCount) + 1) * 1_500) +
+		Math.min(
+			5_000,
+			Math.log10(Math.max(1, tweet.authorProfile.followersCount) + 1) * 500,
+		)
+	);
+}
+
+function orderWeeklyTweets(
+	tweets: CompactTweet[],
+	window: PeriodDigestWindow,
+	links: CompactLink[],
+) {
+	const windows = localDayWindows(window);
+	const linkedTweetIds = new Set(
+		links.flatMap((link) =>
+			link.mentions.flatMap((mention) =>
+				mention.tweetId ? [mention.tweetId] : [],
+			),
+		),
+	);
+	const buckets = windows.map(() => [] as CompactTweet[]);
+	for (const tweet of tweets) {
+		const createdAt = Date.parse(tweet.createdAt);
+		const matchingBucket = Number.isFinite(createdAt)
+			? windows.findIndex(
+					(day) =>
+						createdAt >= Date.parse(day.since) &&
+						createdAt < Date.parse(day.until),
+				)
+			: -1;
+		const bucket = matchingBucket >= 0 ? matchingBucket : windows.length - 1;
+		buckets[bucket]?.push(tweet);
+	}
+	for (const bucket of buckets) {
+		bucket.sort((left, right) => {
+			const scoreDifference =
+				weeklyPromptTweetScore(right, linkedTweetIds) -
+				weeklyPromptTweetScore(left, linkedTweetIds);
+			return scoreDifference || right.createdAt.localeCompare(left.createdAt);
+		});
+	}
+	const selected: CompactTweet[] = [];
+	for (
+		let rank = 0;
+		buckets.some((bucket) => rank < bucket.length);
+		rank += 1
+	) {
+		for (const bucket of buckets) {
+			const tweet = bucket[rank];
+			if (tweet) selected.push(tweet);
+		}
+	}
+	return selected;
+}
+
+function selectWeeklyPromptTweets(context: PeriodDigestContext) {
+	return orderWeeklyTweets(context.tweets, context.window, context.links);
+}
+
 function buildPrompt(
 	context: PeriodDigestContext,
-	options?: { language?: string },
+	options?: {
+		language?: string;
+		reportProfile?: PeriodDigestReportProfile;
+	},
 ) {
 	const language = normalizeDigestLanguage(options?.language);
-	const promptTweets = context.tweets.map((tweet) => ({
+	const weeklyDeepDive = options?.reportProfile === "weekly-deep-dive";
+	const selectedTweets = weeklyDeepDive
+		? selectWeeklyPromptTweets(context)
+		: context.tweets;
+	const promptTweets = selectedTweets.map((tweet) => ({
 		id: tweet.id,
 		url: tweet.url,
 		source: tweet.source,
@@ -1037,6 +1214,9 @@ function buildPrompt(
 		replyToTweet: tweet.replyToTweet,
 	}));
 	const fitDataset = () => {
+		const maxPromptDataChars = weeklyDeepDive
+			? MAX_WEEKLY_PROMPT_DATA_CHARS
+			: MAX_PROMPT_DATA_CHARS;
 		let tweetCount = promptTweets.length;
 		let dmCount = context.dms.length;
 		let linkCount = context.links.length;
@@ -1062,7 +1242,7 @@ function buildPrompt(
 			}
 			return best;
 		};
-		if (lengthFor(tweetCount, dmCount, linkCount) <= MAX_PROMPT_DATA_CHARS) {
+		if (lengthFor(tweetCount, dmCount, linkCount) <= maxPromptDataChars) {
 			return {
 				dataset: datasetFor(tweetCount, dmCount, linkCount),
 				tweetCount,
@@ -1070,26 +1250,41 @@ function buildPrompt(
 		}
 		dmCount = fitCount(
 			dmCount,
-			(count) =>
-				lengthFor(tweetCount, count, linkCount) <= MAX_PROMPT_DATA_CHARS,
+			(count) => lengthFor(tweetCount, count, linkCount) <= maxPromptDataChars,
 		);
-		if (lengthFor(tweetCount, dmCount, linkCount) > MAX_PROMPT_DATA_CHARS) {
+		if (lengthFor(tweetCount, dmCount, linkCount) > maxPromptDataChars) {
 			linkCount = fitCount(
 				linkCount,
-				(count) =>
-					lengthFor(tweetCount, dmCount, count) <= MAX_PROMPT_DATA_CHARS,
+				(count) => lengthFor(tweetCount, dmCount, count) <= maxPromptDataChars,
 			);
 		}
-		if (lengthFor(tweetCount, dmCount, linkCount) > MAX_PROMPT_DATA_CHARS) {
+		if (lengthFor(tweetCount, dmCount, linkCount) > maxPromptDataChars) {
 			tweetCount = fitCount(
 				tweetCount,
-				(count) =>
-					lengthFor(count, dmCount, linkCount) <= MAX_PROMPT_DATA_CHARS,
+				(count) => lengthFor(count, dmCount, linkCount) <= maxPromptDataChars,
 			);
 		}
 		return { dataset: datasetFor(tweetCount, dmCount, linkCount), tweetCount };
 	};
 	const { dataset, tweetCount } = fitDataset();
+
+	const reportRequirements = weeklyDeepDive
+		? `- This is a weekly deep-dive, not a daily digest. When the dataset is substantial, target 7,000-10,000 Chinese characters for zh-CN, or 2,500-3,500 words for other languages, supported by roughly 50-100 unique tweet citations. Do not pad thin datasets or repeat points merely to hit a length target.
+- Start with a 4-6 sentence executive lead that states the week's dominant narrative, the most consequential change, and the strongest counter-signal.
+- Use these level-2 sections in this order: "Executive brief", "What changed this week", "Main themes", "Key turning points", "Key people and viewpoints", "Disagreements and open questions", "Important links shared", "Worth opening", and "Next week watchlist". Add "Worth replying to" only for clearly high-signal replies. Translate the titles when a report language is requested.
+- Under "What changed this week", distinguish genuine developments from topics that merely stayed noisy. Use 4-8 evidence-rich bullets.
+- Under "Main themes", cover 6-10 distinct themes when supported by the data. Give each theme a level-3 heading and 2-4 substantive bullets covering the evidence, why it matters, and meaningful disagreement or uncertainty.
+- Under "Key turning points", reconstruct 3-7 dated or sequenced shifts from across the week; do not turn the entire report into a raw chronology.
+- Cover evidence from every day that has source data instead of over-weighting the end of the week.
+- Under "Key people and viewpoints", select 5-10 people for the distinct information or argument they contributed, not merely for popularity.
+- Under "Disagreements and open questions", surface 3-6 substantive conflicts, counterexamples, or unresolved claims without forcing a false consensus.
+- Under "Important links shared", include 8-15 of the most consequential external links when available and explain the value of each.
+- Under "Worth opening", select 8-12 source tweets or threads that best reward direct reading, with a concrete reason for each choice.
+- Under "Next week watchlist", give 5-8 falsifiable things to monitor. Clearly label forward-looking interpretation as inference and cite the observations supporting it.
+- Represent competing views fairly. Separate reported facts, participants' opinions, and your synthesis. Omit low-signal repetition even if it was popular.`
+		: `- Target 700-1100 words when there is enough data.
+- Start with a 2-3 sentence lead that immediately says what people are talking about.
+- Use sections named "What people are talking about", "Important links shared", and "Worth opening". Add "Worth replying to" only if there are clearly high-signal replies. Translate these section titles when a report language is requested.`;
 
 	return `Window: ${context.window.label}
 Since: ${context.window.since}
@@ -1101,13 +1296,11 @@ Write a high-signal "what happened" report from this local Twitter/X dataset.
 
 Requirements:
 - Stream one readable Markdown report first. The UI will show this text directly; do not rely on separate cards or structured summaries.
-- Target 700-1100 words when there is enough data.
-- Start with a 2-3 sentence lead that immediately says what people are talking about.
-- Use sections named "What people are talking about", "Important links shared", and "Worth opening". Add "Worth replying to" only if there are clearly high-signal replies. Translate these section titles when a report language is requested.
+${reportRequirements}
 - Format every section title as a Markdown level-2 heading (\`## Section title\`), never as bold-only text.
 - When a tweet has replyToTweet, use that parent context to understand what the author was replying to and whether Peter already joined the conversation.
 - Use bullets under each section. Each bullet should be specific and explain why it matters.
-- Under "What people are talking about", group related bullets beneath concise Markdown level-3 topic headings (\`### Topic title\`).
+- In the main topic section ("What people are talking about" or "Main themes"), group related bullets beneath concise Markdown level-3 topic headings (\`### Topic title\`).
 - Every level-3 topic heading must exactly match one corresponding keyTopics[].title in the JSON, and keyTopics must follow the same order. Do not replace these headings with bold-only bullet prefixes.
 - For tweets: cite every claim with inline tweet ids at the end of the relevant sentence or bullet, e.g. (tweet_123, tweet_456). These citations become hoverable source links.
 - For links: emit normal Markdown links with no space between the label and URL, e.g. [title](https://example.com), then cite the sharing tweet ids in the same bullet.
@@ -1192,8 +1385,10 @@ function createOpenAIRequestBody(
 			"You are a precise local Twitter archive analyst. Stream Markdown first, then emit the requested JSON object after the delimiter. Do not invent events not present in the dataset.",
 		prompt: buildPrompt(context, {
 			language: languageFromOptions(options),
+			reportProfile: reportProfileFromOptions(options),
 		}),
 		stream: true,
+		maxOutputTokens: maxOutputTokensFromOptions(options),
 	});
 }
 
@@ -1404,9 +1599,11 @@ export const __test__ = {
 	buildPrompt,
 	digestCacheKey,
 	languageFromOptions,
+	localDayWindows,
 	normalizeDigestLanguage,
 	readOpenAIStreamEffect,
 	parseDigestFromHybridText,
 	processSseChunk,
 	resolvePeriodDigestWindow,
+	selectWeeklyPromptTweets,
 };

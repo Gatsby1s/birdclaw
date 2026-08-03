@@ -130,6 +130,189 @@ describe("period digest", () => {
 		expect(prompt).toContain(context.tweets[0]?.text);
 	});
 
+	it("uses a materially richer, day-balanced weekly report profile", () => {
+		const context = collectPeriodDigestContext({
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			maxTweets: 20,
+		});
+		const dayTweets = Array.from({ length: 7 }, (_, index) => ({
+			...(context.tweets[index % context.tweets.length] as NonNullable<
+				(typeof context.tweets)[number]
+			>),
+			id: `weekly-day-${String(index + 1)}`,
+			createdAt: new Date(
+				Date.parse("2026-07-06T00:00:00.000Z") + index * 86_400_000,
+			).toISOString(),
+		}));
+		const weeklyContext = {
+			...context,
+			window: {
+				label: "Week",
+				since: "2026-07-06T00:00:00.000Z",
+				until: "2026-07-13T00:00:00.000Z",
+			},
+			tweets: dayTweets,
+		};
+		const selected = __test__.selectWeeklyPromptTweets(weeklyContext);
+		const prompt = __test__.buildPrompt(weeklyContext, {
+			language: "zh-CN",
+			reportProfile: "weekly-deep-dive",
+		});
+
+		expect(selected.slice(0, 7).map((tweet) => tweet.id)).toEqual(
+			dayTweets.map((tweet) => tweet.id),
+		);
+		expect(prompt).toContain("7,000-10,000 Chinese characters");
+		expect(prompt).toContain('"What changed this week"');
+		expect(prompt).toContain('"Key turning points"');
+		expect(prompt).toContain('"Next week watchlist"');
+		expect(prompt).toContain("Cover evidence from every day");
+		expect(__test__.digestCacheKey(weeklyContext, {})).not.toBe(
+			__test__.digestCacheKey(weeklyContext, { period: "week" }),
+		);
+	});
+
+	it("keeps every day represented when a week exceeds the tweet cap", () => {
+		const db = getNativeDb();
+		const seed = db
+			.prepare(
+				`select edge.account_id, tweet.author_profile_id
+				 from tweets tweet
+				 join tweet_account_edges edge on edge.tweet_id = tweet.id
+				 limit 1`,
+			)
+			.get() as { account_id: string; author_profile_id: string };
+		const insertTweet = db.prepare(
+			`insert into tweets (id, author_profile_id, text, created_at, like_count)
+			 values (?, ?, ?, ?, ?)`,
+		);
+		const insertEdge = db.prepare(
+			`insert into tweet_account_edges (
+			 account_id, tweet_id, kind, first_seen_at, last_seen_at, seen_count,
+			 source, raw_json, updated_at
+			) values (?, ?, 'home', ?, ?, 1, 'test', '{}', ?)`,
+		);
+		db.transaction(() => {
+			for (let day = 0; day < 7; day += 1) {
+				for (let item = 0; item < 800; item += 1) {
+					const id = `weekly-volume-${String(day)}-${String(item)}`;
+					const createdAt = new Date(
+						Date.parse("2026-07-06T00:00:00.000Z") +
+							day * 86_400_000 +
+							item * 1_000,
+					).toISOString();
+					insertTweet.run(
+						id,
+						seed.author_profile_id,
+						`High-volume week day ${String(day)}`,
+						createdAt,
+						item,
+					);
+					insertEdge.run(seed.account_id, id, createdAt, createdAt, createdAt);
+				}
+			}
+		})();
+
+		const context = collectPeriodDigestContext({
+			period: "week",
+			since: "2026-07-06T00:00:00.000Z",
+			until: "2026-07-13T00:00:00.000Z",
+			account: seed.account_id,
+			maxTweets: 5_000,
+			maxLinks: 3,
+		});
+		const dayCounts = new Map<number, number>();
+		for (const tweet of context.tweets) {
+			const day = Math.floor(
+				(Date.parse(tweet.createdAt) - Date.parse(context.window.since)) /
+					86_400_000,
+			);
+			dayCounts.set(day, (dayCounts.get(day) ?? 0) + 1);
+		}
+
+		expect(context.tweets).toHaveLength(5_000);
+		expect([...dayCounts.keys()].sort()).toEqual([0, 1, 2, 3, 4, 5, 6]);
+		for (let day = 0; day < 7; day += 1) {
+			expect(dayCounts.get(day)).toBeGreaterThan(700);
+		}
+	});
+
+	it("backfills unused day quotas during a one-day weekly spike", () => {
+		const db = getNativeDb();
+		const seed = db
+			.prepare(
+				`select edge.account_id, tweet.author_profile_id
+				 from tweets tweet
+				 join tweet_account_edges edge on edge.tweet_id = tweet.id
+				 limit 1`,
+			)
+			.get() as { account_id: string; author_profile_id: string };
+		const insertTweet = db.prepare(
+			`insert into tweets (id, author_profile_id, text, created_at)
+			 values (?, ?, ?, ?)`,
+		);
+		const insertEdge = db.prepare(
+			`insert into tweet_account_edges (
+			 account_id, tweet_id, kind, first_seen_at, last_seen_at, seen_count,
+			 source, raw_json, updated_at
+			) values (?, ?, 'home', ?, ?, 1, 'test', '{}', ?)`,
+		);
+		db.transaction(() => {
+			for (let item = 0; item < 2_000; item += 1) {
+				const id = `weekly-spike-${String(item)}`;
+				const createdAt = new Date(
+					Date.parse("2026-07-09T00:00:00.000Z") + item * 1_000,
+				).toISOString();
+				insertTweet.run(
+					id,
+					seed.author_profile_id,
+					"One-day weekly spike",
+					createdAt,
+				);
+				insertEdge.run(seed.account_id, id, createdAt, createdAt, createdAt);
+			}
+		})();
+
+		const context = collectPeriodDigestContext({
+			period: "week",
+			since: "2026-07-06T00:00:00.000Z",
+			until: "2026-07-13T00:00:00.000Z",
+			account: seed.account_id,
+			maxTweets: 5_000,
+			maxLinks: 3,
+		});
+
+		expect(context.counts.home).toBe(2_000);
+		expect(context.tweets).toHaveLength(2_000);
+	});
+
+	it("uses local calendar days across a DST-short week", () => {
+		const originalTimezone = process.env.TZ;
+		process.env.TZ = "America/New_York";
+		try {
+			const windows = __test__.localDayWindows({
+				label: "DST week",
+				since: "2026-03-02T05:00:00.000Z",
+				until: "2026-03-09T04:00:00.000Z",
+			});
+			const durations = windows.map(
+				(window) => Date.parse(window.until) - Date.parse(window.since),
+			);
+
+			expect(windows).toHaveLength(7);
+			expect(
+				durations.filter((duration) => duration === 23 * 60 * 60_000),
+			).toHaveLength(1);
+			expect(durations.reduce((total, duration) => total + duration, 0)).toBe(
+				167 * 60 * 60_000,
+			);
+		} finally {
+			if (originalTimezone === undefined) delete process.env.TZ;
+			else process.env.TZ = originalTimezone;
+		}
+	});
+
 	it("preserves tweet prompt context when auxiliary sections exceed the budget", () => {
 		const context = collectPeriodDigestContext({
 			since: "2026-01-01T00:00:00.000Z",
@@ -264,6 +447,32 @@ describe("period digest", () => {
 		expect(body.reasoning).toEqual({ effort: "medium" });
 		expect(body.service_tier).toBe("priority");
 		expect(body.stream).toBe(true);
+		expect(body.max_output_tokens).toBe(7_000);
+	});
+
+	it("sends the expanded output budget for weekly deep-dives", async () => {
+		const streamed = [
+			sseFrame({
+				type: "response.output_text.delta",
+				delta:
+					'# Week\n\nWeekly report.\n\n---\n{"title":"Week","summary":"Weekly report","keyTopics":[],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[]}',
+			}),
+			"data: [DONE]\n\n",
+		].join("");
+		const fetchMock = vi.fn().mockResolvedValue(streamResponse(streamed));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await streamPeriodDigest({
+			period: "week",
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			refresh: true,
+		});
+
+		const body = JSON.parse(
+			String(fetchMock.mock.calls[0]?.[1]?.body),
+		) as Record<string, unknown>;
+		expect(body.max_output_tokens).toBe(16_000);
 	});
 
 	it("adds locally stored cited tweets to the result context for previews", async () => {

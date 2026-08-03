@@ -7,8 +7,10 @@ import { resetBirdclawPathsForTests } from "./config";
 import { getNativeDb, resetDatabaseForTests } from "./db";
 import type { PeriodDigestRunResult } from "./period-digest";
 import {
+	__test__,
 	claimWeeklyDigest,
 	completeWeeklyDigestHistory,
+	CURRENT_WEEKLY_DIGEST_FORMAT_VERSION,
 	failWeeklyDigestHistory,
 	getWeeklyDigestHistory,
 	listWeeklyDigestHistory,
@@ -136,10 +138,163 @@ describe("weekly digest history", () => {
 				date: "2026-07-20",
 				endDate: "2026-07-26",
 				status: "ready",
+				formatVersion: CURRENT_WEEKLY_DIGEST_FORMAT_VERSION,
 			},
 			result: { cached: true, reasoningEffort: "high" },
 		});
 		expect(listWeeklyDigestHistory()).toHaveLength(1);
+	});
+
+	it("upgrades an old ready report without hiding or losing it on failure", () => {
+		const first = claimWeeklyDigest("2026-07-20");
+		if (!first.claimed) throw new Error("Expected the first claim to win");
+		completeWeeklyDigestHistory(
+			first.id,
+			first.claimToken,
+			resultForWeek("2026-07-20"),
+		);
+		const db = getNativeDb();
+		db.prepare(
+			`update weekly_digest_history
+			 set format_version = 1, markdown = '# Legacy weekly report'
+			 where id = ?`,
+		).run(first.id);
+		const legacyUpdatedAt = getWeeklyDigestHistory(first.id)?.metadata
+			.updatedAt;
+
+		const upgrade = claimWeeklyDigest("2026-07-20");
+		expect(upgrade).toMatchObject({
+			claimed: true,
+			id: first.id,
+			status: "ready",
+			preserveReady: true,
+		});
+		expect(getWeeklyDigestHistory(first.id)?.result.markdown).toBe(
+			"# Legacy weekly report",
+		);
+		expect(getWeeklyDigestHistory(first.id)?.metadata.updatedAt).toBe(
+			legacyUpdatedAt,
+		);
+		if (!upgrade.claimed) throw new Error("Expected the upgrade claim to win");
+		expect(
+			failWeeklyDigestHistory(
+				upgrade.id,
+				upgrade.claimToken,
+				new Error("temporary provider failure"),
+				{ preserveReady: upgrade.preserveReady },
+			),
+		).toBe(true);
+		expect(getWeeklyDigestHistory(first.id)).toMatchObject({
+			metadata: {
+				status: "ready",
+				formatVersion: 1,
+				updatedAt: legacyUpdatedAt,
+			},
+			result: { markdown: "# Legacy weekly report" },
+		});
+
+		const retry = claimWeeklyDigest("2026-07-20");
+		if (!retry.claimed) throw new Error("Expected the upgrade retry to win");
+		const richer = {
+			...resultForWeek("2026-07-20"),
+			markdown: "# Richer weekly report\n\nExpanded analysis.",
+		};
+		expect(
+			completeWeeklyDigestHistory(retry.id, retry.claimToken, richer),
+		).toBe(true);
+		expect(getWeeklyDigestHistory(first.id)).toMatchObject({
+			metadata: {
+				status: "ready",
+				formatVersion: CURRENT_WEEKLY_DIGEST_FORMAT_VERSION,
+			},
+			result: { markdown: richer.markdown },
+		});
+		expect(claimWeeklyDigest("2026-07-20")).toMatchObject({
+			claimed: false,
+			status: "ready",
+		});
+	});
+
+	it("defers a failed ready upgrade until the next scheduler scan", async () => {
+		const first = claimWeeklyDigest("2026-07-20");
+		if (!first.claimed) throw new Error("Expected the first claim to win");
+		completeWeeklyDigestHistory(
+			first.id,
+			first.claimToken,
+			resultForWeek("2026-07-20"),
+		);
+		getNativeDb()
+			.prepare(
+				"update weekly_digest_history set format_version = 1 where id = ?",
+			)
+			.run(first.id);
+		let runOptions:
+			| {
+					refresh?: boolean;
+					reportProfile?: string;
+					maxOutputTokens?: number;
+			  }
+			| undefined;
+
+		const outcome = await __test__.archiveWeeklyDigestWithStream(
+			"2026-07-20",
+			{},
+			async (options) => {
+				const requested = options ?? {};
+				runOptions = {
+					refresh: requested.refresh,
+					reportProfile: requested.reportProfile,
+					maxOutputTokens: requested.maxOutputTokens,
+				};
+				throw new Error("provider remains unavailable");
+			},
+		);
+
+		expect(outcome).toMatchObject({
+			generated: false,
+			id: first.id,
+			status: "ready",
+			upgradeFailed: true,
+		});
+		expect(runOptions).toMatchObject({
+			refresh: false,
+			reportProfile: "weekly-deep-dive",
+			maxOutputTokens: 16_000,
+		});
+		expect(getWeeklyDigestHistory(first.id)).toMatchObject({
+			metadata: { status: "ready", formatVersion: 1 },
+		});
+	});
+
+	it("fences an upgrade worker after a current report replaces its claim", () => {
+		const first = claimWeeklyDigest("2026-07-20");
+		if (!first.claimed) throw new Error("Expected the first claim to win");
+		completeWeeklyDigestHistory(
+			first.id,
+			first.claimToken,
+			resultForWeek("2026-07-20"),
+		);
+		const db = getNativeDb();
+		db.prepare(
+			"update weekly_digest_history set format_version = 1 where id = ?",
+		).run(first.id);
+		const upgrade = claimWeeklyDigest("2026-07-20");
+		if (!upgrade.claimed) throw new Error("Expected the upgrade claim to win");
+		db.prepare(
+			`update weekly_digest_history
+			 set format_version = ?, claim_token = '', markdown = '# Remote v2'
+			 where id = ?`,
+		).run(CURRENT_WEEKLY_DIGEST_FORMAT_VERSION, first.id);
+
+		expect(
+			completeWeeklyDigestHistory(upgrade.id, upgrade.claimToken, {
+				...resultForWeek("2026-07-20"),
+				markdown: "# Stale worker v2",
+			}),
+		).toBe(false);
+		expect(getWeeklyDigestHistory(first.id)?.result.markdown).toBe(
+			"# Remote v2",
+		);
 	});
 
 	it("fences stale workers and redacts provider secrets", () => {

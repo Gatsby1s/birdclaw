@@ -702,7 +702,7 @@ describe("text backup", () => {
 
 		expect(first.manifest.schemaVersion).toBe(5);
 		expect(first.manifest.backupHash).toBe(
-			"b40ee8fcb075441e1ef6dd614079298bdcbfedd1999c7ceaad963a6240b1a823",
+			"56da2d481996826355c9d89942a7a33295ac0bbf4831f198fcf0b388dad409f5",
 		);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);
@@ -718,6 +718,73 @@ describe("text backup", () => {
 		);
 		expect((await validateBackup(secondRepoPath)).ok).toBe(true);
 	}, 20000);
+
+	it("imports legacy weekly digest backups without a format version", async () => {
+		switchHome("birdclaw-backup-legacy-weekly-src-");
+		seedBackupFixture();
+		const repoPath = makeTempDir("birdclaw-backup-legacy-weekly-repo-");
+		await exportBackup({ repoPath });
+		const weeklyPath = path.join(repoPath, "data/digests/weekly-history.jsonl");
+		const legacyWeekly = readFileSync(weeklyPath, "utf8").replace(
+			'"format_version":1,',
+			"",
+		);
+		expect(legacyWeekly).not.toContain("format_version");
+		writeFileSync(weeklyPath, legacyWeekly);
+
+		switchHome("birdclaw-backup-legacy-weekly-dest-");
+		await importBackup({ repoPath, validate: false });
+
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare("select week_start, format_version from weekly_digest_history")
+				.all(),
+		).toEqual([{ week_start: "2025-01-06", format_version: 1 }]);
+	});
+
+	it("prefers a richer weekly format over a newer legacy timestamp", async () => {
+		switchHome("birdclaw-backup-weekly-v2-src-");
+		seedBackupFixture();
+		getNativeDb({ seedDemoData: false })
+			.prepare(
+				`update weekly_digest_history
+				 set format_version = 2, markdown = '# Rich weekly backup'
+				 where week_start = '2025-01-06'`,
+			)
+			.run();
+		const repoPath = makeTempDir("birdclaw-backup-weekly-v2-repo-");
+		await exportBackup({ repoPath });
+
+		switchHome("birdclaw-backup-weekly-v1-dest-");
+		getNativeDb({ seedDemoData: false })
+			.prepare(
+				`insert into weekly_digest_history (
+				 id, week_start, week_end, timezone, status, claim_token, format_version,
+				 started_at, finished_at, created_at, updated_at
+				) values (
+				 'legacy-newer', '2025-01-06', '2025-01-12', 'UTC', 'ready',
+				 'active-upgrade', 1,
+				 '2030-01-01T00:00:00.000Z', '2030-01-01T00:01:00.000Z',
+				 '2030-01-01T00:00:00.000Z', '2030-01-01T00:01:00.000Z'
+				)`,
+			)
+			.run();
+
+		await importBackup({ repoPath });
+
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare(
+					`select format_version, claim_token, markdown
+					 from weekly_digest_history where week_start = '2025-01-06'`,
+				)
+				.get(),
+		).toEqual({
+			format_version: 2,
+			claim_token: "",
+			markdown: "# Rich weekly backup",
+		});
+	});
 
 	it("does not downgrade a fresh DM request when merging a stale backup", async () => {
 		switchHome("birdclaw-backup-dm-merge-");

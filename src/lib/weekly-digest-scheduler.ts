@@ -9,6 +9,7 @@ import {
 } from "./scheduled-job";
 import {
 	archiveWeeklyDigest,
+	CURRENT_WEEKLY_DIGEST_FORMAT_VERSION,
 	listWeeklyDigestHistory,
 	localWeekStartKey,
 	previousCompletedWeekStartKey,
@@ -53,7 +54,13 @@ export function startupDigestWeeks(now = new Date()) {
 	const oldestDate = dateFromKey(oldest);
 	const start = oldestDate > cap ? oldestDate : cap;
 	const complete = new Set(
-		items.filter((item) => item.status === "ready").map((item) => item.date),
+		items
+			.filter(
+				(item) =>
+					item.status === "ready" &&
+					item.formatVersion >= CURRENT_WEEKLY_DIGEST_FORMAT_VERSION,
+			)
+			.map((item) => item.date),
 	);
 	const missing: string[] = [];
 	for (

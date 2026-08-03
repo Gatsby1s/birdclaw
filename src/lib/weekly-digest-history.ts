@@ -11,6 +11,7 @@ import { redactProviderError } from "./openai-response-runtime";
 import type { Database } from "./sqlite";
 
 export type WeeklyDigestHistoryStatus = "pending" | "ready" | "failed";
+export const CURRENT_WEEKLY_DIGEST_FORMAT_VERSION = 2;
 
 export interface WeeklyDigestHistoryMetadata {
 	id: string;
@@ -25,6 +26,7 @@ export interface WeeklyDigestHistoryMetadata {
 	provider?: string;
 	model?: string;
 	attemptCount: number;
+	formatVersion: number;
 	error?: string;
 	createdAt: string;
 	updatedAt: string;
@@ -45,6 +47,7 @@ interface WeeklyDigestHistoryRow extends Record<string, unknown> {
 	status: string;
 	claim_token: string;
 	attempt_count: number;
+	format_version: number;
 	window_since: string;
 	window_until: string;
 	include_dms: number;
@@ -185,6 +188,7 @@ function metadataFromRow(
 		...(row.provider ? { provider: row.provider } : {}),
 		...(row.model ? { model: row.model } : {}),
 		attemptCount: Number(row.attempt_count),
+		formatVersion: Number(row.format_version),
 		...(row.error ? { error: row.error } : {}),
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
@@ -292,31 +296,56 @@ export function claimWeeklyDigest(weekStart: string, db = getNativeDb()) {
 		const existing = db
 			.prepare("select * from weekly_digest_history where week_start = ?")
 			.get(weekStart) as WeeklyDigestHistoryRow | undefined;
+		const hasCurrentReadyReport =
+			existing?.status === "ready" &&
+			Number(existing.format_version) >= CURRENT_WEEKLY_DIGEST_FORMAT_VERSION;
+		const hasActiveUpgrade =
+			existing?.status === "ready" &&
+			!hasCurrentReadyReport &&
+			Boolean(existing.claim_token) &&
+			existing.started_at > staleBefore;
 		if (
-			existing?.status === "ready" ||
+			hasCurrentReadyReport ||
+			hasActiveUpgrade ||
 			(existing?.status === "pending" && existing.updated_at > staleBefore)
 		) {
 			return {
 				claimed: false as const,
 				id: existing.id,
-				status: existing.status,
+				status: hasActiveUpgrade ? "pending" : existing.status,
 			};
 		}
 		if (existing) {
 			const timezone =
 				Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+			const preserveReady = existing.status === "ready";
 			db.prepare(
 				`update weekly_digest_history
-				 set status = 'pending', claim_token = ?, attempt_count = attempt_count + 1,
+				 set status = ?, claim_token = ?, attempt_count = attempt_count + 1,
 				     week_end = ?, timezone = ?, window_since = ?, window_until = ?,
-				     error = null, started_at = ?, finished_at = null, updated_at = ?
+				     error = null, started_at = ?,
+				     finished_at = case when ? then finished_at else null end,
+				     updated_at = case when ? then updated_at else ? end
 				 where id = ?`,
-			).run(claimToken, endDate, timezone, since, until, now, now, existing.id);
+			).run(
+				preserveReady ? "ready" : "pending",
+				claimToken,
+				endDate,
+				timezone,
+				since,
+				until,
+				now,
+				preserveReady ? 1 : 0,
+				preserveReady ? 1 : 0,
+				now,
+				existing.id,
+			);
 			return {
 				claimed: true as const,
 				id: existing.id,
 				claimToken,
-				status: "pending",
+				status: preserveReady ? ("ready" as const) : ("pending" as const),
+				preserveReady,
 			};
 		}
 		const id = randomUUID();
@@ -337,7 +366,13 @@ export function claimWeeklyDigest(weekStart: string, db = getNativeDb()) {
 			now,
 			now,
 		);
-		return { claimed: true as const, id, claimToken, status: "pending" };
+		return {
+			claimed: true as const,
+			id,
+			claimToken,
+			status: "pending" as const,
+			preserveReady: false,
+		};
 	})();
 }
 
@@ -352,13 +387,19 @@ export function completeWeeklyDigestHistory(
 	const changed = db
 		.prepare(
 			`update weekly_digest_history set
-			 status = 'ready', include_dms = ?, provider = ?, model = ?,
+			 status = 'ready', claim_token = '', format_version = ?,
+			 include_dms = ?, provider = ?, model = ?,
 			 reasoning_effort = ?, service_tier = ?, context_hash = ?,
 			 counts_json = ?, digest_json = ?, markdown = ?, tweets_json = ?,
 			 dms_json = ?, links_json = ?, error = null, finished_at = ?, updated_at = ?
-			 where id = ? and claim_token = ? and status = 'pending'`,
+			 where id = ? and claim_token = ?
+			   and (
+			     status = 'pending'
+			     or (status = 'ready' and format_version < ?)
+			   )`,
 		)
 		.run(
+			CURRENT_WEEKLY_DIGEST_FORMAT_VERSION,
 			result.context.includeDms ? 1 : 0,
 			result.provider ?? "",
 			result.model,
@@ -375,6 +416,7 @@ export function completeWeeklyDigestHistory(
 			now,
 			id,
 			claimToken,
+			CURRENT_WEEKLY_DIGEST_FORMAT_VERSION,
 		).changes;
 	return changed > 0;
 }
@@ -383,26 +425,40 @@ export function failWeeklyDigestHistory(
 	id: string,
 	claimToken: string,
 	error: unknown,
+	options: { preserveReady?: boolean } = {},
 	db = getNativeDb(),
 ) {
 	const now = new Date().toISOString();
 	const message = redactProviderError(
 		error instanceof Error ? error.message : String(error),
 	).slice(0, 2_000);
+	const preserveReady = options.preserveReady === true;
 	return (
 		db
 			.prepare(
 				`update weekly_digest_history
-				 set status = 'failed', error = ?, finished_at = ?, updated_at = ?
-				 where id = ? and claim_token = ? and status = 'pending'`,
+				 set status = ?, claim_token = '', error = ?,
+				     finished_at = case when ? then finished_at else ? end,
+				     updated_at = case when ? then updated_at else ? end
+				 where id = ? and claim_token = ? and status in ('pending', 'ready')`,
 			)
-			.run(message, now, now, id, claimToken).changes > 0
+			.run(
+				preserveReady ? "ready" : "failed",
+				message,
+				preserveReady ? 1 : 0,
+				now,
+				preserveReady ? 1 : 0,
+				now,
+				id,
+				claimToken,
+			).changes > 0
 	);
 }
 
-export async function archiveWeeklyDigest(
+async function archiveWeeklyDigestWithStream(
 	weekStart: string,
 	{ signal }: { signal?: AbortSignal } = {},
+	stream: typeof streamPeriodDigest = streamPeriodDigest,
 ) {
 	const claim = claimWeeklyDigest(weekStart);
 	if (!claim.claimed) {
@@ -410,7 +466,7 @@ export async function archiveWeeklyDigest(
 	}
 	const window = localWindowForWeekStart(weekStart);
 	try {
-		const result = await streamPeriodDigest({
+		const result = await stream({
 			period: "week",
 			since: window.since,
 			until: window.until,
@@ -419,7 +475,9 @@ export async function archiveWeeklyDigest(
 			reasoningEffort: "high",
 			serviceTier: "priority",
 			maxTweets: 5_000,
-			maxLinks: 25,
+			maxLinks: 50,
+			reportProfile: "weekly-deep-dive",
+			maxOutputTokens: 16_000,
 			liveSync: false,
 			signal,
 			bufferModelDeltasUntilSuccess: true,
@@ -434,12 +492,35 @@ export async function archiveWeeklyDigest(
 		}
 		return { generated: true as const, id: claim.id, status: "ready" as const };
 	} catch (error) {
-		failWeeklyDigestHistory(claim.id, claim.claimToken, error);
+		const preserved = failWeeklyDigestHistory(
+			claim.id,
+			claim.claimToken,
+			error,
+			{
+				preserveReady: claim.preserveReady,
+			},
+		);
+		if (claim.preserveReady && preserved) {
+			return {
+				generated: false as const,
+				id: claim.id,
+				status: "ready" as const,
+				upgradeFailed: true as const,
+			};
+		}
 		throw error;
 	}
 }
 
+export function archiveWeeklyDigest(
+	weekStart: string,
+	options: { signal?: AbortSignal } = {},
+) {
+	return archiveWeeklyDigestWithStream(weekStart, options);
+}
+
 export const __test__ = {
+	archiveWeeklyDigestWithStream,
 	compactContext,
 	detailFromRow,
 	metadataFromRow,

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetBirdclawPathsForTests } from "./config";
 import { getNativeDb, resetDatabaseForTests } from "./db";
 import { __test__, startupDigestWeeks } from "./weekly-digest-scheduler";
+import { CURRENT_WEEKLY_DIGEST_FORMAT_VERSION } from "./weekly-digest-history";
 
 let temporaryHome = "";
 
@@ -26,7 +27,10 @@ afterEach(() => {
 	rmSync(temporaryHome, { recursive: true, force: true });
 });
 
-function insertReadyWeek(weekStart: string) {
+function insertReadyWeek(
+	weekStart: string,
+	formatVersion = CURRENT_WEEKLY_DIGEST_FORMAT_VERSION,
+) {
 	const end = new Date(`${weekStart}T12:00:00`);
 	end.setDate(end.getDate() + 6);
 	const endDate = [
@@ -38,14 +42,16 @@ function insertReadyWeek(weekStart: string) {
 	getNativeDb({ seedDemoData: false })
 		.prepare(
 			`insert into weekly_digest_history (
-			 id, week_start, week_end, timezone, status, started_at, finished_at,
+			 id, week_start, week_end, timezone, status, format_version,
+			 started_at, finished_at,
 			 created_at, updated_at
-			) values (?, ?, ?, 'Asia/Shanghai', 'ready', ?, ?, ?, ?)`,
+			) values (?, ?, ?, 'Asia/Shanghai', 'ready', ?, ?, ?, ?, ?)`,
 		)
 		.run(
 			`history-${weekStart}`,
 			weekStart,
 			endDate,
+			formatVersion,
 			timestamp,
 			timestamp,
 			timestamp,
@@ -63,6 +69,12 @@ describe("weekly digest scheduler", () => {
 		insertReadyWeek("2026-07-06");
 		insertReadyWeek("2026-07-20");
 		expect(startupDigestWeeks(new Date(2026, 7, 2, 8))).toEqual(["2026-07-13"]);
+	});
+
+	it("queues ready reports created with an older format", () => {
+		insertReadyWeek("2026-07-13");
+		insertReadyWeek("2026-07-20", 1);
+		expect(startupDigestWeeks(new Date(2026, 7, 2, 8))).toEqual(["2026-07-20"]);
 	});
 
 	it("caps historical catch-up to twelve completed weeks", () => {
