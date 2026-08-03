@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 0.8.64 - 2026-08-03
+
+### Changed
+
+- Expand weekly reports into a 7,000–10,000-character deep dive with executive context, six to ten themes, weekly turning points, key viewpoints, disagreements, important links, direct-reading picks, and a next-week watchlist.
+- Balance weekly evidence across local calendar days, preserve high-signal saved and linked posts, backfill unused day quotas during one-day spikes, and raise the weekly output budget without changing daily reports.
+
+### Fixed
+
+- Regenerate older short weekly reports through a versioned, atomic upgrade while keeping their saved content and PDF available on provider failures.
+- Fence upgrade workers against backup restores, prefer richer backup formats, and defer failed legacy upgrades until the next daily scan instead of repeatedly spending model tokens.
+
 ## 0.8.63 - 2026-08-02
 
 ### Fixed
