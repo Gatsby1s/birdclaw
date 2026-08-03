@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.66 - 2026-08-04
+
+### Added
+
+- Route cloud profile-analysis jobs to the local Mac over an authenticated, leased, long-poll bridge so an online Mac can stream ChatGPT results without exposing its OpenAI key to Railway.
+
+### Fixed
+
+- Fall back explicitly to DeepSeek when no Mac worker claims the cloud job or local GPT fails before emitting text, while preventing provider output from being mixed after streaming starts.
+- Abort abandoned long polls, half-open bridge responses, and in-flight GPT work during disconnects or shutdown so stale workers cannot steal or strand later analysis jobs.
+
 ## 0.8.65 - 2026-08-04
 
 ### Fixed
