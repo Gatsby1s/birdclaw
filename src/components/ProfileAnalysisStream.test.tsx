@@ -10,6 +10,46 @@ afterEach(() => {
 });
 
 describe("useProfileAnalysisStream", () => {
+	it("shows profile markdown while the analysis stream is still running", async () => {
+		const encoder = new TextEncoder();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				async () =>
+					new Response(
+						new ReadableStream<Uint8Array>({
+							start(controller) {
+								controller.enqueue(
+									encoder.encode(
+										`${JSON.stringify({ type: "delta", delta: "Live profile insight" })}\n`,
+									),
+								);
+							},
+						}),
+					),
+			),
+		);
+		const queryClient = createTestQueryClient();
+		const { result, unmount } = renderHook(
+			() => useProfileAnalysisStream("alice"),
+			{
+				wrapper: ({ children }) => (
+					<QueryClientProvider client={queryClient}>
+						{children}
+					</QueryClientProvider>
+				),
+			},
+		);
+
+		act(() => result.current.run());
+
+		await waitFor(() =>
+			expect(result.current.markdown).toBe("Live profile insight"),
+		);
+		expect(result.current.loading).toBe(true);
+		unmount();
+	});
+
 	it("reports a stream that closes before a terminal event", async () => {
 		vi.stubGlobal(
 			"fetch",

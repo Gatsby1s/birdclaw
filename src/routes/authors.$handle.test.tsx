@@ -95,6 +95,10 @@ describe("author local timeline route", () => {
 			"href",
 			"/profiles/Alice",
 		);
+		expect(screen.getByRole("link", { name: "Analysis" })).toHaveAttribute(
+			"href",
+			"/profiles/Alice",
+		);
 		await waitFor(() => {
 			const queryCall = fetchMock.mock.calls.find(([input]) =>
 				String(input).includes("/api/query"),
