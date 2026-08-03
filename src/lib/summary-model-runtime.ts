@@ -37,7 +37,7 @@ interface SummaryModelTarget {
 	apiKey?: string;
 }
 
-interface CanonicalAnalysisBody {
+export interface SummaryAnalysisBody {
 	model?: unknown;
 	input?: unknown;
 	max_output_tokens?: unknown;
@@ -78,19 +78,38 @@ function configModel(value: string | undefined) {
 function resolveTargets(
 	options: AnalysisModelOptions,
 	runtime: RuntimeServices,
+	provider?: SummaryModelProvider,
+	allowFailover = true,
 ): SummaryModelTarget[] {
 	const configured = getSummaryModelConfig();
-	const primary = options.model ? "openai" : configured.primary;
+	const primary = provider ?? (options.model ? "openai" : configured.primary);
 	const providers: SummaryModelProvider[] = [primary];
-	if (configured.backup !== primary) providers.push(configured.backup);
+	if (allowFailover && configured.backup !== primary) {
+		providers.push(configured.backup);
+	}
 	return providers
 		.map((provider, index) => {
 			const target = providerSettings(provider, runtime);
-			return index === 0 && options.model
+			return index === 0 && options.model && target.provider === "openai"
 				? { ...target, model: options.model }
 				: target;
 		})
 		.filter((target, index) => index === 0 || Boolean(target.apiKey));
+}
+
+export function resolveSummaryProviderSettings(
+	provider: SummaryModelProvider,
+	options: AnalysisModelOptions = {},
+	runtime: RuntimeServices = defaultRuntimeServices,
+): SummaryModelSettings {
+	const shared = resolveAnalysisModelSettings(options, runtime);
+	const target = providerSettings(provider, runtime);
+	return {
+		...shared,
+		provider,
+		model:
+			provider === "openai" && options.model ? options.model : target.model,
+	};
 }
 
 export function resolveSummaryModelSettings(
@@ -106,7 +125,7 @@ export function resolveSummaryModelSettings(
 	};
 }
 
-function canonicalMessages(body: CanonicalAnalysisBody) {
+function canonicalMessages(body: SummaryAnalysisBody) {
 	if (!Array.isArray(body.input)) return [];
 	return body.input.flatMap((item) => {
 		if (!item || typeof item !== "object") return [];
@@ -121,7 +140,7 @@ function canonicalMessages(body: CanonicalAnalysisBody) {
 	});
 }
 
-function deepSeekRequestBody(body: CanonicalAnalysisBody, model: string) {
+function deepSeekRequestBody(body: SummaryAnalysisBody, model: string) {
 	const maxTokens = Number(body.max_output_tokens);
 	return {
 		model,
@@ -137,7 +156,7 @@ function deepSeekRequestBody(body: CanonicalAnalysisBody, model: string) {
 
 function requestTargetEffect(
 	target: SummaryModelTarget,
-	body: CanonicalAnalysisBody,
+	body: SummaryAnalysisBody,
 	signal: AbortSignal | undefined,
 	runtime: RuntimeServices,
 ) {
@@ -330,10 +349,12 @@ export function streamSummaryAnalysisEffect<T>({
 	fallback,
 	onDelta,
 	onFailover,
+	provider,
+	allowFailover = true,
 	bufferDeltasUntilSuccess = false,
 	delimiterPattern = DEFAULT_DELIMITER_PATTERN,
 }: {
-	body: CanonicalAnalysisBody;
+	body: SummaryAnalysisBody;
 	options: AnalysisModelOptions;
 	signal?: AbortSignal;
 	runtime?: RuntimeServices;
@@ -344,11 +365,13 @@ export function streamSummaryAnalysisEffect<T>({
 		provider: SummaryModelProvider;
 		model: string;
 	}) => void;
+	provider?: SummaryModelProvider;
+	allowFailover?: boolean;
 	bufferDeltasUntilSuccess?: boolean;
 	delimiterPattern?: RegExp;
 }): Effect.Effect<HybridAnalysisResult<T>, Error> {
 	return Effect.gen(function* () {
-		const targets = resolveTargets(options, runtime);
+		const targets = resolveTargets(options, runtime, provider, allowFailover);
 		let lastError: Error | undefined;
 		for (const [index, target] of targets.entries()) {
 			if (index > 0) onFailover?.(target);

@@ -25,6 +25,13 @@ import {
 	verifyLocalCloudBridgeToken,
 } from "./local-cloud-bridge";
 import {
+	localAnalysisSubmissionSchema,
+	startLocalAnalysisBridgeWorker,
+	stopLocalAnalysisBridgeWorker,
+	submitLocalAnalysisEvent,
+	waitForLocalAnalysisClaim,
+} from "./local-analysis-bridge";
+import {
 	startLocalTwitterCollector,
 	stopLocalTwitterCollector,
 } from "./local-twitter-collector";
@@ -367,6 +374,65 @@ async function handleLocalCloudBridge(
 	return true;
 }
 
+async function handleLocalAnalysisBridge(
+	request: IncomingMessage,
+	response: ServerResponse,
+	signal: AbortSignal,
+) {
+	const url = new URL(request.url ?? "/", "http://local");
+	if (url.pathname !== "/api/integrations/local-analysis") return false;
+	if (request.method !== "GET" && request.method !== "POST") {
+		sendText(response, 405, "Method not allowed", "text/plain; charset=utf-8", {
+			allow: "GET, POST",
+		});
+		return true;
+	}
+	if (!isLocalCloudBridgeTokenConfigured()) {
+		sendText(response, 503, "Local analysis bridge is not configured");
+		return true;
+	}
+	const authorization = request.headers.authorization;
+	const candidate = authorization?.startsWith("Bearer ")
+		? authorization.slice("Bearer ".length).trim()
+		: "";
+	if (!verifyLocalCloudBridgeToken(candidate)) {
+		sendText(response, 401, "Unauthorized");
+		return true;
+	}
+	try {
+		const result =
+			request.method === "GET"
+				? {
+						ok: true as const,
+						job: await waitForLocalAnalysisClaim({ signal }),
+					}
+				: {
+						...submitLocalAnalysisEvent(
+							localAnalysisSubmissionSchema.parse(
+								await readLocalBridgeJson(request),
+							),
+						),
+					};
+		sendText(
+			response,
+			200,
+			JSON.stringify(result),
+			"application/json; charset=utf-8",
+		);
+	} catch (error) {
+		sendText(
+			response,
+			400,
+			JSON.stringify({
+				ok: false,
+				message: error instanceof Error ? error.message : String(error),
+			}),
+			"application/json; charset=utf-8",
+		);
+	}
+	return true;
+}
+
 function loginRateKey(request: IncomingMessage) {
 	const realIp = request.headers["x-real-ip"];
 	const realIpValue = Array.isArray(realIp) ? realIp.at(-1) : realIp;
@@ -611,6 +677,10 @@ export async function startProductionServer({
 		response.once("close", abortClosedResponse);
 		try {
 			if (await handleRagMcpHttpRequest(request, response)) return;
+			if (
+				await handleLocalAnalysisBridge(request, response, requestAbort.signal)
+			)
+				return;
 			if (await handleLocalCloudBridge(request, response)) return;
 			if (await handlePrivateWebGate(request, response)) return;
 			if (await sendStaticFile(request, response, clientDir)) return;
@@ -634,6 +704,7 @@ export async function startProductionServer({
 		stopPeriodDigestScheduler();
 		stopWeeklyDigestScheduler();
 		stopLocalCloudBridgeClient();
+		stopLocalAnalysisBridgeWorker();
 		stopLocalTwitterCollector();
 		void stopTwitter6551WorkerManager();
 	});
@@ -646,6 +717,7 @@ export async function startProductionServer({
 		startWeeklyDigestScheduler();
 		startLocalTwitterCollector();
 		startLocalCloudBridgeClient();
+		startLocalAnalysisBridgeWorker();
 		void startTwitter6551WorkerManager().catch((error) => {
 			console.error(
 				`6551 worker startup failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -678,6 +750,7 @@ export async function runProductionServer(options: ProductionServerOptions) {
 			stopPeriodDigestScheduler();
 			stopWeeklyDigestScheduler();
 			stopLocalCloudBridgeClient();
+			stopLocalAnalysisBridgeWorker();
 			stopLocalTwitterCollector();
 			void stopTwitter6551WorkerManager().finally(() => {
 				server.close(() => process.kill(process.pid, signal));

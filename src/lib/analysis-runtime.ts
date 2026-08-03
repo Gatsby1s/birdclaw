@@ -83,8 +83,8 @@ export function createAnalysisRequestBody({
 		...(stream ? { stream: true } : {}),
 		max_output_tokens: maxOutputTokens,
 		input: [
-			{ role: "system", content: system },
-			{ role: "user", content: prompt },
+			{ role: "system" as const, content: system },
+			{ role: "user" as const, content: prompt },
 		],
 	};
 }

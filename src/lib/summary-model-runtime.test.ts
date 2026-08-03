@@ -138,4 +138,34 @@ describe("summary model runtime", () => {
 		).rejects.toThrow("primary interrupted");
 		expect(fetch).toHaveBeenCalledTimes(1);
 	});
+
+	it("can force DeepSeek without trying OpenAI or reusing an OpenAI model override", async () => {
+		const fetch = vi.fn().mockResolvedValue(deepSeekStream());
+		const runtime = createRuntimeServices({
+			fetch,
+			env: (name) =>
+				name === "DEEPSEEK_API_KEY" ? "deepseek-test-key" : undefined,
+		});
+
+		const result = await Effect.runPromise(
+			streamSummaryAnalysisEffect({
+				body: { input: [], stream: true },
+				options: { model: "gpt-5.5" },
+				provider: "deepseek",
+				allowFailover: false,
+				runtime,
+				parse: (value) => value as { answer: string; summary: string },
+				fallback: () => ({ answer: "fallback", summary: "fallback" }),
+			}),
+		);
+
+		expect(fetch).toHaveBeenCalledTimes(1);
+		expect(String(fetch.mock.calls[0]?.[0])).toBe(
+			"https://api.deepseek.com/chat/completions",
+		);
+		expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)).model).toBe(
+			"deepseek-v4-flash",
+		);
+		expect(result.provider).toBe("deepseek");
+	});
 });

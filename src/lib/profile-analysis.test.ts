@@ -6,6 +6,11 @@ import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetBirdclawPathsForTests } from "./config";
 import { getNativeDb, resetDatabaseForTests } from "./db";
+import {
+	__test__ as localAnalysisBridgeTest,
+	submitLocalAnalysisEvent,
+	waitForLocalAnalysisClaim,
+} from "./local-analysis-bridge";
 import { streamProfileAnalysis } from "./profile-analysis";
 import { listTimelineItems } from "./queries";
 
@@ -61,6 +66,13 @@ function openAIProfileAnalysisStream(text = profileAnalysisText) {
 		]
 			.map((event) => `data: ${JSON.stringify(event)}\n\n`)
 			.join(""),
+		{ headers: { "content-type": "text/event-stream" } },
+	);
+}
+
+function deepSeekProfileAnalysisStream(text = profileAnalysisText) {
+	return new Response(
+		`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`,
 		{ headers: { "content-type": "text/event-stream" } },
 	);
 }
@@ -138,18 +150,94 @@ afterEach(() => {
 	resetBirdclawPathsForTests();
 	delete process.env.BIRDCLAW_HOME;
 	delete process.env.OPENAI_API_KEY;
+	delete process.env.DEEPSEEK_API_KEY;
+	delete process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN;
+	delete process.env.BIRDCLAW_LOCAL_ANALYSIS_CLAIM_TIMEOUT_MS;
 	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_CONVERSATION_DELAY_MS;
 	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_RATE_LIMIT_RETRY_MS;
 	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_RATE_LIMIT_MAX_RETRIES;
 	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_ACCOUNT;
 	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_SOURCE;
 	vi.unstubAllGlobals();
+	localAnalysisBridgeTest.resetStore();
 	for (const tempRoot of tempRoots.splice(0)) {
 		rmSync(tempRoot, { recursive: true, force: true });
 	}
 });
 
 describe("profile analysis", () => {
+	it("uses a GPT result claimed by the online Mac bridge", async () => {
+		process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN = "bridge-test-token";
+		const claimPromise = waitForLocalAnalysisClaim({ timeoutMs: 1_000 });
+		const resultPromise = streamProfileAnalysis({
+			handle: "alice",
+			maxPages: 1,
+			maxTweets: 10,
+			maxConversations: 1,
+			maxConversationPages: 1,
+		});
+		const claim = await claimPromise;
+		if (!claim) throw new Error("expected the Mac bridge to claim the job");
+		submitLocalAnalysisEvent({
+			type: "delta",
+			jobId: claim.id,
+			leaseToken: claim.leaseToken,
+			sequence: 1,
+			delta: "# Alice\n\nBuilds local memory tools. (tweet_1)\n",
+		});
+		submitLocalAnalysisEvent({
+			type: "done",
+			jobId: claim.id,
+			leaseToken: claim.leaseToken,
+			sequence: 2,
+			rawText: profileAnalysisText,
+			model: "gpt-5.5",
+		});
+
+		await expect(resultPromise).resolves.toMatchObject({
+			model: "gpt-5.5",
+			analysis: { title: "Alice" },
+			cached: false,
+		});
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it("uses DeepSeek when no Mac bridge is online", async () => {
+		process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN = "bridge-test-token";
+		process.env.BIRDCLAW_LOCAL_ANALYSIS_CLAIM_TIMEOUT_MS = "10";
+		process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => deepSeekProfileAnalysisStream()),
+		);
+		const statuses: string[] = [];
+
+		const result = await streamProfileAnalysis(
+			{
+				handle: "alice",
+				maxPages: 1,
+				maxTweets: 10,
+				maxConversations: 1,
+				maxConversationPages: 1,
+			},
+			{
+				onEvent: (event) => {
+					if (event.type === "status") statuses.push(event.label);
+				},
+			},
+		);
+
+		expect(result).toMatchObject({
+			model: "deepseek-v4-flash",
+			analysis: { title: "Alice" },
+			cached: false,
+		});
+		expect(statuses).toContain("Local ChatGPT unavailable");
+		expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toBe(
+			"https://api.deepseek.com/chat/completions",
+		);
+	});
+
 	it("streams profile markdown and requests a streaming model response", async () => {
 		const deltas: string[] = [];
 		const eventTypes: string[] = [];

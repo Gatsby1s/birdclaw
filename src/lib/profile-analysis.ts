@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Effect } from "effect";
 import { z } from "zod";
 import {
+	type AnalysisModelSettings,
 	createAnalysisRequestBody,
 	extractOpenAIResponseText,
 	parseHybridAnalysis,
@@ -12,6 +13,10 @@ import {
 } from "./config";
 import { getNativeDb } from "./db";
 import { runEffectPromise, tryPromise } from "./effect-runtime";
+import {
+	isLocalAnalysisBrokerConfigured,
+	streamLocalAnalysisJob,
+} from "./local-analysis-bridge";
 import { buildMediaJsonFromIncludes, countTweetMedia } from "./media-includes";
 import { profileFromDbRow } from "./profile-row";
 import { parseJsonField } from "./query-read-model-shared";
@@ -19,6 +24,7 @@ import type { Database } from "./sqlite";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
 import {
 	resolveSummaryModelSettings,
+	resolveSummaryProviderSettings,
 	streamSummaryAnalysisEffect,
 } from "./summary-model-runtime";
 import { tweetEntitiesFromXurl } from "./tweet-render";
@@ -1614,9 +1620,10 @@ function extractResponseText(payload: Record<string, unknown>) {
 function createOpenAIRequestBody(
 	context: ProfileAnalysisContext,
 	options: ProfileAnalysisOptions,
+	settings: AnalysisModelSettings = resolveSummaryModelSettings(options),
 ) {
 	return createAnalysisRequestBody({
-		settings: resolveSummaryModelSettings(options),
+		settings,
 		system:
 			"You are a precise X/Twitter profile analyst. Stream Markdown first, then emit the requested JSON object after the delimiter. Use only supplied data.",
 		prompt: buildPrompt(context),
@@ -1663,25 +1670,86 @@ export function streamProfileAnalysisEffect(
 		}
 
 		handlers.onEvent?.({ type: "start", context, cached: false });
-		emitStatus(handlers, "Streaming AI summary", modelFromOptions(options));
-		const analysisResponse = yield* streamSummaryAnalysisEffect({
-			body: createOpenAIRequestBody(context, options),
-			options,
-			signal: options.signal,
-			parse: (value) => ProfileAnalysisSchema.parse(value),
-			fallback: (markdown) => fallbackAnalysis(context, markdown),
-			delimiterPattern: DELIMITER_PATTERN,
-			onDelta: (delta) => {
-				handlers.onDelta?.(delta);
-				handlers.onEvent?.({ type: "delta", delta });
-			},
-			onFailover: (target) =>
+		const emitDelta = (delta: string) => {
+			handlers.onDelta?.(delta);
+			handlers.onEvent?.({ type: "delta", delta });
+		};
+		let analysisResponse;
+		if (isLocalAnalysisBrokerConfigured()) {
+			emitStatus(
+				handlers,
+				"Checking local ChatGPT bridge",
+				"Waiting briefly for the Mac worker.",
+			);
+			const localResult = yield* tryProfilePromise(() =>
+				streamLocalAnalysisJob(
+					{
+						kind: "profile-analysis",
+						body: createOpenAIRequestBody(context, options),
+					},
+					{
+						signal: options.signal,
+						onClaimed: () =>
+							emitStatus(
+								handlers,
+								"Local Mac connected",
+								"Streaming with ChatGPT.",
+							),
+						onDelta: emitDelta,
+					},
+				),
+			);
+			if (localResult) {
+				const parsed = yield* tryProfileSync(() =>
+					parseAnalysisFromHybridText(context, localResult.rawText),
+				);
+				analysisResponse = {
+					...parsed,
+					value: parsed.analysis,
+					rawText: localResult.rawText,
+					provider: "openai",
+					model: localResult.model,
+				};
+			} else {
 				emitStatus(
 					handlers,
-					"Primary summary model unavailable",
-					`Switching to ${target.provider === "deepseek" ? "DeepSeek V4 / Flash" : "ChatGPT"}.`,
-				),
-		});
+					"Local ChatGPT unavailable",
+					"Switching to DeepSeek V4 / Flash.",
+				);
+				const deepSeekSettings = resolveSummaryProviderSettings(
+					"deepseek",
+					options,
+				);
+				analysisResponse = yield* streamSummaryAnalysisEffect({
+					body: createOpenAIRequestBody(context, options, deepSeekSettings),
+					options,
+					provider: "deepseek",
+					allowFailover: false,
+					signal: options.signal,
+					parse: (value) => ProfileAnalysisSchema.parse(value),
+					fallback: (markdown) => fallbackAnalysis(context, markdown),
+					delimiterPattern: DELIMITER_PATTERN,
+					onDelta: emitDelta,
+				});
+			}
+		} else {
+			emitStatus(handlers, "Streaming AI summary", modelFromOptions(options));
+			analysisResponse = yield* streamSummaryAnalysisEffect({
+				body: createOpenAIRequestBody(context, options),
+				options,
+				signal: options.signal,
+				parse: (value) => ProfileAnalysisSchema.parse(value),
+				fallback: (markdown) => fallbackAnalysis(context, markdown),
+				delimiterPattern: DELIMITER_PATTERN,
+				onDelta: emitDelta,
+				onFailover: (target) =>
+					emitStatus(
+						handlers,
+						"Primary summary model unavailable",
+						`Switching to ${target.provider === "deepseek" ? "DeepSeek V4 / Flash" : "ChatGPT"}.`,
+					),
+			});
+		}
 		const completedModel = analysisResponse.model ?? modelFromOptions(options);
 		const updatedAt = yield* tryProfileSync(() =>
 			writeSyncCache(resultCacheKey(context, options), {

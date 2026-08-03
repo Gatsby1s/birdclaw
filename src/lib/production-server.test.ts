@@ -11,6 +11,10 @@ import {
 	withTestHome,
 } from "../test/test-home";
 import { startProductionServer } from "./production-server";
+import {
+	__test__ as localAnalysisBridgeTest,
+	streamLocalAnalysisJob,
+} from "./local-analysis-bridge";
 import { getTwitter6551RuntimeStatus } from "./twitter-6551";
 
 const schedulerMocks = vi.hoisted(() => ({
@@ -51,6 +55,7 @@ afterEach(() => {
 		rmSync(directory, { recursive: true, force: true });
 	}
 	vi.clearAllMocks();
+	localAnalysisBridgeTest.resetStore();
 });
 
 describe("production server", () => {
@@ -329,6 +334,84 @@ describe("production server", () => {
 				expect(getTwitter6551RuntimeStatus()).toMatchObject({
 					lastLocalHeartbeatAt: heartbeatAfterLive.lastLocalHeartbeatAt,
 					localBridgeIngestedCount: heartbeatAfterLive.localBridgeIngestedCount,
+				});
+			} finally {
+				await new Promise<void>((resolve) => server.close(() => resolve()));
+			}
+		});
+	});
+
+	it("lets the authenticated Mac worker claim and complete a cloud analysis job", async () => {
+		await withTestHome(async () => {
+			process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN = "bridge-secret";
+			const packageRoot = mkdtempSync(
+				path.join(os.tmpdir(), "birdclaw-production-analysis-bridge-"),
+			);
+			tempDirs.push(packageRoot);
+			const clientDir = path.join(packageRoot, "client");
+			mkdirSync(clientDir, { recursive: true });
+			const serverEntry = path.join(packageRoot, "server.mjs");
+			writeFileSync(
+				serverEntry,
+				`export default { fetch() { return new Response("private"); } };`,
+			);
+			const server = await startProductionServer({
+				packageRoot,
+				clientDir,
+				serverEntry,
+				port: 0,
+			});
+			try {
+				const address = server.address();
+				if (!address || typeof address === "string") {
+					throw new Error("no address");
+				}
+				const url = `http://127.0.0.1:${String(address.port)}/api/integrations/local-analysis`;
+				await expect(
+					fetch(url).then((response) => response.status),
+				).resolves.toBe(401);
+				const resultPromise = streamLocalAnalysisJob(
+					{
+						kind: "profile-analysis",
+						body: {
+							input: [
+								{ role: "system", content: "Analyze." },
+								{ role: "user", content: "Context." },
+							],
+							stream: true,
+						},
+					},
+					{ claimTimeoutMs: 1_000 },
+				);
+				const claimResponse = await fetch(url, {
+					headers: { authorization: "Bearer bridge-secret" },
+				});
+				expect(claimResponse.status).toBe(200);
+				const claimPayload = (await claimResponse.json()) as {
+					ok: boolean;
+					job: { id: string; leaseToken: string };
+				};
+				expect(claimPayload.ok).toBe(true);
+				const accepted = await fetch(url, {
+					method: "POST",
+					headers: {
+						authorization: "Bearer bridge-secret",
+						"content-type": "application/json",
+					},
+					body: JSON.stringify({
+						type: "done",
+						jobId: claimPayload.job.id,
+						leaseToken: claimPayload.job.leaseToken,
+						sequence: 1,
+						rawText: "GPT result",
+						model: "gpt-5.5",
+					}),
+				});
+				expect(accepted.status).toBe(200);
+				await expect(accepted.json()).resolves.toMatchObject({ ok: true });
+				await expect(resultPromise).resolves.toEqual({
+					rawText: "GPT result",
+					model: "gpt-5.5",
 				});
 			} finally {
 				await new Promise<void>((resolve) => server.close(() => resolve()));
