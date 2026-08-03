@@ -48,6 +48,9 @@ afterEach(() => {
 	resetBirdclawPathsForTests();
 	delete process.env.BIRDCLAW_HOME;
 	delete process.env.OPENAI_API_KEY;
+	delete process.env.DEEPSEEK_API_KEY;
+	delete process.env.DEEPSEEK_BASE_URL;
+	delete process.env.DEEPSEEK_MODEL;
 	delete process.env.BIRDCLAW_AI_MODEL;
 	delete process.env.BIRDCLAW_OPENAI_REASONING_EFFORT;
 	delete process.env.BIRDCLAW_OPENAI_SERVICE_TIER;
@@ -466,6 +469,49 @@ describe("search discussion", () => {
 			}),
 		).rejects.toThrow("OPENAI_API_KEY is not set");
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("falls back to configured DeepSeek when OpenAI credentials are unavailable", async () => {
+		delete process.env.OPENAI_API_KEY;
+		process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+		const text =
+			'# DeepSeek fallback\n\nThe configured backup completed the discussion.\n\n---\n{"title":"DeepSeek fallback","summary":"The backup model completed the discussion","themes":[],"tensions":[],"followUps":[],"sourceTweetIds":[],"sourceDmConversationIds":[]}';
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(
+				streamResponse(
+					`${sseFrame({ choices: [{ delta: { content: text } }] })}data: [DONE]\n\n`,
+				),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const options = {
+			query: "local-first",
+			mode: "local" as const,
+			limit: 20,
+		};
+		const result = await streamSearchDiscussion({ ...options, refresh: true });
+		const cached = await streamSearchDiscussion(options);
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+			"https://api.deepseek.com/chat/completions",
+		);
+		expect(result.discussion.title).toBe("DeepSeek fallback");
+		expect(result.markdown).toContain(
+			"The configured backup completed the discussion.",
+		);
+		expect(result.model).toBe("deepseek-v4-flash");
+		expect(cached).toMatchObject({
+			cached: true,
+			model: "deepseek-v4-flash",
+			discussion: { title: "DeepSeek fallback" },
+		});
+		const body = JSON.parse(
+			String(fetchMock.mock.calls[0]?.[1]?.body),
+		) as Record<string, unknown>;
+		expect(body.model).toBe("deepseek-v4-flash");
+		expect(JSON.stringify(body.messages)).toContain("local-first");
 	});
 
 	it("surfaces OpenAI response failures", async () => {

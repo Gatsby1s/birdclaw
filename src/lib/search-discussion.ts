@@ -6,7 +6,6 @@ import {
 	type HybridAnalysisResult,
 	parseHybridAnalysis,
 	resolveAnalysisModelSettings,
-	streamHybridAnalysisEffect,
 } from "./analysis-runtime";
 import { prefetchCachedAvatarsForProfileIdsEffect } from "./avatar-cache";
 import {
@@ -24,6 +23,10 @@ import {
 import { parseJsonField } from "./query-read-model-shared";
 import { listTimelineItems } from "./timeline-read-model";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
+import {
+	resolveSummaryModelSettings,
+	streamSummaryAnalysisEffect,
+} from "./summary-model-runtime";
 import {
 	syncTweetSearchEffect,
 	type SyncTweetSearchResult,
@@ -525,7 +528,11 @@ function prefetchDiscussionAvatars(context: SearchDiscussionContext) {
 }
 
 function modelFromOptions(options: SearchDiscussionOptions) {
-	return resolveAnalysisModelSettings(options).model;
+	return resolveSummaryModelSettings(options).model;
+}
+
+function providerFromOptions(options: SearchDiscussionOptions) {
+	return resolveSummaryModelSettings(options).provider;
 }
 
 function reasoningEffortFromOptions(options: SearchDiscussionOptions) {
@@ -541,7 +548,8 @@ function cacheKey(
 	options: SearchDiscussionOptions,
 ) {
 	return [
-		"search-discussion:v1",
+		"search-discussion:v2",
+		providerFromOptions(options),
 		modelFromOptions(options),
 		reasoningEffortFromOptions(options),
 		serviceTierFromOptions(options),
@@ -682,7 +690,7 @@ function createOpenAIRequestBody(
 	options: SearchDiscussionOptions,
 ) {
 	return createAnalysisRequestBody({
-		settings: resolveAnalysisModelSettings(options),
+		settings: resolveSummaryModelSettings(options),
 		system:
 			"You are a precise local Twitter archive analyst. Stream Markdown first, then emit the requested JSON object after the delimiter. Do not invent events not present in the dataset.",
 		prompt: buildPrompt(context),
@@ -702,7 +710,7 @@ function completeOpenAIStreamEffect(
 			writeSyncCache(resolvedCacheKey, {
 				discussion: stream.value,
 				markdown: stream.markdown,
-				model: modelFromOptions(options),
+				model: stream.model ?? modelFromOptions(options),
 				reasoningEffort: reasoningEffortFromOptions(options),
 				serviceTier: serviceTierFromOptions(options),
 				usage: stream.usage,
@@ -713,7 +721,7 @@ function completeOpenAIStreamEffect(
 			context,
 			discussion: stream.value,
 			markdown: stream.markdown,
-			model: modelFromOptions(options),
+			model: stream.model ?? modelFromOptions(options),
 			reasoningEffort: reasoningEffortFromOptions(options),
 			serviceTier: serviceTierFromOptions(options),
 			cached: false,
@@ -809,8 +817,9 @@ export function streamSearchDiscussionEffect(
 		}
 
 		handlers.onEvent?.({ type: "start", context, cached: false });
-		const stream = yield* streamHybridAnalysisEffect({
+		const stream = yield* streamSummaryAnalysisEffect({
 			body: createOpenAIRequestBody(context, options),
+			options,
 			signal: options.signal,
 			parse: (value) => SearchDiscussionSchema.parse(value),
 			fallback: (markdown) => fallbackDiscussion(context, markdown),
