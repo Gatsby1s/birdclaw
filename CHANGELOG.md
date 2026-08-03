@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.68 - 2026-08-04
+
+### Fixed
+
+- Honor the configured primary and backup summary providers in Discuss, allowing Railway to fall back from unavailable OpenAI credentials to the configured DeepSeek model.
+- Keep cached discussion results separated by provider and record the model that actually completed the streamed analysis.
+
 ## 0.8.67 - 2026-08-04
 
 ### Fixed
