@@ -236,6 +236,21 @@ describe("profile analysis", () => {
 		expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toBe(
 			"https://api.deepseek.com/chat/completions",
 		);
+		const deepSeekRequest = JSON.parse(
+			String(vi.mocked(fetch).mock.calls[0]?.[1]?.body),
+		) as { messages?: Array<{ role?: string; content?: string }> };
+		expect(deepSeekRequest.messages?.[0]?.content).toContain(
+			"Simplified Chinese",
+		);
+		expect(deepSeekRequest.messages?.[0]?.content).toContain(
+			"Preserve source quotations, @handles, URLs, tickers",
+		);
+		expect(deepSeekRequest.messages?.[1]?.content).toContain(
+			"entire analysis in natural Simplified Chinese",
+		);
+		expect(deepSeekRequest.messages?.[1]?.content).toContain(
+			"Preserve tweet quotations, @handles, URLs, tickers",
+		);
 	});
 
 	it("streams profile markdown and requests a streaming model response", async () => {
@@ -266,8 +281,51 @@ describe("profile analysis", () => {
 		);
 		const request = vi.mocked(fetch).mock.calls[0];
 		expect(request).toBeDefined();
-		expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+		const requestBody = JSON.parse(String(request?.[1]?.body)) as {
+			stream?: boolean;
+			input?: Array<{ role?: string; content?: string }>;
+		};
+		expect(requestBody).toMatchObject({
 			stream: true,
+		});
+		expect(requestBody.input?.[0]?.content).toContain("Simplified Chinese");
+		expect(requestBody.input?.[0]?.content).toContain("all JSON string values");
+		expect(requestBody.input?.[0]?.content).toContain(
+			"Preserve source quotations, @handles, URLs, tickers",
+		);
+		expect(requestBody.input?.[1]?.content).toContain(
+			"entire analysis in natural Simplified Chinese",
+		);
+		expect(requestBody.input?.[1]?.content).toContain(
+			"Preserve tweet quotations, @handles, URLs, tickers",
+		);
+		expect(requestBody.input?.[1]?.content).toContain(
+			"Do not use English headings or English narrative",
+		);
+	});
+
+	it("uses Chinese fallback copy while preserving source identifiers", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => openAIProfileAnalysisStream("\n---\n{invalid-json")),
+		);
+
+		const result = await streamProfileAnalysis({
+			handle: "alice",
+			maxPages: 1,
+			maxTweets: 10,
+			maxConversations: 1,
+			maxConversationPages: 1,
+			refresh: true,
+		});
+
+		expect(result.analysis).toMatchObject({
+			title: "账号分析：@alice",
+			summary: "模型未返回分析摘要。",
+			voice: "结构化输出不足，暂时无法判断表达风格。",
+			conversationStyle: "结构化输出不足，暂时无法判断互动风格。",
+			sourceTweetIds: ["tweet_1"],
+			sourceHandles: ["alice"],
 		});
 	});
 
@@ -507,6 +565,14 @@ describe("profile analysis", () => {
 		expect(cached.cached).toBe(true);
 		expect(mocks.listUserTweetsEffect).toHaveBeenCalledTimes(1);
 		expect(fetch).toHaveBeenCalledTimes(1);
+		const resultCache = getNativeDb()
+			.prepare(
+				"select cache_key from sync_cache where cache_key like 'profile-analysis:result:%'",
+			)
+			.get() as { cache_key?: string } | undefined;
+		expect(resultCache?.cache_key).toContain(
+			"profile-analysis:result:zh-cn-v1:",
+		);
 	});
 
 	it("keeps unchanged backfilled tweets to one FTS row", async () => {

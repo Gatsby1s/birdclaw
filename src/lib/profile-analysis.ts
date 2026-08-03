@@ -179,6 +179,7 @@ const DEFAULT_RATE_LIMIT_MAX_RETRIES = 1;
 const XURL_PAGE_SIZE = 100;
 const MAX_PROMPT_DATA_CHARS = 1_200_000;
 const DELIMITER_PATTERN = /\n---\s*\n/;
+const PROFILE_ANALYSIS_PROMPT_VERSION = "zh-cn-v1";
 
 function toError(error: unknown) {
 	return error instanceof Error ? error : new Error(String(error));
@@ -1011,6 +1012,7 @@ function resultCacheKey(
 ) {
 	return [
 		"profile-analysis:result",
+		PROFILE_ANALYSIS_PROMPT_VERSION,
 		modelFromOptions(options),
 		reasoningEffortFromOptions(options),
 		serviceTierFromOptions(options),
@@ -1567,6 +1569,9 @@ Prompt conversation tweets: ${String(conversationCount)} of ${String(context.con
 Write a high-signal Markdown profile analysis from the supplied X/Twitter data.
 
 Requirements:
+- Write the entire analysis in natural Simplified Chinese. This applies to every Markdown heading, paragraph, label, and all human-readable JSON string values.
+- Preserve tweet quotations, @handles, URLs, tickers, product or project names, and proper nouns in their original language when translating them would reduce accuracy.
+- Do not use English headings or English narrative unless a source term has no established Chinese equivalent.
 - Summarize who this person appears to be, what they care about, and what kind of attention they attract.
 - Separate authored profile evidence from conversation/reply evidence.
 - Cover recurring topics, tone, technical interests, social graph hints, interaction style, and likely follow-up angles.
@@ -1585,13 +1590,13 @@ function fallbackAnalysis(
 	markdown: string,
 ): ProfileAnalysis {
 	return {
-		title: `Profile analysis: @${context.handle}`,
+		title: `账号分析：@${context.handle}`,
 		summary:
 			markdown.replaceAll(/\s+/g, " ").trim().slice(0, 320) ||
-			"No model summary was returned.",
-		voice: "Not enough structured output was returned to classify voice.",
+			"模型未返回分析摘要。",
+		voice: "结构化输出不足，暂时无法判断表达风格。",
 		themes: [],
-		conversationStyle: "Not enough structured output was returned.",
+		conversationStyle: "结构化输出不足，暂时无法判断互动风格。",
 		notableSignals: [],
 		risks: [],
 		followUps: [],
@@ -1625,7 +1630,7 @@ function createOpenAIRequestBody(
 	return createAnalysisRequestBody({
 		settings,
 		system:
-			"You are a precise X/Twitter profile analyst. Stream Markdown first, then emit the requested JSON object after the delimiter. Use only supplied data.",
+			"You are a precise X/Twitter profile analyst writing for a Simplified Chinese reader. Write every human-readable part of the response in natural Simplified Chinese, including Markdown headings and all JSON string values. Preserve source quotations, @handles, URLs, tickers, product or project names, and proper nouns when translation would reduce accuracy. Stream Markdown first, then emit the requested JSON object after the delimiter. Use only supplied data.",
 		prompt: buildPrompt(context),
 		stream: true,
 	});
