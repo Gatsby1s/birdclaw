@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.67 - 2026-08-04
+
+### Fixed
+
+- Require profile-analysis Markdown and structured summaries from both local GPT and cloud DeepSeek to use natural Simplified Chinese while preserving source quotations, handles, URLs, tickers, and proper names.
+- Invalidate cached English profile analyses after the language-contract update and keep malformed-response fallback copy in Chinese.
+
 ## 0.8.66 - 2026-08-04
 
 ### Added
