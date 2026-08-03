@@ -44,6 +44,27 @@ const profileUser = {
 		"https://pbs.twimg.com/profile_images/42/avatar_normal.jpg",
 };
 
+const profileAnalysisText =
+	'# Alice\n\nBuilds local memory tools. (tweet_1)\n\n---\n{"title":"Alice","summary":"Builds local memory tools.","voice":"Practical","themes":[{"title":"Local memory","summary":"Recurring local-first tooling.","tweetIds":["tweet_1"],"handles":["alice"]}],"conversationStyle":"Direct","notableSignals":["Conversation replies reinforce memory angle."],"risks":[],"followUps":["Ask about sync."],"sourceTweetIds":["tweet_1"],"sourceHandles":["alice"]}';
+
+function openAIProfileAnalysisStream(text = profileAnalysisText) {
+	return new Response(
+		[
+			{
+				type: "response.output_text.delta",
+				delta: text,
+			},
+			{
+				type: "response.completed",
+				response: { id: "resp_profile", usage: { output_tokens: 120 } },
+			},
+		]
+			.map((event) => `data: ${JSON.stringify(event)}\n\n`)
+			.join(""),
+		{ headers: { "content-type": "text/event-stream" } },
+	);
+}
+
 beforeEach(() => {
 	setupTempHome();
 	process.env.OPENAI_API_KEY = "test-key";
@@ -108,12 +129,7 @@ beforeEach(() => {
 	);
 	vi.stubGlobal(
 		"fetch",
-		vi.fn(async () =>
-			Response.json({
-				output_text:
-					'# Alice\n\nBuilds local memory tools. (tweet_1)\n\n---\n{"title":"Alice","summary":"Builds local memory tools.","voice":"Practical","themes":[{"title":"Local memory","summary":"Recurring local-first tooling.","tweetIds":["tweet_1"],"handles":["alice"]}],"conversationStyle":"Direct","notableSignals":["Conversation replies reinforce memory angle."],"risks":[],"followUps":["Ask about sync."],"sourceTweetIds":["tweet_1"],"sourceHandles":["alice"]}',
-			}),
-		),
+		vi.fn(async () => openAIProfileAnalysisStream()),
 	);
 });
 
@@ -134,6 +150,39 @@ afterEach(() => {
 });
 
 describe("profile analysis", () => {
+	it("streams profile markdown and requests a streaming model response", async () => {
+		const deltas: string[] = [];
+		const eventTypes: string[] = [];
+
+		const result = await streamProfileAnalysis(
+			{
+				handle: "alice",
+				maxPages: 1,
+				maxTweets: 10,
+				maxConversations: 1,
+				maxConversationPages: 1,
+			},
+			{
+				onDelta: (delta) => deltas.push(delta),
+				onEvent: (event) => eventTypes.push(event.type),
+			},
+		);
+
+		expect(deltas.join("")).toBe(
+			"# Alice\n\nBuilds local memory tools. (tweet_1)\n",
+		);
+		expect(eventTypes).toContain("delta");
+		expect(eventTypes.at(-1)).toBe("done");
+		expect(result.markdown).toBe(
+			"# Alice\n\nBuilds local memory tools. (tweet_1)",
+		);
+		const request = vi.mocked(fetch).mock.calls[0];
+		expect(request).toBeDefined();
+		expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+			stream: true,
+		});
+	});
+
 	it("builds profile context from local tweets without xurl", async () => {
 		const db = getNativeDb();
 		const now = "2026-06-01T00:00:00.000Z";

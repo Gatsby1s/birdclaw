@@ -5,8 +5,6 @@ import {
 	createAnalysisRequestBody,
 	extractOpenAIResponseText,
 	parseHybridAnalysis,
-	requestHybridAnalysisEffect,
-	resolveAnalysisModelSettings,
 } from "./analysis-runtime";
 import {
 	resolveProfileAnalysisSource,
@@ -19,6 +17,10 @@ import { profileFromDbRow } from "./profile-row";
 import { parseJsonField } from "./query-read-model-shared";
 import type { Database } from "./sqlite";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
+import {
+	resolveSummaryModelSettings,
+	streamSummaryAnalysisEffect,
+} from "./summary-model-runtime";
 import { tweetEntitiesFromXurl } from "./tweet-render";
 import type {
 	ProfileRecord,
@@ -306,15 +308,15 @@ function resolveAccount(db: Database, accountId?: string) {
 }
 
 function modelFromOptions(options: ProfileAnalysisOptions) {
-	return resolveAnalysisModelSettings(options).model;
+	return resolveSummaryModelSettings(options).model;
 }
 
 function reasoningEffortFromOptions(options: ProfileAnalysisOptions) {
-	return resolveAnalysisModelSettings(options).reasoningEffort;
+	return resolveSummaryModelSettings(options).reasoningEffort;
 }
 
 function serviceTierFromOptions(options: ProfileAnalysisOptions) {
-	return resolveAnalysisModelSettings(options).serviceTier;
+	return resolveSummaryModelSettings(options).serviceTier;
 }
 
 function tweetUrl(handle: string, id: string) {
@@ -1614,11 +1616,11 @@ function createOpenAIRequestBody(
 	options: ProfileAnalysisOptions,
 ) {
 	return createAnalysisRequestBody({
-		settings: resolveAnalysisModelSettings(options),
+		settings: resolveSummaryModelSettings(options),
 		system:
-			"You are a precise X/Twitter profile analyst. Use only supplied data. Return Markdown plus the requested JSON after the delimiter.",
+			"You are a precise X/Twitter profile analyst. Stream Markdown first, then emit the requested JSON object after the delimiter. Use only supplied data.",
 		prompt: buildPrompt(context),
-		stream: false,
+		stream: true,
 	});
 }
 
@@ -1661,19 +1663,31 @@ export function streamProfileAnalysisEffect(
 		}
 
 		handlers.onEvent?.({ type: "start", context, cached: false });
-		emitStatus(handlers, "Summarizing with AI", modelFromOptions(options));
-		const analysisResponse = yield* requestHybridAnalysisEffect({
+		emitStatus(handlers, "Streaming AI summary", modelFromOptions(options));
+		const analysisResponse = yield* streamSummaryAnalysisEffect({
 			body: createOpenAIRequestBody(context, options),
+			options,
 			signal: options.signal,
 			parse: (value) => ProfileAnalysisSchema.parse(value),
 			fallback: (markdown) => fallbackAnalysis(context, markdown),
 			delimiterPattern: DELIMITER_PATTERN,
+			onDelta: (delta) => {
+				handlers.onDelta?.(delta);
+				handlers.onEvent?.({ type: "delta", delta });
+			},
+			onFailover: (target) =>
+				emitStatus(
+					handlers,
+					"Primary summary model unavailable",
+					`Switching to ${target.provider === "deepseek" ? "DeepSeek V4 / Flash" : "ChatGPT"}.`,
+				),
 		});
+		const completedModel = analysisResponse.model ?? modelFromOptions(options);
 		const updatedAt = yield* tryProfileSync(() =>
 			writeSyncCache(resultCacheKey(context, options), {
 				analysis: analysisResponse.value,
 				markdown: analysisResponse.markdown,
-				model: modelFromOptions(options),
+				model: completedModel,
 				reasoningEffort: reasoningEffortFromOptions(options),
 				serviceTier: serviceTierFromOptions(options),
 			}),
@@ -1682,14 +1696,12 @@ export function streamProfileAnalysisEffect(
 			context,
 			analysis: analysisResponse.value,
 			markdown: analysisResponse.markdown,
-			model: modelFromOptions(options),
+			model: completedModel,
 			reasoningEffort: reasoningEffortFromOptions(options),
 			serviceTier: serviceTierFromOptions(options),
 			cached: false,
 			updatedAt,
 		};
-		handlers.onDelta?.(result.markdown);
-		handlers.onEvent?.({ type: "delta", delta: result.markdown });
 		handlers.onEvent?.({ type: "done", result });
 		return result;
 	});
