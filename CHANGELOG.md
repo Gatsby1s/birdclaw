@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.69 - 2026-08-07
+
+### Added
+
+- Add and edit persistent profile remarks directly from mobile author pages, while preserving them across X Remark sync, backups, and restores.
+
+### Fixed
+
+- Keep Home filters in the normal mobile document flow so All, Unreplied, and Replied remain aligned, visible, and tappable in portrait and landscape layouts.
+- Isolate profile remarks by stable account identity so recycled handles cannot leak or overwrite another account's note.
+
 ## 0.8.68 - 2026-08-04
 
 ### Fixed
