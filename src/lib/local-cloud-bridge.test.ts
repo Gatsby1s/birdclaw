@@ -100,6 +100,19 @@ describe("local cloud bridge", () => {
 		});
 
 		home.switchHome();
+		home.db
+			.prepare(
+				`insert into birdclaw_profile_notes (
+					note_key, identifier, additional_name, remark, updated_at
+				) values (?, ?, ?, ?, ?)`,
+			)
+			.run(
+				"id:profile:test",
+				"profile:test",
+				"test",
+				"Edited from the mobile profile",
+				"2026-07-31T08:00:30.000Z",
+			);
 		await importLocalCloudBridgeBatch(batch);
 		await importLocalCloudBridgeBatch(batch);
 
@@ -140,6 +153,11 @@ describe("local cloud bridge", () => {
 				.prepare("select count(*) as count from xremark_profile_notes")
 				.get(),
 		).toEqual({ count: 0 });
+		expect(
+			home.db
+				.prepare("select remark from birdclaw_profile_notes where note_key = ?")
+				.get("id:profile:test"),
+		).toEqual({ remark: "Edited from the mobile profile" });
 	});
 
 	it("does not send a heartbeat until local collection is healthy", async () => {

@@ -7,7 +7,7 @@ import { resetBirdclawPathsForTests } from "#/lib/config";
 import { resetDatabaseForTests } from "#/lib/db";
 import { Route } from "./xremark";
 
-type XRemarkMethod = "GET" | "POST";
+type XRemarkMethod = "GET" | "PATCH" | "POST";
 type XRemarkHandler = (context: {
 	request: Request;
 }) => Response | Promise<Response>;
@@ -21,6 +21,7 @@ function routeHandler(method: XRemarkMethod) {
 }
 
 const GET = routeHandler("GET");
+const PATCH = routeHandler("PATCH");
 const POST = routeHandler("POST");
 let tempDir = "";
 
@@ -38,6 +39,39 @@ afterEach(() => {
 });
 
 describe("api X Remark route", () => {
+	it("creates and updates a BirdClaw profile note without an X Remark import", async () => {
+		const created = await PATCH({
+			request: new Request("http://localhost/api/xremark", {
+				method: "PATCH",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					identifier: "profile_user_42",
+					handle: "Ada",
+					remark: "Met on mobile",
+				}),
+			}),
+		});
+
+		expect(created.status).toBe(200);
+		expect(await created.json()).toMatchObject({
+			imported: false,
+			annotation: {
+				identifier: "42",
+				handle: "ada",
+				remark: "Met on mobile",
+			},
+		});
+
+		const lookup = await GET({
+			request: new Request(
+				"http://localhost/api/xremark?handle=ada&identifier=profile_user_42",
+			),
+		});
+		expect(await lookup.json()).toMatchObject({
+			annotation: { identifier: "42", remark: "Met on mobile" },
+		});
+	});
+
 	it("imports a valid X Remark backup and reports its status", async () => {
 		const response = await POST({
 			request: new Request("http://localhost/api/xremark", {

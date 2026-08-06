@@ -10,6 +10,7 @@ import {
 	enrichTimelineItemsWithXRemark,
 	getXRemarkSyncStatus,
 	importXRemarkBackup,
+	saveBirdclawProfileRemark,
 	xRemarkBackupSchema,
 } from "./xremark";
 
@@ -160,6 +161,97 @@ describe("X Remark backup import", () => {
 		expect(
 			getXRemarkSyncStatus({ handle: "second" }, db).annotation,
 		).toMatchObject({ remark: "New" });
+	});
+
+	it("keeps a BirdClaw-edited remark when a newer X Remark snapshot arrives", () => {
+		const db = createDatabase();
+		importXRemarkBackup(
+			backup([
+				{
+					identifier: "42",
+					additionalName: "ada",
+					remark: "Extension note",
+					description: "Keep the imported context",
+					tags: [1],
+				},
+			]),
+			db,
+		);
+		saveBirdclawProfileRemark(
+			{
+				identifier: "profile_user_42",
+				handle: "Ada",
+				remark: "Edited from mobile",
+			},
+			db,
+		);
+
+		const next = backup(
+			[
+				{
+					identifier: "42",
+					additionalName: "ada",
+					remark: "New extension note",
+					description: "Updated imported context",
+					tags: [1, 2],
+				},
+			],
+			"backup_2",
+		);
+		next.database.backupTime += 1;
+		importXRemarkBackup(next, db);
+
+		expect(
+			getXRemarkSyncStatus({ handle: "ada", identifier: "profile_user_42" }, db)
+				.annotation,
+		).toMatchObject({
+			identifier: "42",
+			remark: "Edited from mobile",
+			description: "Updated imported context",
+			tags: ["Founder", "AI"],
+		});
+	});
+
+	it("keeps ID-backed notes isolated when an X handle is reused", () => {
+		const db = createDatabase();
+		saveBirdclawProfileRemark(
+			{
+				identifier: "profile_user_41",
+				handle: "reused",
+				remark: "Belongs to the first account",
+			},
+			db,
+		);
+		saveBirdclawProfileRemark(
+			{
+				identifier: "profile_user_42",
+				handle: "reused",
+				remark: "Belongs to the second account",
+			},
+			db,
+		);
+
+		expect(
+			getXRemarkSyncStatus(
+				{ handle: "reused", identifier: "profile_user_41" },
+				db,
+			).annotation,
+		).toMatchObject({
+			identifier: "41",
+			remark: "Belongs to the first account",
+		});
+		expect(
+			getXRemarkSyncStatus(
+				{ handle: "reused", identifier: "profile_user_42" },
+				db,
+			).annotation,
+		).toMatchObject({
+			identifier: "42",
+			remark: "Belongs to the second account",
+		});
+		expect(
+			db.prepare("select count(*) as count from birdclaw_profile_notes").get(),
+		).toEqual({ count: 2 });
 	});
 
 	it("rejects an older snapshot without replacing current notes", () => {

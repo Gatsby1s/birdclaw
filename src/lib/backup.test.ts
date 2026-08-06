@@ -47,6 +47,7 @@ function switchHome(prefix: string) {
 function clearData() {
 	const db = getNativeDb();
 	db.exec(`
+	delete from birdclaw_profile_notes;
 	delete from weekly_digest_history;
 	delete from period_digest_history;
     delete from discussion_history;
@@ -213,6 +214,13 @@ function seedBackupFixture() {
       entity_kind, entity_id, model, score, summary, reasoning, updated_at
     ) values (
       'tweet', 'tweet_2025', 'test-model', 88, 'useful', 'has context', '2025-01-09T00:00:00.000Z'
+    );
+
+    insert into birdclaw_profile_notes (
+      note_key, identifier, additional_name, remark, updated_at
+    ) values (
+      'id:profile_friend', 'profile_friend', 'friend',
+      'Met at a local-first meetup', '2025-01-09T00:30:00.000Z'
     );
 
     insert into discussion_history (
@@ -477,6 +485,7 @@ describe("text backup", () => {
 			mutes: 1,
 			tweet_actions: 1,
 			ai_scores: 1,
+			birdclaw_profile_notes: 1,
 			discussion_history: 1,
 			period_digest_history: 1,
 			weekly_digest_history: 1,
@@ -549,6 +558,12 @@ describe("text backup", () => {
 		switchHome("birdclaw-backup-dst-");
 		const staleDb = getNativeDb();
 		staleDb.exec(`
+	  insert into birdclaw_profile_notes (
+	    note_key, identifier, additional_name, remark, updated_at
+	  ) values (
+	    'id:stale_profile', 'stale_profile', 'stale_handle', 'Stale note',
+	    '2026-04-01T00:00:00.000Z'
+	  );
 	  insert into discussion_history (
 	    id, root_id, cache_key, title, summary, query, source, mode, range,
 	    model, reasoning_effort, service_tier, context_hash, counts_json,
@@ -662,6 +677,21 @@ describe("text backup", () => {
 		expect(
 			getNativeDb({ seedDemoData: false })
 				.prepare(
+					"select additional_name, remark from birdclaw_profile_notes where note_key = 'id:profile_friend'",
+				)
+				.get(),
+		).toEqual({
+			additional_name: "friend",
+			remark: "Met at a local-first meetup",
+		});
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare("select count(*) as count from birdclaw_profile_notes")
+				.get(),
+		).toEqual({ count: 1 });
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare(
 					"select digest_date, status, markdown from period_digest_history",
 				)
 				.all(),
@@ -691,7 +721,7 @@ describe("text backup", () => {
 		expect(validation.ok).toBe(true);
 	}, 20000);
 
-	it("emits byte-identical schema-v5 data and still accepts schema v2", async () => {
+	it("emits byte-identical schema-v6 data and still accepts schema v2", async () => {
 		switchHome("birdclaw-backup-stable-src-");
 		seedBackupFixture();
 		const firstRepoPath = makeTempDir("birdclaw-backup-stable-first-");
@@ -700,9 +730,9 @@ describe("text backup", () => {
 		const first = await exportBackup({ repoPath: firstRepoPath });
 		const second = await exportBackup({ repoPath: secondRepoPath });
 
-		expect(first.manifest.schemaVersion).toBe(5);
+		expect(first.manifest.schemaVersion).toBe(6);
 		expect(first.manifest.backupHash).toBe(
-			"56da2d481996826355c9d89942a7a33295ac0bbf4831f198fcf0b388dad409f5",
+			"a8b9ef0d6fc3d47724c0778f3b0de9d776674ebd7d22b0d8512d7a9334339625",
 		);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);
@@ -908,6 +938,7 @@ describe("text backup", () => {
 			mutes: 1,
 			tweet_actions: 1,
 			ai_scores: 1,
+			birdclaw_profile_notes: 1,
 			discussion_history: 1,
 			period_digest_history: 1,
 			weekly_digest_history: 1,

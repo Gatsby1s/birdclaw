@@ -375,6 +375,18 @@ describe("database init", () => {
 				"last_seen_at",
 			]),
 		);
+		const profileNoteColumnNames = db
+			.prepare("pragma table_info(birdclaw_profile_notes)")
+			.all() as Array<{ name: string }>;
+		expect(profileNoteColumnNames.map((column) => column.name)).toEqual(
+			expect.arrayContaining([
+				"note_key",
+				"identifier",
+				"additional_name",
+				"remark",
+				"updated_at",
+			]),
+		);
 
 		const busyTimeout = db.pragma("busy_timeout", {
 			simple: true,
@@ -417,7 +429,7 @@ describe("database init", () => {
 				.all()
 				.map((column) => (column as { name: string }).name),
 		).toContain("format_version");
-		expect(db.pragma("user_version", { simple: true })).toBe(11);
+		expect(db.pragma("user_version", { simple: true })).toBe(12);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -446,7 +458,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(11);
+		expect(db.pragma("user_version", { simple: true })).toBe(12);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {
