@@ -50,6 +50,14 @@ describe("author local timeline route", () => {
 		window.localStorage.setItem("birdclaw:selected-account-id", "acct_studio");
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/xremark") {
+				return Response.json({
+					imported: false,
+					annotationCount: 0,
+					matchedProfileCount: 0,
+					annotation: null,
+				});
+			}
 			if (url.pathname === "/api/status") {
 				return Response.json({
 					stats: { home: 2, mentions: 0, dms: 0, needsReply: 0, inbox: 0 },
@@ -135,6 +143,76 @@ describe("author local timeline route", () => {
 			expect(queryUrls.some((url) => url.includes("search=history"))).toBe(
 				true,
 			);
+		});
+	});
+
+	it("edits a private note directly on the author timeline", async () => {
+		let storedRemark = "Original note";
+		let patchBody: Record<string, unknown> | null = null;
+		const fetchMock = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/xremark") {
+					if (init?.method === "PATCH") {
+						patchBody = JSON.parse(String(init.body)) as Record<
+							string,
+							unknown
+						>;
+						storedRemark = String(patchBody.remark);
+					}
+					return Response.json({
+						imported: true,
+						annotationCount: 1,
+						matchedProfileCount: 1,
+						annotation: {
+							identifier: "profile_alice",
+							handle: "Alice",
+							remark: storedRemark,
+							description: "",
+							tags: [],
+						},
+					});
+				}
+				if (url.pathname === "/api/status") {
+					return Response.json({
+						stats: {
+							home: 1,
+							mentions: 0,
+							dms: 0,
+							needsReply: 0,
+							inbox: 0,
+						},
+						transport: { statusText: "local" },
+						accounts: [],
+						archives: [],
+					});
+				}
+				if (url.pathname === "/api/query") {
+					return Response.json({
+						resource: "home",
+						items: [timelineItem("tweet_alice_note", "Alice note history")],
+					});
+				}
+				throw new Error(`Unexpected fetch ${url.toString()}`);
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<AuthorTimelineRouteView handle="Alice" />);
+
+		expect(await screen.findByText("Original note")).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
+		const textarea = screen.getByRole("textbox", { name: "Private note" });
+		expect(textarea).toHaveValue("Original note");
+		fireEvent.change(textarea, { target: { value: "Updated on mobile" } });
+		fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+
+		await waitFor(() => expect(patchBody).not.toBeNull());
+		expect(await screen.findByText("Updated on mobile")).toBeInTheDocument();
+		expect(patchBody).toMatchObject({
+			identifier: "profile_alice",
+			handle: "Alice",
+			remark: "Updated on mobile",
 		});
 	});
 });

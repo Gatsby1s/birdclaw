@@ -1,19 +1,28 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { z } from "zod";
 import { xRemarkSyncStatusSchema } from "#/lib/api-contracts";
+import { databaseWriteEffect } from "#/lib/database-writer";
 import {
 	jsonResponse,
+	requestJsonEffect,
 	runRouteEffect,
 	sensitiveRequestErrorResponse,
 } from "#/lib/http-effect";
 import {
 	getXRemarkSyncStatus,
 	importXRemarkBackup,
+	saveBirdclawProfileRemark,
 	XRemarkImportError,
 	xRemarkBackupSchema,
 } from "#/lib/xremark";
 
 const MAX_BACKUP_BYTES = 25 * 1024 * 1024;
+const profileRemarkRequestSchema = z.object({
+	handle: z.string().trim().min(1).max(100),
+	identifier: z.string().trim().min(1).max(128).optional(),
+	remark: z.string().max(10_000),
+});
 
 type BoundedJsonResult =
 	| { ok: true; value: unknown }
@@ -83,6 +92,31 @@ export const Route = createFileRoute("/api/xremark")({
 					),
 				);
 			},
+			PATCH: ({ request }) =>
+				runRouteEffect(
+					Effect.gen(function* () {
+						const denied = sensitiveRequestErrorResponse(request);
+						if (denied) return denied;
+
+						const input = yield* requestJsonEffect(request, {});
+						const parsed = profileRemarkRequestSchema.safeParse(input);
+						if (!parsed.success) {
+							return jsonResponse(
+								{
+									ok: false,
+									message:
+										"Choose a profile and keep the note under 10,000 characters.",
+								},
+								{ status: 400 },
+							);
+						}
+
+						const status = yield* databaseWriteEffect((db) =>
+							saveBirdclawProfileRemark(parsed.data, db),
+						);
+						return jsonResponse(xRemarkSyncStatusSchema.parse(status));
+					}),
+				),
 			POST: ({ request }) =>
 				runRouteEffect(
 					Effect.gen(function* () {

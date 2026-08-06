@@ -945,6 +945,23 @@ function ensureXRemarkLiveSyncTable(db: Database) {
   `);
 }
 
+function ensureBirdclawProfileNotesTable(db: Database) {
+	db.exec(`
+    create table if not exists birdclaw_profile_notes (
+      note_key text primary key,
+      identifier text,
+      additional_name text not null,
+      remark text not null default '',
+      updated_at text not null
+    );
+
+    create index if not exists idx_birdclaw_profile_notes_identifier
+      on birdclaw_profile_notes(identifier);
+    create index if not exists idx_birdclaw_profile_notes_handle
+      on birdclaw_profile_notes(lower(additional_name));
+  `);
+}
+
 function ensureTwitter6551EventTable(db: Database) {
 	db.exec(`
     create table if not exists twitter6551_events (
@@ -1197,6 +1214,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		up: (db) => {
 			ensureWeeklyDigestHistoryTable(db);
 			ensureWeeklyDigestFormatVersionColumn(db);
+		},
+	},
+	{
+		version: 12,
+		name: "add BirdClaw profile note overrides",
+		up: (db) => {
+			ensureBirdclawProfileNotesTable(db);
 		},
 	},
 ];

@@ -56,7 +56,7 @@ export const mainColumnDmClass =
 
 /* Sticky page header at top of the main column. */
 export const pageHeaderClass =
-	"sticky top-0 z-20 flex flex-col gap-0 border-b border-[var(--line)] bg-[color:color-mix(in_srgb,var(--bg)_85%,transparent)] backdrop-blur";
+	"flex flex-col gap-0 border-b border-[var(--line)] bg-[var(--bg)] min-[900px]:sticky min-[900px]:top-0 min-[900px]:z-20 min-[900px]:bg-[color:color-mix(in_srgb,var(--bg)_85%,transparent)] min-[900px]:backdrop-blur";
 
 export const pageHeaderRowClass =
 	"flex items-center justify-between gap-3 px-4 pt-3 pb-2";

@@ -74,6 +74,13 @@ type XRemarkImportStateRow = {
 	annotation_count: number;
 };
 
+type BirdclawProfileNoteRow = {
+	identifier: string | null;
+	additional_name: string;
+	remark: string;
+	updated_at: string;
+};
+
 type AnnotationMaps = {
 	byIdentifier: Map<string, XRemarkAnnotation>;
 	byHandle: Map<string, XRemarkAnnotation>;
@@ -97,6 +104,16 @@ function identifierCandidates(profileId: string) {
 		candidates.push(`profile_user_${profileId}`);
 	}
 	return candidates;
+}
+
+function storedProfileIdentifier(value: string | null | undefined) {
+	const identifier = value?.trim() ?? "";
+	if (!identifier) return "";
+	if (identifier.startsWith("profile_user_")) {
+		const externalId = identifier.slice("profile_user_".length);
+		if (isStableXIdentifier(externalId)) return externalId;
+	}
+	return identifier;
 }
 
 function timestampToIso(value: number | null | undefined) {
@@ -165,6 +182,52 @@ function listAnnotationMaps(db: Database): AnnotationMaps {
 		}
 		const handle = normalizedHandle(annotation.handle);
 		if (handle && !row.stable_profile_exists) byHandle.set(handle, annotation);
+	}
+
+	const overrides = db
+		.prepare(
+			`select identifier, additional_name, remark, updated_at
+			 from birdclaw_profile_notes
+			 order by updated_at asc`,
+		)
+		.all() as BirdclawProfileNoteRow[];
+	for (const override of overrides) {
+		const handle = normalizedHandle(override.additional_name);
+		const storedIdentifier = storedProfileIdentifier(override.identifier);
+		const existing =
+			(storedIdentifier
+				? identifierCandidates(storedIdentifier)
+						.map((identifier) => byIdentifier.get(identifier))
+						.find(Boolean)
+				: undefined) ?? (handle ? byHandle.get(handle) : undefined);
+		const identifier =
+			storedIdentifier || existing?.identifier || `handle:${handle}`;
+		const annotation: XRemarkAnnotation = {
+			identifier,
+			handle: override.additional_name || existing?.handle || handle,
+			...(existing?.displayName ? { displayName: existing.displayName } : {}),
+			remark: override.remark,
+			description: existing?.description ?? "",
+			tags: existing?.tags ?? [],
+			...(existing?.category ? { category: existing.category } : {}),
+			sourceUpdatedAt: override.updated_at,
+		};
+		const identifiers = new Set([
+			...identifierCandidates(identifier),
+			...(existing ? identifierCandidates(existing.identifier) : []),
+		]);
+		const handles = storedIdentifier
+			? new Set<string>()
+			: new Set([handle, normalizedHandle(existing?.handle)].filter(Boolean));
+		if (hasVisibleAnnotation(annotation)) {
+			for (const candidate of identifiers) {
+				byIdentifier.set(candidate, annotation);
+			}
+			for (const candidate of handles) byHandle.set(candidate, annotation);
+		} else {
+			for (const candidate of identifiers) byIdentifier.delete(candidate);
+			for (const candidate of handles) byHandle.delete(candidate);
+		}
 	}
 
 	return { byIdentifier, byHandle };
@@ -245,6 +308,47 @@ export function enrichEmbeddedTweetsWithXRemark(
 ) {
 	const maps = listAnnotationMaps(db);
 	return items.map((item) => enrichEmbeddedTweet(item, maps));
+}
+
+export function saveBirdclawProfileRemark(
+	input: { handle: string; identifier?: string; remark: string },
+	db: Database = getNativeDb({ seedDemoData: false }),
+) {
+	const handle = normalizedHandle(input.handle);
+	if (!handle) throw new Error("A valid X handle is required.");
+	const identifier = storedProfileIdentifier(input.identifier);
+	if (identifier.length > 128)
+		throw new Error("Profile identifier is too long.");
+	const remark = input.remark.trim();
+	if (remark.length > 10_000) {
+		throw new Error("Profile note must be 10,000 characters or fewer.");
+	}
+	const noteKey = identifier ? `id:${identifier}` : `handle:${handle}`;
+	const updatedAt = new Date().toISOString();
+
+	db.prepare(
+		`delete from birdclaw_profile_notes
+		 where note_key <> ?
+		   and (
+		     (? <> '' and identifier = ?)
+		     or (identifier is null and lower(additional_name) = ?)
+		   )`,
+	).run(noteKey, identifier, identifier, handle);
+	db.prepare(
+		`insert into birdclaw_profile_notes (
+		   note_key, identifier, additional_name, remark, updated_at
+		 ) values (?, ?, ?, ?, ?)
+		 on conflict(note_key) do update set
+		   identifier = excluded.identifier,
+		   additional_name = excluded.additional_name,
+		   remark = excluded.remark,
+		   updated_at = excluded.updated_at`,
+	).run(noteKey, identifier || null, handle, remark, updatedAt);
+
+	return getXRemarkSyncStatus(
+		{ handle, ...(identifier ? { identifier } : {}) },
+		db,
+	);
 }
 
 export class XRemarkImportError extends Error {

@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink, UserSearch } from "lucide-react";
 import { useState } from "react";
 import { AvatarChip } from "#/components/AvatarChip";
 import { cleanProfileHandle } from "#/components/ProfileAnalysisStream";
+import { ProfileRemarkEditor } from "#/components/ProfileRemarkEditor";
 import { TimelineCard } from "#/components/TimelineCard";
 import {
 	TimelineFeedShell,
@@ -125,6 +126,12 @@ export function AuthorTimelineRouteView({ handle }: { handle: string }) {
 										{profile.bio}
 									</p>
 								) : null}
+								<ProfileRemarkEditor
+									className="mt-3"
+									handle={profile?.handle ?? cleanHandle}
+									identifier={profile?.id}
+									key={cleanHandle.toLowerCase()}
+								/>
 								{profile ? (
 									<div className="mt-3 flex flex-wrap gap-4 text-[13px] text-[var(--ink-soft)]">
 										<span>
