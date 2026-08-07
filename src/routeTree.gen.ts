@@ -37,6 +37,7 @@ import { Route as ApiStatusRouteImport } from './routes/api/status'
 import { Route as ApiSettingsRouteImport } from './routes/api/settings'
 import { Route as ApiSearchDiscussionRouteImport } from './routes/api/search-discussion'
 import { Route as ApiQueryRouteImport } from './routes/api/query'
+import { Route as ApiProfilePriorityRouteImport } from './routes/api/profile-priority'
 import { Route as ApiProfileHydrateRouteImport } from './routes/api/profile-hydrate'
 import { Route as ApiProfileAnalysisRouteImport } from './routes/api/profile-analysis'
 import { Route as ApiPeriodDigestHistoryRouteImport } from './routes/api/period-digest-history'
@@ -196,6 +197,11 @@ const ApiQueryRoute = ApiQueryRouteImport.update({
   path: '/api/query',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiProfilePriorityRoute = ApiProfilePriorityRouteImport.update({
+  id: '/api/profile-priority',
+  path: '/api/profile-priority',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiProfileHydrateRoute = ApiProfileHydrateRouteImport.update({
   id: '/api/profile-hydrate',
   path: '/api/profile-hydrate',
@@ -320,6 +326,7 @@ export interface FileRoutesByFullPath {
   '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
   '/api/profile-analysis': typeof ApiProfileAnalysisRoute
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
+  '/api/profile-priority': typeof ApiProfilePriorityRoute
   '/api/query': typeof ApiQueryRoute
   '/api/search-discussion': typeof ApiSearchDiscussionRoute
   '/api/settings': typeof ApiSettingsRoute
@@ -368,6 +375,7 @@ export interface FileRoutesByTo {
   '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
   '/api/profile-analysis': typeof ApiProfileAnalysisRoute
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
+  '/api/profile-priority': typeof ApiProfilePriorityRoute
   '/api/query': typeof ApiQueryRoute
   '/api/search-discussion': typeof ApiSearchDiscussionRoute
   '/api/settings': typeof ApiSettingsRoute
@@ -417,6 +425,7 @@ export interface FileRoutesById {
   '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
   '/api/profile-analysis': typeof ApiProfileAnalysisRoute
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
+  '/api/profile-priority': typeof ApiProfilePriorityRoute
   '/api/query': typeof ApiQueryRoute
   '/api/search-discussion': typeof ApiSearchDiscussionRoute
   '/api/settings': typeof ApiSettingsRoute
@@ -467,6 +476,7 @@ export interface FileRouteTypes {
     | '/api/period-digest-history'
     | '/api/profile-analysis'
     | '/api/profile-hydrate'
+    | '/api/profile-priority'
     | '/api/query'
     | '/api/search-discussion'
     | '/api/settings'
@@ -515,6 +525,7 @@ export interface FileRouteTypes {
     | '/api/period-digest-history'
     | '/api/profile-analysis'
     | '/api/profile-hydrate'
+    | '/api/profile-priority'
     | '/api/query'
     | '/api/search-discussion'
     | '/api/settings'
@@ -563,6 +574,7 @@ export interface FileRouteTypes {
     | '/api/period-digest-history'
     | '/api/profile-analysis'
     | '/api/profile-hydrate'
+    | '/api/profile-priority'
     | '/api/query'
     | '/api/search-discussion'
     | '/api/settings'
@@ -612,6 +624,7 @@ export interface RootRouteChildren {
   ApiPeriodDigestHistoryRoute: typeof ApiPeriodDigestHistoryRoute
   ApiProfileAnalysisRoute: typeof ApiProfileAnalysisRoute
   ApiProfileHydrateRoute: typeof ApiProfileHydrateRoute
+  ApiProfilePriorityRoute: typeof ApiProfilePriorityRoute
   ApiQueryRoute: typeof ApiQueryRoute
   ApiSearchDiscussionRoute: typeof ApiSearchDiscussionRoute
   ApiSettingsRoute: typeof ApiSettingsRoute
@@ -827,6 +840,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiQueryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/profile-priority': {
+      id: '/api/profile-priority'
+      path: '/api/profile-priority'
+      fullPath: '/api/profile-priority'
+      preLoaderRoute: typeof ApiProfilePriorityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/profile-hydrate': {
       id: '/api/profile-hydrate'
       path: '/api/profile-hydrate'
@@ -1001,6 +1021,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPeriodDigestHistoryRoute: ApiPeriodDigestHistoryRoute,
   ApiProfileAnalysisRoute: ApiProfileAnalysisRoute,
   ApiProfileHydrateRoute: ApiProfileHydrateRoute,
+  ApiProfilePriorityRoute: ApiProfilePriorityRoute,
   ApiQueryRoute: ApiQueryRoute,
   ApiSearchDiscussionRoute: ApiSearchDiscussionRoute,
   ApiSettingsRoute: ApiSettingsRoute,

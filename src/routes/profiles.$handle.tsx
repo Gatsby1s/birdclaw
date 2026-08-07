@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { AvatarChip } from "#/components/AvatarChip";
+import { ProfileSpecialFollowButton } from "#/components/ProfileSpecialFollowButton";
 import { TweetRichText } from "#/components/TweetRichText";
 import { XRemarkAnnotationCard } from "#/components/XRemarkAnnotation";
 import {
@@ -215,6 +216,12 @@ export function ProfileRouteView({ handle }: { handle: string }) {
 								profilesByHandle={profilesByHandle}
 							/>
 						) : null}
+
+						<ProfileSpecialFollowButton
+							handle={xRemarkHandle}
+							identifier={profile?.id}
+							key={`special-follow:${profile?.id ?? xRemarkHandle.toLowerCase()}`}
+						/>
 
 						{xRemarkQuery.data?.annotation ? (
 							<XRemarkAnnotationCard

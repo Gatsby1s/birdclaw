@@ -58,6 +58,13 @@ export interface XRemarkSyncStatus {
 	annotation?: XRemarkAnnotation | null;
 }
 
+export interface ProfilePriorityStatus {
+	handle: string;
+	identifier?: string;
+	specialFollow: boolean;
+	updatedAt?: string;
+}
+
 export interface XRemarkLiveSyncStatus {
 	paired: boolean;
 	connected: boolean;
@@ -396,6 +403,8 @@ export interface TimelineQuery {
 	includeQualityReason?: boolean;
 	likedOnly?: boolean;
 	bookmarkedOnly?: boolean;
+	priorityProfileIds?: string[];
+	priorityHandleOnlyHandles?: string[];
 	limit?: number;
 }
 

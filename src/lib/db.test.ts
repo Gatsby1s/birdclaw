@@ -77,6 +77,39 @@ afterEach(() => {
 });
 
 describe("database init", () => {
+	it("migrates the independent profile-priority table with a false default", () => {
+		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-"));
+		tempDirs.push(tempDir);
+		process.env.BIRDCLAW_HOME = tempDir;
+
+		const db = getNativeDb({ seedDemoData: false });
+		const columns = db
+			.prepare("pragma table_info(birdclaw_profile_priorities)")
+			.all() as Array<{ name: string; dflt_value: string | null }>;
+		expect(columns.map((column) => column.name)).toEqual([
+			"priority_key",
+			"identifier",
+			"additional_name",
+			"is_special_follow",
+			"updated_at",
+		]);
+		expect(
+			columns.find((column) => column.name === "is_special_follow")?.dflt_value,
+		).toBe("0");
+		db.prepare(
+			`insert into birdclaw_profile_priorities (
+			 priority_key, additional_name, updated_at
+			) values (?, ?, ?)`,
+		).run("handle:ada", "ada", "2026-08-01T00:00:00.000Z");
+		expect(
+			db
+				.prepare(
+					"select is_special_follow from birdclaw_profile_priorities where priority_key = 'handle:ada'",
+				)
+				.get(),
+		).toEqual({ is_special_follow: 0 });
+	});
+
 	it("seeds demo data after an initial unseeded open", () => {
 		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-"));
 		tempDirs.push(tempDir);
@@ -430,7 +463,7 @@ describe("database init", () => {
 				.all()
 				.map((column) => (column as { name: string }).name),
 		).toContain("format_version");
-		expect(db.pragma("user_version", { simple: true })).toBe(13);
+		expect(db.pragma("user_version", { simple: true })).toBe(14);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -459,7 +492,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(13);
+		expect(db.pragma("user_version", { simple: true })).toBe(14);
 	});
 
 	it("migrates v12 profile notes without overriding imported descriptions", () => {
@@ -496,7 +529,7 @@ describe("database init", () => {
 				)
 				.get(),
 		).toEqual({ remark: "Legacy local remark", description: null });
-		expect(db.pragma("user_version", { simple: true })).toBe(13);
+		expect(db.pragma("user_version", { simple: true })).toBe(14);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AvatarChip } from "#/components/AvatarChip";
 import { cleanProfileHandle } from "#/components/ProfileAnalysisStream";
 import { ProfileRemarkEditor } from "#/components/ProfileRemarkEditor";
+import { ProfileSpecialFollowButton } from "#/components/ProfileSpecialFollowButton";
 import { TimelineCard } from "#/components/TimelineCard";
 import {
 	TimelineFeedShell,
@@ -126,6 +127,12 @@ export function AuthorTimelineRouteView({ handle }: { handle: string }) {
 										{profile.bio}
 									</p>
 								) : null}
+								<ProfileSpecialFollowButton
+									className="mt-3"
+									handle={profile?.handle ?? cleanHandle}
+									identifier={profile?.id}
+									key={`special-follow:${profile?.id ?? cleanHandle.toLowerCase()}`}
+								/>
 								<ProfileRemarkEditor
 									className="mt-3"
 									handle={profile?.handle ?? cleanHandle}

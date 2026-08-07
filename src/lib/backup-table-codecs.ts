@@ -824,6 +824,38 @@ const definitions = {
 			],
 		},
 	},
+	birdclaw_profile_priorities: {
+		exportSql: `
+      select priority_key, identifier, additional_name, is_special_follow, updated_at
+      from birdclaw_profile_priorities
+      order by priority_key
+    `,
+		...fixedShard(
+			"data/profile-priorities.jsonl",
+			"birdclaw_profile_priorities",
+		),
+		merge: {
+			order: 22,
+			sql: `
+      insert into birdclaw_profile_priorities (
+        priority_key, identifier, additional_name, is_special_follow, updated_at
+      ) values (?, ?, ?, ?, ?)
+      on conflict(priority_key) do update set
+        identifier = excluded.identifier,
+        additional_name = excluded.additional_name,
+        is_special_follow = excluded.is_special_follow,
+        updated_at = excluded.updated_at
+      where excluded.updated_at >= birdclaw_profile_priorities.updated_at
+      `,
+			columns: [
+				"priority_key",
+				"identifier",
+				"additional_name",
+				"is_special_follow",
+				"updated_at",
+			],
+		},
+	},
 	discussion_history: {
 		exportSql: `
       select id, root_id, parent_id, cache_key, title, summary, query,
@@ -837,7 +869,7 @@ const definitions = {
     `,
 		...fixedShard("data/discussions/history.jsonl", "discussion_history"),
 		merge: {
-			order: 22,
+			order: 23,
 			sql: `
       insert into discussion_history (
         id, root_id, parent_id, cache_key, title, summary, query, question,
@@ -928,7 +960,7 @@ const definitions = {
     `,
 		...fixedShard("data/digests/daily-history.jsonl", "period_digest_history"),
 		merge: {
-			order: 23,
+			order: 24,
 			sql: `
       insert into period_digest_history (
         id, digest_date, timezone, status, attempt_count, window_since,
@@ -1002,7 +1034,7 @@ const definitions = {
     `,
 		...fixedShard("data/digests/weekly-history.jsonl", "weekly_digest_history"),
 		merge: {
-			order: 24,
+			order: 25,
 			sql: `
       insert into weekly_digest_history (
 		id, week_start, week_end, timezone, status, attempt_count, format_version,

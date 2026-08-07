@@ -505,6 +505,8 @@ export function listTimelineItems({
 	includeQualityReason = false,
 	likedOnly = false,
 	bookmarkedOnly = false,
+	priorityProfileIds = [],
+	priorityHandleOnlyHandles = [],
 	limit = 18,
 }: TimelineQuery): TimelineItem[] {
 	const db = getReadDb();
@@ -537,6 +539,8 @@ export function listTimelineItems({
 		!until?.trim() &&
 		includeReplies &&
 		qualityFilter === "all";
+	const hasPriorityAuthors =
+		priorityProfileIds.length > 0 || priorityHandleOnlyHandles.length > 0;
 
 	if (likedOnly || bookmarkedOnly) {
 		// This CTE is also reused by the all-account dedupe subquery below. Keep
@@ -699,7 +703,7 @@ export function listTimelineItems({
     `;
 		params.push(author.trim().replace(/^@/, ""), stateAccount?.trim() ?? "");
 		where = "where 1 = 1";
-	} else if (canUseRecentEdgeWindow) {
+	} else if (canUseRecentEdgeWindow && !hasPriorityAuthors) {
 		usedRecentEdgeWindow = true;
 		timelineEdgesCte = `
       with timeline_edges as (
@@ -803,6 +807,21 @@ export function listTimelineItems({
 		params.push(ftsSearch);
 	}
 
+	const priorityOrderClauses: string[] = [];
+	if (priorityProfileIds.length > 0) {
+		priorityOrderClauses.push("p.id in (select value from json_each(?))");
+		params.push(JSON.stringify(priorityProfileIds));
+	}
+	if (priorityHandleOnlyHandles.length > 0) {
+		priorityOrderClauses.push(
+			"(p.id like 'profile_handle_%' and lower(p.handle) in (select value from json_each(?)))",
+		);
+		params.push(JSON.stringify(priorityHandleOnlyHandles));
+	}
+	const priorityOrder =
+		priorityOrderClauses.length > 0
+			? `case when ${priorityOrderClauses.join(" or ")} then 0 else 1 end,`
+			: "";
 	params.push(limit);
 
 	const buildTimelineSelectSql = (timelineEdgesSql: string) => `
@@ -903,7 +922,7 @@ export function listTimelineItems({
       left join profiles qp on qp.id = qt.author_profile_id
       ${join}
       ${where}
-      order by t.created_at desc, t.id desc
+	      order by ${priorityOrder} t.created_at desc, t.id desc
       limit ?
       `;
 
