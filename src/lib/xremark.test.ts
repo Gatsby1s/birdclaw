@@ -163,7 +163,7 @@ describe("X Remark backup import", () => {
 		).toMatchObject({ remark: "New" });
 	});
 
-	it("keeps a BirdClaw-edited remark when a newer X Remark snapshot arrives", () => {
+	it("keeps both BirdClaw-edited text fields when a newer X Remark snapshot arrives", () => {
 		const db = createDatabase();
 		importXRemarkBackup(
 			backup([
@@ -182,6 +182,7 @@ describe("X Remark backup import", () => {
 				identifier: "profile_user_42",
 				handle: "Ada",
 				remark: "Edited from mobile",
+				description: "Edited detailed context from mobile",
 			},
 			db,
 		);
@@ -207,7 +208,7 @@ describe("X Remark backup import", () => {
 		).toMatchObject({
 			identifier: "42",
 			remark: "Edited from mobile",
-			description: "Updated imported context",
+			description: "Edited detailed context from mobile",
 			tags: ["Founder", "AI"],
 		});
 	});
@@ -252,6 +253,81 @@ describe("X Remark backup import", () => {
 		expect(
 			db.prepare("select count(*) as count from birdclaw_profile_notes").get(),
 		).toEqual({ count: 2 });
+	});
+
+	it("does not merge an imported same-handle account into another ID override", () => {
+		const db = createDatabase();
+		importXRemarkBackup(
+			backup([
+				{
+					identifier: "42",
+					additionalName: "reused",
+					remark: "Imported account 42",
+					description: "Description for account 42",
+				},
+			]),
+			db,
+		);
+		saveBirdclawProfileRemark(
+			{
+				identifier: "profile_user_41",
+				handle: "reused",
+				remark: "Local account 41",
+			},
+			db,
+		);
+
+		expect(
+			getXRemarkSyncStatus(
+				{ handle: "reused", identifier: "profile_user_41" },
+				db,
+			).annotation,
+		).toMatchObject({
+			identifier: "41",
+			remark: "Local account 41",
+			description: "",
+		});
+		expect(
+			getXRemarkSyncStatus(
+				{ handle: "reused", identifier: "profile_user_42" },
+				db,
+			).annotation,
+		).toMatchObject({
+			identifier: "42",
+			remark: "Imported account 42",
+			description: "Description for account 42",
+		});
+	});
+
+	it("keeps the description when a handle-only override gains a stable ID", () => {
+		const db = createDatabase();
+		saveBirdclawProfileRemark(
+			{
+				handle: "ada",
+				remark: "Handle-only remark",
+				description: "Handle-only description",
+			},
+			db,
+		);
+		saveBirdclawProfileRemark(
+			{
+				identifier: "profile_user_42",
+				handle: "ada",
+				remark: "Now ID-backed",
+			},
+			db,
+		);
+
+		expect(
+			getXRemarkSyncStatus({ handle: "ada", identifier: "profile_user_42" }, db)
+				.annotation,
+		).toMatchObject({
+			remark: "Now ID-backed",
+			description: "Handle-only description",
+		});
+		expect(
+			db.prepare("select count(*) as count from birdclaw_profile_notes").get(),
+		).toEqual({ count: 1 });
 	});
 
 	it("rejects an older snapshot without replacing current notes", () => {

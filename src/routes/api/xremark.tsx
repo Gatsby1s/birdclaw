@@ -21,7 +21,8 @@ const MAX_BACKUP_BYTES = 25 * 1024 * 1024;
 const profileRemarkRequestSchema = z.object({
 	handle: z.string().trim().min(1).max(100),
 	identifier: z.string().trim().min(1).max(128).optional(),
-	remark: z.string().max(10_000),
+	remark: z.string().max(80),
+	description: z.string().max(300).optional(),
 });
 
 type BoundedJsonResult =
@@ -105,7 +106,7 @@ export const Route = createFileRoute("/api/xremark")({
 								{
 									ok: false,
 									message:
-										"Choose a profile and keep the note under 10,000 characters.",
+										"Choose a profile and keep both note fields within their character limits.",
 								},
 								{ status: 400 },
 							);

@@ -78,6 +78,7 @@ type BirdclawProfileNoteRow = {
 	identifier: string | null;
 	additional_name: string;
 	remark: string;
+	description: string | null;
 	updated_at: string;
 };
 
@@ -186,7 +187,7 @@ function listAnnotationMaps(db: Database): AnnotationMaps {
 
 	const overrides = db
 		.prepare(
-			`select identifier, additional_name, remark, updated_at
+			`select identifier, additional_name, remark, description, updated_at
 			 from birdclaw_profile_notes
 			 order by updated_at asc`,
 		)
@@ -194,12 +195,13 @@ function listAnnotationMaps(db: Database): AnnotationMaps {
 	for (const override of overrides) {
 		const handle = normalizedHandle(override.additional_name);
 		const storedIdentifier = storedProfileIdentifier(override.identifier);
-		const existing =
-			(storedIdentifier
-				? identifierCandidates(storedIdentifier)
-						.map((identifier) => byIdentifier.get(identifier))
-						.find(Boolean)
-				: undefined) ?? (handle ? byHandle.get(handle) : undefined);
+		const existing = storedIdentifier
+			? identifierCandidates(storedIdentifier)
+					.map((identifier) => byIdentifier.get(identifier))
+					.find(Boolean)
+			: handle
+				? byHandle.get(handle)
+				: undefined;
 		const identifier =
 			storedIdentifier || existing?.identifier || `handle:${handle}`;
 		const annotation: XRemarkAnnotation = {
@@ -207,7 +209,7 @@ function listAnnotationMaps(db: Database): AnnotationMaps {
 			handle: override.additional_name || existing?.handle || handle,
 			...(existing?.displayName ? { displayName: existing.displayName } : {}),
 			remark: override.remark,
-			description: existing?.description ?? "",
+			description: override.description ?? existing?.description ?? "",
 			tags: existing?.tags ?? [],
 			...(existing?.category ? { category: existing.category } : {}),
 			sourceUpdatedAt: override.updated_at,
@@ -311,7 +313,12 @@ export function enrichEmbeddedTweetsWithXRemark(
 }
 
 export function saveBirdclawProfileRemark(
-	input: { handle: string; identifier?: string; remark: string },
+	input: {
+		handle: string;
+		identifier?: string;
+		remark: string;
+		description?: string;
+	},
 	db: Database = getNativeDb({ seedDemoData: false }),
 ) {
 	const handle = normalizedHandle(input.handle);
@@ -320,10 +327,30 @@ export function saveBirdclawProfileRemark(
 	if (identifier.length > 128)
 		throw new Error("Profile identifier is too long.");
 	const remark = input.remark.trim();
-	if (remark.length > 10_000) {
-		throw new Error("Profile note must be 10,000 characters or fewer.");
+	if (remark.length > 80) {
+		throw new Error("Profile remark must be 80 characters or fewer.");
 	}
 	const noteKey = identifier ? `id:${identifier}` : `handle:${handle}`;
+	const previousOverride = db
+		.prepare(
+			`select description
+			 from birdclaw_profile_notes
+			 where note_key = ?
+			    or (? <> '' and identifier = ?)
+			    or (identifier is null and lower(additional_name) = ?)
+			 order by case when note_key = ? then 0 else 1 end, updated_at desc
+			 limit 1`,
+		)
+		.get(noteKey, identifier, identifier, handle, noteKey) as
+		| { description: string | null }
+		| undefined;
+	const description =
+		input.description === undefined
+			? (previousOverride?.description ?? null)
+			: input.description.trim();
+	if (description != null && description.length > 300) {
+		throw new Error("Profile description must be 300 characters or fewer.");
+	}
 	const updatedAt = new Date().toISOString();
 
 	db.prepare(
@@ -336,14 +363,15 @@ export function saveBirdclawProfileRemark(
 	).run(noteKey, identifier, identifier, handle);
 	db.prepare(
 		`insert into birdclaw_profile_notes (
-		   note_key, identifier, additional_name, remark, updated_at
-		 ) values (?, ?, ?, ?, ?)
+		   note_key, identifier, additional_name, remark, description, updated_at
+		 ) values (?, ?, ?, ?, ?, ?)
 		 on conflict(note_key) do update set
 		   identifier = excluded.identifier,
 		   additional_name = excluded.additional_name,
 		   remark = excluded.remark,
+		   description = excluded.description,
 		   updated_at = excluded.updated_at`,
-	).run(noteKey, identifier || null, handle, remark, updatedAt);
+	).run(noteKey, identifier || null, handle, remark, description, updatedAt);
 
 	return getXRemarkSyncStatus(
 		{ handle, ...(identifier ? { identifier } : {}) },

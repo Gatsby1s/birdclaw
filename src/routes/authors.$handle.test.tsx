@@ -148,6 +148,7 @@ describe("author local timeline route", () => {
 
 	it("edits a private note directly on the author timeline", async () => {
 		let storedRemark = "Original note";
+		let storedDescription = "Original description";
 		let patchBody: Record<string, unknown> | null = null;
 		const fetchMock = vi.fn(
 			async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -159,6 +160,7 @@ describe("author local timeline route", () => {
 							unknown
 						>;
 						storedRemark = String(patchBody.remark);
+						storedDescription = String(patchBody.description);
 					}
 					return Response.json({
 						imported: true,
@@ -168,7 +170,7 @@ describe("author local timeline route", () => {
 							identifier: "profile_alice",
 							handle: "Alice",
 							remark: storedRemark,
-							description: "",
+							description: storedDescription,
 							tags: [],
 						},
 					});
@@ -202,17 +204,90 @@ describe("author local timeline route", () => {
 
 		expect(await screen.findByText("Original note")).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
-		const textarea = screen.getByRole("textbox", { name: "Private note" });
-		expect(textarea).toHaveValue("Original note");
-		fireEvent.change(textarea, { target: { value: "Updated on mobile" } });
+		const remark = screen.getByRole("textbox", { name: "Remark" });
+		const description = screen.getByRole("textbox", { name: "Description" });
+		expect(remark).toHaveValue("Original note");
+		expect(description).toHaveValue("Original description");
+		expect(remark).toHaveAttribute("maxlength", "80");
+		expect(description).toHaveAttribute("maxlength", "300");
+		fireEvent.change(remark, { target: { value: "Updated on mobile" } });
+		fireEvent.change(description, {
+			target: { value: "Updated mobile description" },
+		});
 		fireEvent.click(screen.getByRole("button", { name: "Save note" }));
 
 		await waitFor(() => expect(patchBody).not.toBeNull());
 		expect(await screen.findByText("Updated on mobile")).toBeInTheDocument();
+		expect(
+			await screen.findByText("Updated mobile description"),
+		).toBeInTheDocument();
 		expect(patchBody).toMatchObject({
 			identifier: "profile_alice",
 			handle: "Alice",
 			remark: "Updated on mobile",
+			description: "Updated mobile description",
 		});
+	});
+
+	it("waits for both existing note fields before enabling edits", async () => {
+		let resolveXRemark: (() => void) | undefined;
+		const xRemarkReady = new Promise<void>((resolve) => {
+			resolveXRemark = resolve;
+		});
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/xremark") {
+				await xRemarkReady;
+				return Response.json({
+					imported: true,
+					annotationCount: 1,
+					matchedProfileCount: 1,
+					annotation: {
+						identifier: "profile_alice",
+						handle: "Alice",
+						remark: "Existing remark",
+						description: "Existing description",
+						tags: [],
+					},
+				});
+			}
+			if (url.pathname === "/api/status") {
+				return Response.json({
+					stats: { home: 1, mentions: 0, dms: 0, needsReply: 0, inbox: 0 },
+					transport: { statusText: "local" },
+					accounts: [],
+					archives: [],
+				});
+			}
+			if (url.pathname === "/api/query") {
+				return Response.json({
+					resource: "home",
+					items: [timelineItem("tweet_alice_loading", "Alice history")],
+				});
+			}
+			throw new Error(`Unexpected fetch ${url.toString()}`);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<AuthorTimelineRouteView handle="Alice" />);
+
+		expect(await screen.findByText("Alice history")).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Loading note…" }),
+		).toBeDisabled();
+		expect(
+			screen.queryByRole("textbox", { name: "Remark" }),
+		).not.toBeInTheDocument();
+
+		resolveXRemark?.();
+		const editButton = await screen.findByRole("button", { name: "Edit note" });
+		expect(editButton).toBeEnabled();
+		fireEvent.click(editButton);
+		expect(screen.getByRole("textbox", { name: "Remark" })).toHaveValue(
+			"Existing remark",
+		);
+		expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
+			"Existing description",
+		);
 	});
 });

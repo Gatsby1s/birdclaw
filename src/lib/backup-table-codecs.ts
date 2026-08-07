@@ -795,7 +795,7 @@ const definitions = {
 	},
 	birdclaw_profile_notes: {
 		exportSql: `
-      select note_key, identifier, additional_name, remark, updated_at
+      select note_key, identifier, additional_name, remark, description, updated_at
       from birdclaw_profile_notes
       order by note_key
     `,
@@ -804,12 +804,13 @@ const definitions = {
 			order: 21,
 			sql: `
       insert into birdclaw_profile_notes (
-        note_key, identifier, additional_name, remark, updated_at
-      ) values (?, ?, ?, ?, ?)
+        note_key, identifier, additional_name, remark, description, updated_at
+      ) values (?, ?, ?, ?, ?, ?)
       on conflict(note_key) do update set
         identifier = excluded.identifier,
         additional_name = excluded.additional_name,
         remark = excluded.remark,
+        description = excluded.description,
         updated_at = excluded.updated_at
       where excluded.updated_at >= birdclaw_profile_notes.updated_at
       `,
@@ -818,6 +819,7 @@ const definitions = {
 				"identifier",
 				"additional_name",
 				"remark",
+				"description",
 				"updated_at",
 			],
 		},

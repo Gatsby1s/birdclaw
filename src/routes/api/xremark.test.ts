@@ -48,6 +48,7 @@ describe("api X Remark route", () => {
 					identifier: "profile_user_42",
 					handle: "Ada",
 					remark: "Met on mobile",
+					description: "Longer background from mobile",
 				}),
 			}),
 		});
@@ -59,6 +60,7 @@ describe("api X Remark route", () => {
 				identifier: "42",
 				handle: "ada",
 				remark: "Met on mobile",
+				description: "Longer background from mobile",
 			},
 		});
 
@@ -68,8 +70,44 @@ describe("api X Remark route", () => {
 			),
 		});
 		expect(await lookup.json()).toMatchObject({
-			annotation: { identifier: "42", remark: "Met on mobile" },
+			annotation: {
+				identifier: "42",
+				remark: "Met on mobile",
+				description: "Longer background from mobile",
+			},
 		});
+
+		const cleared = await PATCH({
+			request: new Request("http://localhost/api/xremark", {
+				method: "PATCH",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					identifier: "profile_user_42",
+					handle: "Ada",
+					remark: "Met on mobile",
+					description: "",
+				}),
+			}),
+		});
+		expect(await cleared.json()).toMatchObject({
+			annotation: { remark: "Met on mobile", description: "" },
+		});
+	});
+
+	it("enforces the PC text limits for both editable fields", async () => {
+		for (const body of [
+			{ handle: "Ada", remark: "r".repeat(81), description: "" },
+			{ handle: "Ada", remark: "", description: "d".repeat(301) },
+		]) {
+			const response = await PATCH({
+				request: new Request("http://localhost/api/xremark", {
+					method: "PATCH",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify(body),
+				}),
+			});
+			expect(response.status).toBe(400);
+		}
 	});
 
 	it("imports a valid X Remark backup and reports its status", async () => {
