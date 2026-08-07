@@ -384,6 +384,7 @@ describe("database init", () => {
 				"identifier",
 				"additional_name",
 				"remark",
+				"description",
 				"updated_at",
 			]),
 		);
@@ -429,7 +430,7 @@ describe("database init", () => {
 				.all()
 				.map((column) => (column as { name: string }).name),
 		).toContain("format_version");
-		expect(db.pragma("user_version", { simple: true })).toBe(12);
+		expect(db.pragma("user_version", { simple: true })).toBe(13);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -458,7 +459,44 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(12);
+		expect(db.pragma("user_version", { simple: true })).toBe(13);
+	});
+
+	it("migrates v12 profile notes without overriding imported descriptions", () => {
+		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-note-"));
+		tempDirs.push(tempDir);
+		process.env.BIRDCLAW_HOME = tempDir;
+		resetBirdclawPathsForTests();
+
+		const dbPath = path.join(tempDir, "birdclaw.sqlite");
+		const legacy = new NativeSqliteDatabase(dbPath);
+		legacy.exec(`
+      create table birdclaw_profile_notes (
+        note_key text primary key,
+        identifier text,
+        additional_name text not null,
+        remark text not null default '',
+        updated_at text not null
+      );
+      insert into birdclaw_profile_notes (
+        note_key, identifier, additional_name, remark, updated_at
+      ) values (
+        'id:42', '42', 'ada', 'Legacy local remark',
+        '2026-08-07T00:00:00.000Z'
+      );
+      pragma user_version = 12;
+    `);
+		legacy.close();
+
+		const db = getNativeDb({ seedDemoData: false });
+		expect(
+			db
+				.prepare(
+					"select remark, description from birdclaw_profile_notes where note_key = 'id:42'",
+				)
+				.get(),
+		).toEqual({ remark: "Legacy local remark", description: null });
+		expect(db.pragma("user_version", { simple: true })).toBe(13);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

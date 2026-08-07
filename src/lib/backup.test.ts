@@ -217,10 +217,11 @@ function seedBackupFixture() {
     );
 
     insert into birdclaw_profile_notes (
-      note_key, identifier, additional_name, remark, updated_at
+      note_key, identifier, additional_name, remark, description, updated_at
     ) values (
       'id:profile_friend', 'profile_friend', 'friend',
-      'Met at a local-first meetup', '2025-01-09T00:30:00.000Z'
+      'Met at a local-first meetup', 'Maintains the local archive',
+      '2025-01-09T00:30:00.000Z'
     );
 
     insert into discussion_history (
@@ -677,12 +678,13 @@ describe("text backup", () => {
 		expect(
 			getNativeDb({ seedDemoData: false })
 				.prepare(
-					"select additional_name, remark from birdclaw_profile_notes where note_key = 'id:profile_friend'",
+					"select additional_name, remark, description from birdclaw_profile_notes where note_key = 'id:profile_friend'",
 				)
 				.get(),
 		).toEqual({
 			additional_name: "friend",
 			remark: "Met at a local-first meetup",
+			description: "Maintains the local archive",
 		});
 		expect(
 			getNativeDb({ seedDemoData: false })
@@ -721,7 +723,7 @@ describe("text backup", () => {
 		expect(validation.ok).toBe(true);
 	}, 20000);
 
-	it("emits byte-identical schema-v6 data and still accepts schema v2", async () => {
+	it("emits byte-identical schema-v7 data and still accepts schema v2", async () => {
 		switchHome("birdclaw-backup-stable-src-");
 		seedBackupFixture();
 		const firstRepoPath = makeTempDir("birdclaw-backup-stable-first-");
@@ -730,9 +732,9 @@ describe("text backup", () => {
 		const first = await exportBackup({ repoPath: firstRepoPath });
 		const second = await exportBackup({ repoPath: secondRepoPath });
 
-		expect(first.manifest.schemaVersion).toBe(6);
+		expect(first.manifest.schemaVersion).toBe(7);
 		expect(first.manifest.backupHash).toBe(
-			"a8b9ef0d6fc3d47724c0778f3b0de9d776674ebd7d22b0d8512d7a9334339625",
+			"a53f78dd532a890cd7e6126e5011a445c7e7aedf06ffeca1a9df164ccc84492b",
 		);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);

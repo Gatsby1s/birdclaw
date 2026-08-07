@@ -952,6 +952,7 @@ function ensureBirdclawProfileNotesTable(db: Database) {
       identifier text,
       additional_name text not null,
       remark text not null default '',
+      description text,
       updated_at text not null
     );
 
@@ -960,6 +961,13 @@ function ensureBirdclawProfileNotesTable(db: Database) {
     create index if not exists idx_birdclaw_profile_notes_handle
       on birdclaw_profile_notes(lower(additional_name));
   `);
+}
+
+function ensureBirdclawProfileNoteDescriptionColumn(db: Database) {
+	ensureBirdclawProfileNotesTable(db);
+	if (!getColumnNames(db, "birdclaw_profile_notes").has("description")) {
+		db.exec("alter table birdclaw_profile_notes add column description text");
+	}
 }
 
 function ensureTwitter6551EventTable(db: Database) {
@@ -1221,6 +1229,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add BirdClaw profile note overrides",
 		up: (db) => {
 			ensureBirdclawProfileNotesTable(db);
+		},
+	},
+	{
+		version: 13,
+		name: "add BirdClaw profile description overrides",
+		up: (db) => {
+			ensureBirdclawProfileNoteDescriptionColumn(db);
 		},
 	},
 ];

@@ -46,7 +46,7 @@ test.describe("mobile shell", () => {
 		await expect(page.getByRole("heading", { name: "Messages" })).toBeVisible();
 	});
 
-	test("edits and persists a private note on an author profile", async ({
+	test("edits and persists both private note fields on an author profile", async ({
 		page,
 	}) => {
 		await page.goto("/authors/avawires");
@@ -54,17 +54,24 @@ test.describe("mobile shell", () => {
 			page.getByRole("heading", { name: "Ava Wires" }).first(),
 		).toBeVisible();
 		await page.getByRole("button", { name: "Add note" }).click();
+		await page.getByRole("textbox", { name: "Remark" }).fill("Mobile remark");
 		await page
-			.getByRole("textbox", { name: "Private note" })
-			.fill("Mobile profile note");
+			.getByRole("textbox", { name: "Description" })
+			.fill("Mobile profile description");
 		await page.getByRole("button", { name: "Save note" }).click();
 		const profileNote = page.getByRole("region", {
 			name: "Private note for @avawires",
 		});
-		await expect(profileNote.getByText("Mobile profile note")).toBeVisible();
+		await expect(profileNote.getByText("Mobile remark")).toBeVisible();
+		await expect(
+			profileNote.getByText("Mobile profile description"),
+		).toBeVisible();
 
 		await page.reload();
-		await expect(profileNote.getByText("Mobile profile note")).toBeVisible();
+		await expect(profileNote.getByText("Mobile remark")).toBeVisible();
+		await expect(
+			profileNote.getByText("Mobile profile description"),
+		).toBeVisible();
 		await expect(page.getByRole("button", { name: "Edit note" })).toBeVisible();
 	});
 });

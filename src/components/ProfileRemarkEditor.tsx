@@ -23,10 +23,12 @@ async function saveProfileRemark({
 	handle,
 	identifier,
 	remark,
+	description,
 }: {
 	handle: string;
 	identifier?: string;
 	remark: string;
+	description: string;
 }) {
 	return fetchJson(
 		"/api/xremark",
@@ -37,6 +39,7 @@ async function saveProfileRemark({
 				handle,
 				...(identifier ? { identifier } : {}),
 				remark,
+				description,
 			}),
 		},
 		xRemarkSyncStatusSchema,
@@ -61,7 +64,8 @@ export function ProfileRemarkEditor({
 		enabled: Boolean(handle),
 	});
 	const [editing, setEditing] = useState(false);
-	const [draft, setDraft] = useState("");
+	const [remarkDraft, setRemarkDraft] = useState("");
+	const [descriptionDraft, setDescriptionDraft] = useState("");
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -72,7 +76,8 @@ export function ProfileRemarkEditor({
 	}, [editing]);
 
 	function beginEditing() {
-		setDraft(annotation?.remark ?? "");
+		setRemarkDraft(annotation?.remark ?? "");
+		setDescriptionDraft(annotation?.description ?? "");
 		setSaveError(null);
 		setEditing(true);
 	}
@@ -84,7 +89,8 @@ export function ProfileRemarkEditor({
 			const status = await saveProfileRemark({
 				handle,
 				identifier,
-				remark: draft,
+				remark: remarkDraft,
+				description: descriptionDraft,
 			});
 			queryClient.setQueryData(queryKey, status);
 			setEditing(false);
@@ -110,29 +116,52 @@ export function ProfileRemarkEditor({
 		>
 			{editing ? (
 				<div className="rounded-xl border border-[var(--line)] bg-[var(--bg-elevated)] p-3">
-					<label className="flex flex-col gap-2">
+					<div className="flex items-center gap-2 text-[13px] font-bold text-[var(--ink)]">
+						<StickyNote
+							aria-hidden="true"
+							className="size-4 text-[var(--accent)]"
+							strokeWidth={1.9}
+						/>
+						Private notes for @{handle}
+					</div>
+					<label className="mt-3 flex flex-col gap-2">
 						<span className="flex items-center gap-2 text-[13px] font-bold text-[var(--ink)]">
-							<StickyNote
-								aria-hidden="true"
-								className="size-4 text-[var(--accent)]"
-								strokeWidth={1.9}
-							/>
-							Private note for @{handle}
+							Remark
 						</span>
 						<textarea
-							aria-label="Private note"
-							className="min-h-28 w-full resize-y rounded-lg border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2.5 text-[15px] leading-[1.45] text-[var(--ink)] outline-none focus:border-[var(--accent)] focus:shadow-[0_0_0_1px_var(--accent)]"
-							maxLength={10_000}
-							onChange={(event) => setDraft(event.currentTarget.value)}
-							placeholder="Add what you want to remember about this person"
+							aria-label="Remark"
+							className="min-h-20 w-full resize-y rounded-lg border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2.5 text-[15px] leading-[1.45] text-[var(--ink)] outline-none focus:border-[var(--accent)] focus:shadow-[0_0_0_1px_var(--accent)]"
+							maxLength={80}
+							onChange={(event) => setRemarkDraft(event.currentTarget.value)}
+							placeholder="Add a short remark about this person"
 							ref={textareaRef}
-							value={draft}
+							value={remarkDraft}
 						/>
+						<span className="self-end text-[11px] text-[var(--ink-soft)]">
+							{String(remarkDraft.length)}/80
+						</span>
 					</label>
-					<div className="mt-1 flex items-start justify-between gap-3 text-[11px] text-[var(--ink-soft)]">
-						<span>This BirdClaw edit is kept when X Remark syncs.</span>
-						<span>{String(draft.length)}/10,000</span>
-					</div>
+					<label className="mt-3 flex flex-col gap-2">
+						<span className="text-[13px] font-bold text-[var(--ink)]">
+							Description
+						</span>
+						<textarea
+							aria-label="Description"
+							className="min-h-28 w-full resize-y rounded-lg border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2.5 text-[15px] leading-[1.45] text-[var(--ink)] outline-none focus:border-[var(--accent)] focus:shadow-[0_0_0_1px_var(--accent)]"
+							maxLength={300}
+							onChange={(event) =>
+								setDescriptionDraft(event.currentTarget.value)
+							}
+							placeholder="Add more detailed context or background"
+							value={descriptionDraft}
+						/>
+						<span className="self-end text-[11px] text-[var(--ink-soft)]">
+							{String(descriptionDraft.length)}/300
+						</span>
+					</label>
+					<p className="mb-0 mt-1 text-[11px] text-[var(--ink-soft)]">
+						Both BirdClaw edits are kept when X Remark syncs.
+					</p>
 					{saveError ? (
 						<p
 							aria-live="polite"
@@ -173,11 +202,16 @@ export function ProfileRemarkEditor({
 					) : null}
 					<button
 						className={cx(secondaryButtonClass, "self-start")}
+						disabled={noteQuery.isPending}
 						onClick={beginEditing}
 						type="button"
 					>
 						<Pencil aria-hidden="true" className="size-4" strokeWidth={1.9} />
-						{annotation ? "Edit note" : "Add note"}
+						{noteQuery.isPending
+							? "Loading note…"
+							: annotation
+								? "Edit note"
+								: "Add note"}
 					</button>
 				</div>
 			)}
