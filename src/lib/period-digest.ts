@@ -21,6 +21,10 @@ import {
 } from "./openai-response-runtime";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
 import {
+	createProfilePrioritySnapshot,
+	type ProfilePrioritySnapshot,
+} from "./profile-priority";
+import {
 	resolveSummaryModelSettings,
 	streamSummaryAnalysisEffect,
 } from "./summary-model-runtime";
@@ -66,6 +70,7 @@ export interface PeriodDigestOptions {
 	bufferModelDeltasUntilSuccess?: boolean;
 	reportProfile?: PeriodDigestReportProfile;
 	maxOutputTokens?: number;
+	prioritySnapshot?: ProfilePrioritySnapshot;
 }
 
 export interface PeriodDigestWindow {
@@ -180,6 +185,7 @@ interface CompactTweet {
 	likeCount: number;
 	liked: boolean;
 	bookmarked: boolean;
+	specialFollow?: boolean;
 	needsReply: boolean;
 	replyToId?: string | null;
 	replyToTweet?: {
@@ -229,6 +235,7 @@ export interface PeriodDigestContext {
 	tweets: CompactTweet[];
 	dms: CompactDm[];
 	links: CompactLink[];
+	priorityFingerprint?: string;
 	hash: string;
 }
 
@@ -344,6 +351,7 @@ function tweetUrl(handle: string, id: string) {
 function compactTweet(
 	source: PeriodDigestSourceKind,
 	item: ReturnType<typeof listTimelineItems>[number],
+	prioritySnapshot: ProfilePrioritySnapshot,
 ): CompactTweet {
 	const replyToTweet = item.replyToTweet
 		? {
@@ -369,6 +377,10 @@ function compactTweet(
 		likeCount: item.likeCount,
 		liked: item.liked,
 		bookmarked: item.bookmarked,
+		specialFollow: prioritySnapshot.isSpecialFollow({
+			handle: item.author.handle,
+			identifier: item.author.id,
+		}),
 		needsReply: !item.isReplied,
 		replyToId: item.replyToId ?? null,
 		replyToTweet,
@@ -390,6 +402,7 @@ function compactEmbeddedTweet(item: EmbeddedTweet): CompactTweet {
 		likeCount: item.likeCount ?? 0,
 		liked: Boolean(item.liked),
 		bookmarked: Boolean(item.bookmarked),
+		specialFollow: false,
 		needsReply: !item.isReplied,
 		replyToId: item.replyToId ?? null,
 		replyToTweet: null,
@@ -409,12 +422,20 @@ function dedupeTweets(tweets: CompactTweet[]) {
 	);
 }
 
+function prioritizeSpecialFollowTweets(tweets: CompactTweet[]) {
+	return [
+		...tweets.filter((tweet) => tweet.specialFollow),
+		...tweets.filter((tweet) => !tweet.specialFollow),
+	];
+}
+
 function collectTweetsForSource(
 	source: Exclude<PeriodDigestSourceKind, "dms">,
 	options: {
 		account?: string;
 		window: PeriodDigestWindow;
 		limit: number;
+		prioritySnapshot: ProfilePrioritySnapshot;
 	},
 ) {
 	if (source === "likes" || source === "bookmarks") {
@@ -425,16 +446,22 @@ function collectTweetsForSource(
 			until: options.window.until,
 			likedOnly: source === "likes",
 			bookmarkedOnly: source === "bookmarks",
+			priorityProfileIds: options.prioritySnapshot.priorityProfileIds,
+			priorityHandleOnlyHandles:
+				options.prioritySnapshot.priorityHandleOnlyHandles,
 			limit: Math.ceil(options.limit / 3),
-		}).map((item) => compactTweet(source, item));
+		}).map((item) => compactTweet(source, item, options.prioritySnapshot));
 	}
 	return listTimelineItems({
 		resource: source,
 		account: options.account,
 		since: options.window.since,
 		until: options.window.until,
+		priorityProfileIds: options.prioritySnapshot.priorityProfileIds,
+		priorityHandleOnlyHandles:
+			options.prioritySnapshot.priorityHandleOnlyHandles,
 		limit: source === "home" ? options.limit : Math.ceil(options.limit / 2),
-	}).map((item) => compactTweet(source, item));
+	}).map((item) => compactTweet(source, item, options.prioritySnapshot));
 }
 
 function localDayWindows(window: PeriodDigestWindow) {
@@ -472,6 +499,7 @@ function collectTweetsForDigestSource(
 		window: PeriodDigestWindow;
 		limit: number;
 		balanceAcrossDays: boolean;
+		prioritySnapshot: ProfilePrioritySnapshot;
 	},
 ) {
 	if (!options.balanceAcrossDays) {
@@ -485,12 +513,14 @@ function collectTweetsForDigestSource(
 				account: options.account,
 				window,
 				limit: perDayLimit,
+				prioritySnapshot: options.prioritySnapshot,
 			}),
 		),
 		...collectTweetsForSource(source, {
 			account: options.account,
 			window: options.window,
 			limit: options.limit,
+			prioritySnapshot: options.prioritySnapshot,
 		}),
 	]);
 }
@@ -568,6 +598,7 @@ function contextHash(context: Omit<PeriodDigestContext, "hash">) {
 				},
 				account: context.account,
 				includeDms: context.includeDms,
+				priorityFingerprint: context.priorityFingerprint,
 				tweets: context.tweets.map((tweet) => [
 					tweet.id,
 					tweet.url,
@@ -581,6 +612,7 @@ function contextHash(context: Omit<PeriodDigestContext, "hash">) {
 					tweet.likeCount,
 					tweet.liked,
 					tweet.bookmarked,
+					tweet.specialFollow,
 					tweet.needsReply,
 					tweet.replyToId,
 					tweet.replyToTweet?.id,
@@ -606,6 +638,8 @@ function contextHash(context: Omit<PeriodDigestContext, "hash">) {
 export function collectPeriodDigestContext(
 	options: PeriodDigestOptions = {},
 ): PeriodDigestContext {
+	const prioritySnapshot =
+		options.prioritySnapshot ?? createProfilePrioritySnapshot();
 	const window = resolvePeriodDigestWindow(options);
 	const weeklyDeepDive =
 		reportProfileFromOptions(options) === "weekly-deep-dive";
@@ -623,30 +657,35 @@ export function collectPeriodDigestContext(
 		window,
 		limit: maxTweets,
 		balanceAcrossDays,
+		prioritySnapshot,
 	});
 	const mentions = collectTweetsForDigestSource("mentions", {
 		account: options.account,
 		window,
 		limit: maxTweets,
 		balanceAcrossDays,
+		prioritySnapshot,
 	});
 	const authored = collectTweetsForDigestSource("authored", {
 		account: options.account,
 		window,
 		limit: maxTweets,
 		balanceAcrossDays,
+		prioritySnapshot,
 	});
 	const likes = collectTweetsForDigestSource("likes", {
 		account: options.account,
 		window,
 		limit: maxTweets,
 		balanceAcrossDays,
+		prioritySnapshot,
 	});
 	const bookmarks = collectTweetsForDigestSource("bookmarks", {
 		account: options.account,
 		window,
 		limit: maxTweets,
 		balanceAcrossDays,
+		prioritySnapshot,
 	});
 	const dms = collectDms({
 		account: options.account,
@@ -666,10 +705,21 @@ export function collectPeriodDigestContext(
 		...likes,
 		...bookmarks,
 	]);
-	const tweets = (
+	const tweets = prioritizeSpecialFollowTweets(
 		weeklyDeepDive
-			? orderWeeklyTweets(candidateTweets, window, links)
-			: candidateTweets
+			? [
+					...orderWeeklyTweets(
+						candidateTweets.filter((tweet) => tweet.specialFollow),
+						window,
+						links,
+					),
+					...orderWeeklyTweets(
+						candidateTweets.filter((tweet) => !tweet.specialFollow),
+						window,
+						links,
+					),
+				]
+			: candidateTweets,
 	).slice(0, maxTweets);
 	const withoutHash = {
 		window,
@@ -687,6 +737,7 @@ export function collectPeriodDigestContext(
 		tweets,
 		dms,
 		links,
+		priorityFingerprint: prioritySnapshot.fingerprint,
 	} satisfies Omit<PeriodDigestContext, "hash">;
 	return {
 		...withoutHash,
@@ -986,7 +1037,7 @@ function digestCacheKey(
 	options: PeriodDigestOptions,
 ) {
 	const parts = [
-		"period-digest:v3",
+		"period-digest:v4",
 		providerFromOptions(options),
 		modelFromOptions(options),
 		reasoningEffortFromOptions(options),
@@ -1025,8 +1076,11 @@ function latestDigestCacheKey(options: PeriodDigestOptions) {
 		serviceTier: serviceTierFromOptions(options),
 		reportProfile: reportProfileFromOptions(options),
 		maxOutputTokens: maxOutputTokensFromOptions(options),
+		priorityFingerprint:
+			options.prioritySnapshot?.fingerprint ??
+			createProfilePrioritySnapshot().fingerprint,
 	};
-	return `period-digest-latest:v2:${createHash("sha1")
+	return `period-digest-latest:v3:${createHash("sha1")
 		.update(JSON.stringify(identity))
 		.digest("hex")}`;
 }
@@ -1181,7 +1235,18 @@ function orderWeeklyTweets(
 }
 
 function selectWeeklyPromptTweets(context: PeriodDigestContext) {
-	return orderWeeklyTweets(context.tweets, context.window, context.links);
+	return [
+		...orderWeeklyTweets(
+			context.tweets.filter((tweet) => tweet.specialFollow),
+			context.window,
+			context.links,
+		),
+		...orderWeeklyTweets(
+			context.tweets.filter((tweet) => !tweet.specialFollow),
+			context.window,
+			context.links,
+		),
+	];
 }
 
 function buildPrompt(
@@ -1195,7 +1260,7 @@ function buildPrompt(
 	const weeklyDeepDive = options?.reportProfile === "weekly-deep-dive";
 	const selectedTweets = weeklyDeepDive
 		? selectWeeklyPromptTweets(context)
-		: context.tweets;
+		: prioritizeSpecialFollowTweets(context.tweets);
 	const promptTweets = selectedTweets.map((tweet) => ({
 		id: tweet.id,
 		url: tweet.url,
@@ -1209,6 +1274,7 @@ function buildPrompt(
 		likeCount: tweet.likeCount,
 		liked: tweet.liked,
 		bookmarked: tweet.bookmarked,
+		specialFollow: Boolean(tweet.specialFollow),
 		needsReply: tweet.needsReply,
 		replyToId: tweet.replyToId,
 		replyToTweet: tweet.replyToTweet,
@@ -1297,6 +1363,7 @@ Write a high-signal "what happened" report from this local Twitter/X dataset.
 Requirements:
 - Stream one readable Markdown report first. The UI will show this text directly; do not rely on separate cards or structured summaries.
 ${reportRequirements}
+- Treat every tweet with specialFollow=true as an explicit user priority. Inspect those tweets before ordinary posts. Give their substantive updates priority in the opening/Executive brief and the main synthesis, and provide more individual context and direct citations for them in "Worth opening". This rule applies to both standard and weekly reports. Low-information priority posts may be handled briefly, but must not be omitted merely because engagement is low and must never be made to sound more important than the evidence supports.
 - Format every section title as a Markdown level-2 heading (\`## Section title\`), never as bold-only text.
 - When a tweet has replyToTweet, use that parent context to understand what the author was replying to and whether Peter already joined the conversation.
 - Use bullets under each section. Each bullet should be specific and explain why it matters.
@@ -1344,6 +1411,22 @@ function fallbackDigest(
 		people: [],
 		actionItems: [],
 		sourceTweetIds: context.tweets.slice(0, 20).map((tweet) => tweet.id),
+	};
+}
+
+function ensureSpecialFollowSourceTweets(
+	context: PeriodDigestContext,
+	digest: PeriodDigest,
+) {
+	const priorityTweetIds = context.tweets
+		.filter((tweet) => tweet.specialFollow)
+		.slice(0, 40)
+		.map((tweet) => tweet.id);
+	return {
+		...digest,
+		sourceTweetIds: [
+			...new Set([...priorityTweetIds, ...digest.sourceTweetIds]),
+		],
 	};
 }
 
@@ -1399,13 +1482,14 @@ function completeOpenAIStreamEffect(
 	handlers: PeriodDigestStreamHandlers,
 ): Effect.Effect<PeriodDigestRunResult, Error> {
 	return Effect.gen(function* () {
+		const digest = ensureSpecialFollowSourceTweets(context, stream.value);
 		const enrichedContext = yield* tryDigestSync(() =>
-			enrichContextWithCitedTweets(context, stream.value),
+			enrichContextWithCitedTweets(context, digest),
 		);
 		const cacheKey = digestCacheKey(context, options);
 		const updatedAt = yield* tryDigestSync(() =>
 			writeSyncCache(cacheKey, {
-				digest: stream.value,
+				digest,
 				markdown: stream.markdown,
 				model: stream.model ?? modelFromOptions(options),
 				provider: stream.provider ?? providerFromOptions(options),
@@ -1417,7 +1501,7 @@ function completeOpenAIStreamEffect(
 		);
 		const result: PeriodDigestRunResult = {
 			context: enrichedContext,
-			digest: stream.value,
+			digest,
 			markdown: stream.markdown,
 			model: stream.model ?? modelFromOptions(options),
 			provider: stream.provider ?? providerFromOptions(options),
@@ -1474,8 +1558,12 @@ export function streamPeriodDigestEffect(
 	handlers: PeriodDigestStreamHandlers = {},
 ): Effect.Effect<PeriodDigestRunResult, Error> {
 	return Effect.gen(function* () {
+		const prioritySnapshot =
+			options.prioritySnapshot ??
+			(yield* tryDigestSync(() => createProfilePrioritySnapshot()));
 		const resolvedOptions = {
 			...options,
+			prioritySnapshot,
 			language: yield* tryDigestSync(() => languageFromOptions(options)),
 		};
 		const latestCached = resolvedOptions.refresh

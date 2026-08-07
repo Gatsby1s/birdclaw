@@ -16,6 +16,8 @@ data/profiles.jsonl
 data/profile_affiliations.jsonl
 data/profile_snapshots.jsonl
 data/profile_bio_entities.jsonl
+data/profile-notes.jsonl
+data/profile-priorities.jsonl
 data/tweets/YYYY.jsonl
 data/tweets/unknown.jsonl
 data/collections/likes.jsonl
@@ -41,6 +43,8 @@ Design rules:
 - **profile affiliations** preserve X badge/highlighted-label organization edges separately from profile rows
 - **profile snapshots** preserve deduplicated profile-history states for identity evidence over time
 - **profile bio entities** preserve extracted `@handle`, domain, and company-phrase identity hints, including inactive historical values
+- **profile notes** preserve BirdClaw's private profile remarks and descriptions
+- **profile priorities** preserve special-follow choices, including disabled tombstones so a newer unfollow wins during cross-device merges
 - **follow graph** shards preserve followers/following snapshots, snapshot members, current edges, and append-only churn events
 - **discussion history** preserves completed Discuss results and only their cited tweet/DM snapshots, so old analyses can be restored without another model call
 - **no SQLite WAL/SHM, FTS shadow tables, or transient live cache rows** ever land in the backup
@@ -119,12 +123,12 @@ Exits non-zero on validation failure. Run it in CI before publishing a backup, o
 
 ```json
 {
-  "backup": {
-    "repoPath": "/Users/bijiben/Projects/backup-birdclaw",
-    "remote": "https://github.com/Gatsby1s/backup-birdclaw.git",
-    "autoSync": true,
-    "staleAfterSeconds": 900
-  }
+	"backup": {
+		"repoPath": "/Users/bijiben/Projects/backup-birdclaw",
+		"remote": "https://github.com/Gatsby1s/backup-birdclaw.git",
+		"autoSync": true,
+		"staleAfterSeconds": 900
+	}
 }
 ```
 

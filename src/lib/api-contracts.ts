@@ -8,6 +8,7 @@ import type {
 	EmbeddedTweet,
 	LinkInsightItem,
 	ProfileAffiliation,
+	ProfilePriorityStatus,
 	ProfileRecord,
 	TimelineItem,
 	TransportStatus,
@@ -77,6 +78,14 @@ export const xRemarkSyncStatusSchema: z.ZodType<XRemarkSyncStatus> = z.object({
 	sourceVersion: z.number().optional(),
 	annotation: xRemarkAnnotationSchema.nullable().optional(),
 });
+
+export const profilePriorityStatusSchema: z.ZodType<ProfilePriorityStatus> =
+	z.object({
+		handle: z.string(),
+		identifier: z.string().optional(),
+		specialFollow: z.boolean(),
+		updatedAt: z.string().optional(),
+	});
 
 export const xRemarkLiveSyncStatusSchema = z.object({
 	paired: z.boolean(),

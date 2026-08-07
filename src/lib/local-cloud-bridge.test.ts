@@ -44,6 +44,19 @@ describe("local cloud bridge", () => {
 			);
 		home.db
 			.prepare(
+				`insert into birdclaw_profile_priorities (
+				 priority_key, identifier, additional_name, is_special_follow, updated_at
+				) values (?, ?, ?, ?, ?)`,
+			)
+			.run(
+				"id:profile:test",
+				"profile:test",
+				"test",
+				1,
+				"2026-07-31T08:00:00.000Z",
+			);
+		home.db
+			.prepare(
 				`insert into xremark_import_state (
 					id, backup_id, backup_time, source_version, imported_at,
 					annotation_count
@@ -98,6 +111,15 @@ describe("local cloud bridge", () => {
 				},
 			],
 		});
+		expect(batch.profilePriorities).toEqual([
+			{
+				priorityKey: "id:profile:test",
+				identifier: "profile:test",
+				additionalName: "test",
+				isSpecialFollow: 1,
+				updatedAt: "2026-07-31T08:00:00.000Z",
+			},
+		]);
 
 		home.switchHome();
 		home.db
@@ -114,8 +136,27 @@ describe("local cloud bridge", () => {
 				"Edited mobile description",
 				"2026-07-31T08:00:30.000Z",
 			);
+		home.db
+			.prepare(
+				`insert into birdclaw_profile_priorities (
+				 priority_key, identifier, additional_name, is_special_follow, updated_at
+				) values (?, ?, ?, ?, ?)`,
+			)
+			.run(
+				"id:profile:test",
+				"profile:test",
+				"test",
+				0,
+				"2026-07-31T08:01:00.000Z",
+			);
+		const imported = await importLocalCloudBridgeBatch(batch);
 		await importLocalCloudBridgeBatch(batch);
-		await importLocalCloudBridgeBatch(batch);
+		expect(imported.profilePriorities).toEqual([
+			expect.objectContaining({
+				priorityKey: "id:profile:test",
+				isSpecialFollow: 0,
+			}),
+		]);
 
 		expect(
 			home.db.prepare("select count(*) as count from tweets").get(),
@@ -430,6 +471,127 @@ describe("local cloud bridge", () => {
 			backfillCompleted: true,
 			backfilledEdges: 2,
 		});
+	});
+
+	it("merges newer cloud priority tombstones back into the local database", async () => {
+		const home = getHome();
+		home.db
+			.prepare(
+				`insert into birdclaw_profile_priorities (
+				 priority_key, identifier, additional_name, is_special_follow, updated_at
+				) values (?, ?, ?, ?, ?)`,
+			)
+			.run("id:42", "42", "ada", 1, "2026-08-01T08:00:00.000Z");
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			now: () => new Date("2026-08-01T10:00:00.000Z"),
+			fetchImpl: vi.fn(async (_url, init) => {
+				const batch = JSON.parse(String(init?.body)) as {
+					purpose: "live" | "history";
+					caughtUp: boolean;
+				};
+				return Response.json({
+					ok: true,
+					profilePriorities:
+						batch.purpose === "live" && batch.caughtUp
+							? [
+									{
+										priorityKey: "id:42",
+										identifier: "42",
+										additionalName: "ada",
+										isSpecialFollow: 0,
+										updatedAt: "2026-08-01T09:00:00.000Z",
+									},
+								]
+							: [],
+				});
+			}),
+		});
+
+		await client.runOnce();
+		expect(
+			home.db
+				.prepare(
+					"select is_special_follow, updated_at from birdclaw_profile_priorities where priority_key = 'id:42'",
+				)
+				.get(),
+		).toEqual({
+			is_special_follow: 0,
+			updated_at: "2026-08-01T09:00:00.000Z",
+		});
+	});
+
+	it("does not transfer a synced priority when another account reuses the handle", async () => {
+		const home = getHome();
+		home.db
+			.prepare(
+				`insert into birdclaw_profile_priorities (
+				 priority_key, identifier, additional_name, is_special_follow, updated_at
+				) values (?, ?, ?, ?, ?)`,
+			)
+			.run("id:42", "42", "reused", 1, "2026-08-01T08:00:00.000Z");
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			fetchImpl: vi.fn(async (_url, init) => {
+				const batch = JSON.parse(String(init?.body)) as {
+					purpose: "live" | "history";
+					caughtUp: boolean;
+				};
+				return Response.json({
+					ok: true,
+					profilePriorities:
+						batch.purpose === "live" && batch.caughtUp
+							? [
+									{
+										priorityKey: "id:41",
+										identifier: "41",
+										additionalName: "reused",
+										isSpecialFollow: 0,
+										updatedAt: "2026-08-01T09:00:00.000Z",
+									},
+								]
+							: [],
+				});
+			}),
+		});
+
+		await client.runOnce();
+		expect(
+			home.db
+				.prepare(
+					"select priority_key, is_special_follow from birdclaw_profile_priorities order by priority_key",
+				)
+				.all(),
+		).toEqual([
+			{ priority_key: "id:41", is_special_follow: 0 },
+			{ priority_key: "id:42", is_special_follow: 1 },
+		]);
+	});
+
+	it("rejects malformed priority identities returned by the bridge", async () => {
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			fetchImpl: vi.fn(async () =>
+				Response.json({
+					ok: true,
+					profilePriorities: [
+						{
+							priorityKey: "id:42",
+							identifier: "41",
+							additionalName: "ada",
+							isSpecialFollow: 1,
+							updatedAt: "not-a-date",
+						},
+					],
+				}),
+			),
+		});
+
+		const status = await client.runOnce();
+		expect(status.lastError).toContain("cloud bridge failed (200)");
 	});
 
 	it("resumes a one-time history backfill without rewinding the live cursor", async () => {

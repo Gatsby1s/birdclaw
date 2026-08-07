@@ -585,6 +585,8 @@ data/profiles.jsonl
 data/profile_affiliations.jsonl
 data/profile_snapshots.jsonl
 data/profile_bio_entities.jsonl
+data/profile-notes.jsonl
+data/profile-priorities.jsonl
 data/tweets/YYYY.jsonl
 data/tweets/unknown.jsonl
 data/timeline_edges/home.jsonl

@@ -47,6 +47,7 @@ function switchHome(prefix: string) {
 function clearData() {
 	const db = getNativeDb();
 	db.exec(`
+	delete from birdclaw_profile_priorities;
 	delete from birdclaw_profile_notes;
 	delete from weekly_digest_history;
 	delete from period_digest_history;
@@ -223,6 +224,13 @@ function seedBackupFixture() {
       'Met at a local-first meetup', 'Maintains the local archive',
       '2025-01-09T00:30:00.000Z'
     );
+
+	insert into birdclaw_profile_priorities (
+	  priority_key, identifier, additional_name, is_special_follow, updated_at
+	) values (
+	  'id:profile_friend', 'profile_friend', 'friend', 1,
+	  '2025-01-09T00:45:00.000Z'
+	);
 
     insert into discussion_history (
       id, root_id, parent_id, cache_key, title, summary, query, question,
@@ -487,6 +495,7 @@ describe("text backup", () => {
 			tweet_actions: 1,
 			ai_scores: 1,
 			birdclaw_profile_notes: 1,
+			birdclaw_profile_priorities: 1,
 			discussion_history: 1,
 			period_digest_history: 1,
 			weekly_digest_history: 1,
@@ -694,6 +703,17 @@ describe("text backup", () => {
 		expect(
 			getNativeDb({ seedDemoData: false })
 				.prepare(
+					"select identifier, additional_name, is_special_follow from birdclaw_profile_priorities where priority_key = 'id:profile_friend'",
+				)
+				.get(),
+		).toEqual({
+			identifier: "profile_friend",
+			additional_name: "friend",
+			is_special_follow: 1,
+		});
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare(
 					"select digest_date, status, markdown from period_digest_history",
 				)
 				.all(),
@@ -723,7 +743,33 @@ describe("text backup", () => {
 		expect(validation.ok).toBe(true);
 	}, 20000);
 
-	it("emits byte-identical schema-v7 data and still accepts schema v2", async () => {
+	it("round-trips disabled special-follow tombstones", async () => {
+		switchHome("birdclaw-backup-priority-src-");
+		getNativeDb({ seedDemoData: false })
+			.prepare(
+				`insert into birdclaw_profile_priorities (
+				 priority_key, identifier, additional_name, is_special_follow, updated_at
+				) values (?, ?, ?, ?, ?)`,
+			)
+			.run("id:42", "42", "ada", 0, "2026-08-01T00:00:00.000Z");
+		const repoPath = makeTempDir("birdclaw-backup-priority-repo-");
+		await exportBackup({ repoPath });
+
+		switchHome("birdclaw-backup-priority-dest-");
+		await importBackup({ repoPath, mode: "replace" });
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare(
+					"select is_special_follow, updated_at from birdclaw_profile_priorities where priority_key = 'id:42'",
+				)
+				.get(),
+		).toEqual({
+			is_special_follow: 0,
+			updated_at: "2026-08-01T00:00:00.000Z",
+		});
+	}, 20000);
+
+	it("emits byte-identical schema-v8 data and still accepts schema v2", async () => {
 		switchHome("birdclaw-backup-stable-src-");
 		seedBackupFixture();
 		const firstRepoPath = makeTempDir("birdclaw-backup-stable-first-");
@@ -732,9 +778,9 @@ describe("text backup", () => {
 		const first = await exportBackup({ repoPath: firstRepoPath });
 		const second = await exportBackup({ repoPath: secondRepoPath });
 
-		expect(first.manifest.schemaVersion).toBe(7);
+		expect(first.manifest.schemaVersion).toBe(8);
 		expect(first.manifest.backupHash).toBe(
-			"a53f78dd532a890cd7e6126e5011a445c7e7aedf06ffeca1a9df164ccc84492b",
+			"d4b55cdf198e0728bc57ced9c64878cc9b260524fe12d480a771645559e53a8a",
 		);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);
@@ -941,6 +987,7 @@ describe("text backup", () => {
 			tweet_actions: 1,
 			ai_scores: 1,
 			birdclaw_profile_notes: 1,
+			birdclaw_profile_priorities: 1,
 			discussion_history: 1,
 			period_digest_history: 1,
 			weekly_digest_history: 1,

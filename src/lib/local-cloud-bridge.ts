@@ -7,6 +7,11 @@ import {
 	isLocalTwitterCollectorFresh,
 	resolveLocalTwitterCollectorAccountId,
 } from "./local-twitter-collector";
+import {
+	listProfilePriorityRows,
+	mergeProfilePriorityRows,
+	remapProfilePriorityRowsToDatabase,
+} from "./profile-priority";
 import { replaceTweetFts } from "./tweet-repository";
 import { getTwitter6551RuntimeConfig } from "./twitter-6551";
 
@@ -117,6 +122,36 @@ const bridgeXRemarkSnapshotSchema = z.object({
 	annotations: z.array(bridgeXRemarkAnnotationSchema).max(50_000),
 });
 
+const bridgeProfilePrioritySchema = z
+	.object({
+		priorityKey: z.string().min(1).max(512),
+		identifier: z.string().max(128).nullable(),
+		additionalName: z
+			.string()
+			.trim()
+			.regex(/^@?[a-z0-9_]{1,15}$/i),
+		isSpecialFollow: z.number().int().min(0).max(1),
+		updatedAt: z
+			.string()
+			.max(64)
+			.refine(
+				(value) =>
+					Number.isFinite(Date.parse(value)) &&
+					new Date(value).toISOString() === value,
+			),
+	})
+	.superRefine((row, context) => {
+		const handle = row.additionalName.replace(/^@/, "").toLowerCase();
+		const identifier = row.identifier?.replace(/^profile_user_/, "") ?? "";
+		const expectedKey = identifier ? `id:${identifier}` : `handle:${handle}`;
+		if (row.priorityKey !== expectedKey) {
+			context.addIssue({
+				code: "custom",
+				message: "Profile priority key does not match its identity.",
+			});
+		}
+	});
+
 export const localCloudBridgeBatchSchema = z.object({
 	version: z.literal(1),
 	purpose: bridgePurposeSchema.optional().default("live"),
@@ -131,6 +166,11 @@ export const localCloudBridgeBatchSchema = z.object({
 		.nullable()
 		.optional()
 		.default(null),
+	profilePriorities: z
+		.array(bridgeProfilePrioritySchema)
+		.max(50_000)
+		.optional()
+		.default([]),
 });
 
 export type LocalCloudBridgeCursor = z.infer<typeof bridgeCursorSchema>;
@@ -535,6 +575,8 @@ export function buildLocalCloudBridgeBatch({
 		edges,
 		xRemarkSnapshot:
 			caughtUp && purpose === "live" ? buildXRemarkSnapshot(db) : null,
+		profilePriorities:
+			caughtUp && purpose === "live" ? listProfilePriorityRows(db) : [],
 	});
 }
 
@@ -843,9 +885,16 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 		for (const row of batch.profiles) {
 			const existing = db
 				.prepare(
-					"select id from profiles where lower(handle) = lower(?) limit 1",
+					`select id
+					 from profiles
+					 where id = ? or lower(handle) = lower(?)
+					 order by
+					   case when id = ? then 0 else 1 end,
+					   created_at desc,
+					   id
+					 limit 1`,
 				)
-				.get(row.handle) as { id?: string } | undefined;
+				.get(row.id, row.handle, row.id) as { id?: string } | undefined;
 			const targetProfileId = existing?.id ?? row.id;
 			profileIdMap.set(row.id, targetProfileId);
 			upsertProfile.run(
@@ -919,6 +968,12 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 				batch.xRemarkSnapshot.annotations.length,
 			);
 		}
+		if (batch.purpose === "live" && batch.caughtUp) {
+			mergeProfilePriorityRows(
+				remapProfilePriorityRowsToDatabase(batch.profilePriorities, db),
+				db,
+			);
+		}
 		return {
 			purpose: batch.purpose,
 			caughtUp: batch.caughtUp,
@@ -927,6 +982,10 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 			tweets: batch.tweets.length,
 			edges: batch.edges.length,
 			xRemarkAnnotations: batch.xRemarkSnapshot?.annotations.length ?? 0,
+			profilePriorities:
+				batch.purpose === "live" && batch.caughtUp
+					? listProfilePriorityRows(db)
+					: [],
 			cursor: batch.cursor,
 		};
 	});
@@ -1079,14 +1138,32 @@ export class LocalCloudBridgeClient {
 		} finally {
 			clearTimeout(timeout);
 		}
-		const payload = (await response.json().catch(() => null)) as {
-			ok?: boolean;
-			message?: string;
-		} | null;
-		if (!response.ok || !payload?.ok) {
+		const payload = z
+			.object({
+				ok: z.boolean(),
+				message: z.string().optional(),
+				profilePriorities: z
+					.array(bridgeProfilePrioritySchema)
+					.max(50_000)
+					.optional()
+					.default([]),
+			})
+			.safeParse(await response.json().catch(() => null));
+		if (!response.ok || !payload.success || !payload.data.ok) {
 			throw new Error(
-				payload?.message ??
+				(payload.success ? payload.data.message : undefined) ??
 					`BirdClaw cloud bridge failed (${String(response.status)})`,
+			);
+		}
+		if (payload.data.profilePriorities.length > 0) {
+			await enqueueDatabaseWrite((writeDb) =>
+				mergeProfilePriorityRows(
+					remapProfilePriorityRowsToDatabase(
+						payload.data.profilePriorities,
+						writeDb,
+					),
+					writeDb,
+				),
 			);
 		}
 		return batch;

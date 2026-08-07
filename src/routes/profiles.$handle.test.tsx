@@ -112,6 +112,9 @@ describe("profile route", () => {
 		];
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/profile-priority") {
+				return Response.json({ handle: "steipete", specialFollow: false });
+			}
 			if (url.pathname === "/api/xremark") {
 				return Response.json({
 					imported: true,
@@ -174,6 +177,9 @@ describe("profile route", () => {
 		expect(screen.getByText("@steipete")).toBeInTheDocument();
 		expect(screen.getByText(/Futurist/)).toBeInTheDocument();
 		expect(screen.getByText(/Contact hello@openai\.com/)).toBeInTheDocument();
+		expect(
+			await screen.findByRole("button", { name: "Special follow" }),
+		).toHaveAttribute("aria-pressed", "false");
 		expect(await screen.findByText("Local-first builder")).toBeInTheDocument();
 		expect(
 			screen.getByText("Follow up about agent tooling"),
@@ -250,6 +256,9 @@ describe("profile route", () => {
 	it("shows a local X Remark note even when profile analysis fails", async () => {
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/profile-priority") {
+				return Response.json({ handle: "steipete", specialFollow: false });
+			}
 			if (url.pathname === "/api/xremark") {
 				return Response.json({
 					imported: true,

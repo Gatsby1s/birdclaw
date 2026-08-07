@@ -50,6 +50,9 @@ describe("author local timeline route", () => {
 		window.localStorage.setItem("birdclaw:selected-account-id", "acct_studio");
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/profile-priority") {
+				return Response.json({ handle: "alice", specialFollow: false });
+			}
 			if (url.pathname === "/api/xremark") {
 				return Response.json({
 					imported: false,
@@ -99,6 +102,9 @@ describe("author local timeline route", () => {
 		expect(screen.getAllByText("Alice Local").length).toBeGreaterThan(0);
 		expect(screen.getByText("@Alice")).toBeInTheDocument();
 		expect(screen.getByText("Stored locally.")).toBeInTheDocument();
+		expect(
+			await screen.findByRole("button", { name: "Special follow" }),
+		).toHaveAttribute("aria-pressed", "false");
 		expect(screen.getByRole("link", { name: "Analyse" })).toHaveAttribute(
 			"href",
 			"/profiles/Alice",
@@ -153,6 +159,9 @@ describe("author local timeline route", () => {
 		const fetchMock = vi.fn(
 			async (input: RequestInfo | URL, init?: RequestInit) => {
 				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/profile-priority") {
+					return Response.json({ handle: "alice", specialFollow: false });
+				}
 				if (url.pathname === "/api/xremark") {
 					if (init?.method === "PATCH") {
 						patchBody = JSON.parse(String(init.body)) as Record<
@@ -236,6 +245,9 @@ describe("author local timeline route", () => {
 		});
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/profile-priority") {
+				return Response.json({ handle: "alice", specialFollow: false });
+			}
 			if (url.pathname === "/api/xremark") {
 				await xRemarkReady;
 				return Response.json({

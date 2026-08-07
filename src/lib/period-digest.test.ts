@@ -13,6 +13,7 @@ import {
 	streamPeriodDigest,
 	streamPeriodDigestEffect,
 } from "./period-digest";
+import { setProfileSpecialFollow } from "./profile-priority";
 import { getTweetsByIds } from "./queries";
 
 const tempRoots: string[] = [];
@@ -128,6 +129,134 @@ describe("period digest", () => {
 			"exactly match one corresponding keyTopics[].title",
 		);
 		expect(prompt).toContain(context.tweets[0]?.text);
+	});
+
+	it("keeps an older special-follow post ahead of newer posts at every cap", () => {
+		const db = getNativeDb();
+		const account = db
+			.prepare("select id from accounts order by is_default desc limit 1")
+			.get() as { id: string };
+		db.exec(`
+			insert into profiles (
+			 id, handle, display_name, bio, followers_count, avatar_hue, created_at
+			) values
+			 ('profile_user_4242', 'priority_author', 'Priority Author', '', 1, 1, '2026-07-01T00:00:00.000Z'),
+			 ('profile_user_4343', 'ordinary_author', 'Ordinary Author', '', 1, 2, '2026-07-01T00:00:00.000Z');
+		`);
+		const insertTweet = db.prepare(
+			`insert into tweets (id, author_profile_id, text, created_at)
+			 values (?, ?, ?, ?)`,
+		);
+		const insertEdge = db.prepare(
+			`insert into tweet_account_edges (
+			 account_id, tweet_id, kind, first_seen_at, last_seen_at, seen_count,
+			 source, raw_json, updated_at
+			) values (?, ?, 'home', ?, ?, 1, 'test', '{}', ?)`,
+		);
+		db.transaction(() => {
+			insertTweet.run(
+				"priority-old",
+				"profile_user_4242",
+				"Priority post that must survive caps",
+				"2026-07-02T00:00:00.000Z",
+			);
+			insertEdge.run(
+				account.id,
+				"priority-old",
+				"2026-07-02T00:00:00.000Z",
+				"2026-07-02T00:00:00.000Z",
+				"2026-07-02T00:00:00.000Z",
+			);
+			for (let index = 0; index < 30; index += 1) {
+				const id = `ordinary-new-${String(index)}`;
+				const createdAt = new Date(
+					Date.parse("2026-07-03T00:00:00.000Z") + index * 1_000,
+				).toISOString();
+				insertTweet.run(
+					id,
+					"profile_user_4343",
+					`Ordinary post ${String(index)}`,
+					createdAt,
+				);
+				insertEdge.run(account.id, id, createdAt, createdAt, createdAt);
+			}
+		})();
+		setProfileSpecialFollow(
+			{
+				handle: "priority_author",
+				identifier: "profile_user_4242",
+				specialFollow: true,
+			},
+			db,
+		);
+
+		const context = collectPeriodDigestContext({
+			since: "2026-07-01T00:00:00.000Z",
+			until: "2026-07-04T00:00:00.000Z",
+			account: account.id,
+			maxTweets: 20,
+		});
+		expect(context.tweets).toHaveLength(20);
+		expect(context.tweets[0]).toMatchObject({
+			id: "priority-old",
+			specialFollow: true,
+		});
+		const prompt = __test__.buildPrompt(context);
+		expect(prompt).toContain('"specialFollow":true');
+		expect(prompt).toContain("opening/Executive brief");
+		expect(prompt).toContain('"Worth opening"');
+
+		const previousHash = context.hash;
+		setProfileSpecialFollow(
+			{
+				handle: "priority_author",
+				identifier: "profile_user_4242",
+				specialFollow: false,
+			},
+			db,
+		);
+		expect(
+			collectPeriodDigestContext({
+				since: "2026-07-01T00:00:00.000Z",
+				until: "2026-07-04T00:00:00.000Z",
+				account: account.id,
+				maxTweets: 20,
+			}).hash,
+		).not.toBe(previousHash);
+	});
+
+	it("keeps special-follow posts inside both standard and weekly prompt budgets", () => {
+		const base = collectPeriodDigestContext({
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			maxTweets: 20,
+		});
+		const seed = base.tweets[0];
+		expect(seed).toBeDefined();
+		const largeTweets = Array.from({ length: 20 }, (_, index) => ({
+			...seed!,
+			id: index === 19 ? "priority-budget" : `ordinary-budget-${String(index)}`,
+			text:
+				index === 19
+					? `PRIORITY_BUDGET_MARKER ${"p".repeat(120_000)}`
+					: `ORDINARY_BUDGET_${String(index)} ${"o".repeat(120_000)}`,
+			specialFollow: index === 19,
+			createdAt: new Date(
+				Date.parse("2026-07-01T00:00:00.000Z") + index * 1_000,
+			).toISOString(),
+		}));
+		const context = { ...base, tweets: largeTweets };
+		const standardPrompt = __test__.buildPrompt(context);
+		const weeklyPrompt = __test__.buildPrompt(context, {
+			reportProfile: "weekly-deep-dive",
+		});
+
+		expect(standardPrompt).toContain("PRIORITY_BUDGET_MARKER");
+		expect(weeklyPrompt).toContain("PRIORITY_BUDGET_MARKER");
+		expect(standardPrompt).not.toContain("ORDINARY_BUDGET_18");
+		expect(__test__.selectWeeklyPromptTweets(context)[0]?.id).toBe(
+			"priority-budget",
+		);
 	});
 
 	it("uses a materially richer, day-balanced weekly report profile", () => {
@@ -766,6 +895,48 @@ describe("period digest", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
+	it("does not reuse yesterday's latest digest after priority changes", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-03-09T04:00:00.000Z"));
+		const streamed = [
+			sseFrame({
+				type: "response.output_text.delta",
+				delta:
+					'# Yesterday\n\nPriority pass.\n\n---\n{"title":"Yesterday","summary":"Priority pass","keyTopics":[],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[]}',
+			}),
+			"data: [DONE]\n\n",
+		].join("");
+		const fetchMock = vi.fn().mockResolvedValue(streamResponse(streamed));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const first = await streamPeriodDigest({
+			period: "yesterday",
+			refresh: true,
+		});
+		const profile = first.context.tweets[0]?.authorProfile;
+		expect(profile).toBeDefined();
+		setProfileSpecialFollow(
+			{
+				handle: profile?.handle ?? "unknown",
+				identifier: profile?.id,
+				specialFollow: true,
+			},
+			getNativeDb(),
+		);
+
+		const regenerated = await streamPeriodDigest({ period: "yesterday" });
+		expect(regenerated.cached).toBe(false);
+		expect(regenerated.context.hash).not.toBe(first.context.hash);
+		const priorityTweetIds = regenerated.context.tweets
+			.filter((tweet) => tweet.specialFollow)
+			.map((tweet) => tweet.id);
+		expect(priorityTweetIds.length).toBeGreaterThan(0);
+		expect(regenerated.digest.sourceTweetIds).toEqual(
+			expect.arrayContaining(priorityTweetIds.slice(0, 40)),
+		);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
 	it("keeps rolling today digests behind the freshness window", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-03-08T04:30:00.000Z"));
@@ -845,7 +1016,7 @@ describe("period digest", () => {
 				`
 				update sync_cache
 				set updated_at = '2020-01-01T00:00:00.000Z'
-				where cache_key like 'period-digest:v3:%'
+				where cache_key like 'period-digest:v4:%'
 				`,
 			)
 			.run();
