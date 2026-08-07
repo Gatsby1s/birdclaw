@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 0.8.70 - 2026-08-07
+
+### Fixed
+
+- Match the PC X Remark editor on mobile author pages with separately editable Remark and Description fields, including the original 80- and 300-character limits.
+- Preserve both local text overrides across X Remark sync, backup, restore, and database migration while keeping same-handle accounts isolated by stable ID.
+- Wait for existing private notes to load before enabling edits so a slow request cannot overwrite either field with an empty value.
+
 ## 0.8.69 - 2026-08-07
 
 ### Added
