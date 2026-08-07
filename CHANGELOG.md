@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 0.8.71 - 2026-08-07
+
+### Added
+
+- Add a persistent Special Follow control to both author profile views, with stable-account isolation, cross-device sync, backup/restore support, and disabled tombstones.
+- Prioritize Special Follow authors throughout Today AI and weekly reports: before source limits, before the overall tweet cap, and before prompt-size trimming, with richer direct citations in the final report.
+
+### Fixed
+
+- Invalidate exact and latest Today caches when priorities change while keeping each in-flight generation bound to its starting priority snapshot.
+- Preserve newer handle-only choices when a stable X user ID becomes available without transferring priorities between accounts that reuse the same handle.
+
 ## 0.8.70 - 2026-08-07
 
 ### Fixed
