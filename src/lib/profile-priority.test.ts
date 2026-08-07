@@ -197,6 +197,13 @@ describe("profile priority", () => {
 		expect(getProfilePriority({ handle: "future_id" }, db).specialFollow).toBe(
 			false,
 		);
+		expect(
+			getOrPromoteProfilePriority(
+				{ handle: "future_id", identifier: "profile_user_77" },
+				db,
+				new Date("2026-08-01T04:00:00.000Z"),
+			),
+		).toMatchObject({ identifier: "77", specialFollow: true });
 		const snapshot = createProfilePrioritySnapshot(db);
 		expect(
 			snapshot.isSpecialFollow({

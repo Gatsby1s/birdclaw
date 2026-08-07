@@ -85,6 +85,16 @@ describe("profile priority API", () => {
 			request: new Request("http://localhost/api/profile-priority?handle=ada"),
 		});
 		expect(await provisional.json()).toMatchObject({ specialFollow: false });
+
+		const reloaded = await GET({
+			request: new Request(
+				"http://localhost/api/profile-priority?handle=ada&identifier=profile_user_42",
+			),
+		});
+		expect(await reloaded.json()).toMatchObject({
+			identifier: "42",
+			specialFollow: true,
+		});
 	});
 
 	it("rejects malformed mutations", async () => {

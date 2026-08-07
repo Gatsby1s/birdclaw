@@ -127,6 +127,13 @@ export function getOrPromoteProfilePriority(
 	const priorityKey = `id:${identifier}`;
 	const stable = getRowByKey(db, priorityKey);
 	const provisional = getRowByKey(db, `handle:${handle}`);
+	if (
+		stable &&
+		provisional?.isSpecialFollow === 0 &&
+		provisional.updatedAt <= stable.updatedAt
+	) {
+		return rowToStatus(stable, handle);
+	}
 	if (provisional) {
 		const provisionalIsNewer =
 			!stable || provisional.updatedAt > stable.updatedAt;
@@ -145,7 +152,13 @@ export function getOrPromoteProfilePriority(
 					identifier,
 					additionalName: handle,
 					isSpecialFollow: provisional.isSpecialFollow,
-					updatedAt: provisional.updatedAt,
+					updatedAt: tombstoneAt,
+				});
+			} else if (stable) {
+				upsertPriorityRow(db, {
+					...stable,
+					additionalName: handle,
+					updatedAt: tombstoneAt,
 				});
 			}
 			upsertPriorityRow(db, {
