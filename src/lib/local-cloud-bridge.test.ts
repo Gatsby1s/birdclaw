@@ -12,6 +12,7 @@ import {
 	LocalCloudBridgeClient,
 	verifyLocalCloudBridgeToken,
 } from "./local-cloud-bridge";
+import { listTimelineItems } from "./timeline-read-model";
 
 describe("local cloud bridge", () => {
 	const getHome = useTestHome({ prefix: "birdclaw-local-cloud-bridge-" });
@@ -207,8 +208,455 @@ describe("local cloud bridge", () => {
 		});
 	});
 
-	it("does not send a heartbeat until local collection is healthy", async () => {
-		const fetchImpl = vi.fn();
+	it("ships native X bookmarks to cloud and returns newer local bookmark state", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		insertTestTweet(home.db, { text: "saved on X" });
+		home.db
+			.prepare(
+				`insert into tweet_collections (
+					account_id, tweet_id, kind, collected_at, source, raw_json, updated_at
+				) values (?, ?, 'bookmarks', ?, 'xurl', '{}', ?)`,
+			)
+			.run(
+				"account:test",
+				"tweet:test",
+				"2026-08-03T08:00:00.000Z",
+				"2026-08-03T08:00:00.000Z",
+			);
+		home.db
+			.prepare(
+				`insert into local_tweet_bookmarks (
+					account_id, tweet_id, is_bookmarked, created_at, updated_at
+				) values (?, ?, 1, ?, ?)`,
+			)
+			.run(
+				"account:test",
+				"tweet:test",
+				"2026-08-03T08:00:00.000Z",
+				"2026-08-03T08:00:00.000Z",
+			);
+
+		const batch = buildLocalCloudBridgeBatch({
+			accountId: "account:test",
+			purpose: "bookmarks",
+			cursor: {
+				updatedAt: "2026-08-03T09:00:00.000Z",
+				accountId: "",
+				tweetId: "",
+				kind: "",
+			},
+			db: home.db,
+		});
+		expect(batch).toMatchObject({
+			caughtUp: true,
+			edges: [],
+			localBookmarks: [
+				{ accountId: "account:test", tweetId: "tweet:test", isBookmarked: 1 },
+			],
+			nativeBookmarks: [
+				{ accountId: "account:test", tweetId: "tweet:test", source: "xurl" },
+			],
+		});
+		expect(batch.tweets.map((tweet) => tweet.id)).toEqual(["tweet:test"]);
+
+		home.switchHome();
+		await importLocalCloudBridgeBatch(batch);
+		expect(
+			home.db
+				.prepare(
+					"select source from tweet_collections where account_id = ? and tweet_id = ? and kind = 'bookmarks'",
+				)
+				.get("account:test", "tweet:test"),
+		).toEqual({ source: "xurl" });
+		home.db
+			.prepare(
+				`update local_tweet_bookmarks
+				 set is_bookmarked = 0, updated_at = ?
+				 where account_id = ? and tweet_id = ?`,
+			)
+			.run("2026-08-03T09:00:00.000Z", "account:test", "tweet:test");
+
+		const merged = await importLocalCloudBridgeBatch(batch);
+		expect(merged.localBookmarks).toEqual([
+			{
+				accountId: "account:test",
+				tweetId: "tweet:test",
+				isBookmarked: 0,
+				createdAt: "2026-08-03T08:00:00.000Z",
+				updatedAt: "2026-08-03T09:00:00.000Z",
+			},
+		]);
+	});
+
+	it("renders all 99 native X bookmarks after a 90 plus 9 cloud bridge walk", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		const insertCollection = home.db.prepare(
+			`insert into tweet_collections (
+				account_id, tweet_id, kind, collected_at, source, raw_json, updated_at
+			) values ('account:test', ?, 'bookmarks', ?, 'xurl', '{}', ?)`,
+		);
+		for (let index = 0; index < 99; index += 1) {
+			const tweetId = `bookmark:${String(index).padStart(3, "0")}`;
+			insertTestTweet(home.db, {
+				id: tweetId,
+				text: `X bookmark ${String(index)}`,
+			});
+			insertCollection.run(
+				tweetId,
+				"2026-08-03T08:00:00.000Z",
+				"2026-08-03T08:00:00.000Z",
+			);
+		}
+		const first = buildLocalCloudBridgeBatch({
+			purpose: "bookmarks",
+			accountId: "account:test",
+			limit: 90,
+			db: home.db,
+		});
+		const second = buildLocalCloudBridgeBatch({
+			purpose: "bookmarks",
+			accountId: "account:test",
+			limit: 90,
+			cursor: first.cursor,
+			db: home.db,
+		});
+		expect(first.nativeBookmarks).toHaveLength(90);
+		expect(first.caughtUp).toBe(false);
+		expect(second.nativeBookmarks).toHaveLength(9);
+		expect(second.caughtUp).toBe(true);
+
+		home.switchHome();
+		await importLocalCloudBridgeBatch(first);
+		await importLocalCloudBridgeBatch(second);
+		expect(
+			listTimelineItems({
+				resource: "home",
+				bookmarkedOnly: true,
+				limit: 120,
+			}),
+		).toHaveLength(99);
+	});
+
+	it("paginates bookmark rows with identical timestamps without dropping any", () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		for (const tweetId of ["tweet:one", "tweet:two", "tweet:three"]) {
+			insertTestTweet(home.db, { id: tweetId });
+			home.db
+				.prepare(
+					`insert into local_tweet_bookmarks (
+						account_id, tweet_id, is_bookmarked, created_at, updated_at
+					) values ('account:test', ?, 1, ?, ?)`,
+				)
+				.run(tweetId, "2026-08-03T08:00:00.000Z", "2026-08-03T08:00:00.000Z");
+		}
+
+		const first = buildLocalCloudBridgeBatch({
+			purpose: "bookmarks",
+			accountId: "account:test",
+			limit: 2,
+			db: home.db,
+		});
+		const second = buildLocalCloudBridgeBatch({
+			purpose: "bookmarks",
+			accountId: "account:test",
+			limit: 2,
+			cursor: first.cursor,
+			db: home.db,
+		});
+
+		expect(first.caughtUp).toBe(false);
+		expect(second.caughtUp).toBe(true);
+		expect(
+			[...first.localBookmarks, ...second.localBookmarks].map(
+				(row) => row.tweetId,
+			),
+		).toEqual(["tweet:one", "tweet:three", "tweet:two"]);
+	});
+
+	it("preserves bookmark cursors when a later live page advances its edge cursor", () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		insertTestTweet(home.db);
+		home.db
+			.prepare(
+				`insert into local_tweet_bookmarks (
+					account_id, tweet_id, is_bookmarked, created_at, updated_at
+				) values ('account:test', 'tweet:test', 1, ?, ?)`,
+			)
+			.run("2026-08-03T08:00:00.000Z", "2026-08-03T08:00:00.000Z");
+		home.db
+			.prepare(
+				`insert into tweet_account_edges (
+					account_id, tweet_id, kind, first_seen_at, last_seen_at,
+					seen_count, source, raw_json, updated_at
+				) values ('account:test', 'tweet:test', 'home', ?, ?, 1, 'bird', '{}', ?)`,
+			)
+			.run(
+				"2026-08-03T09:00:00.000Z",
+				"2026-08-03T09:00:00.000Z",
+				"2026-08-03T09:00:00.000Z",
+			);
+
+		const bookmarkBatch = buildLocalCloudBridgeBatch({
+			purpose: "bookmarks",
+			accountId: "account:test",
+			limit: 2,
+			db: home.db,
+		});
+		const liveBatch = buildLocalCloudBridgeBatch({
+			purpose: "live",
+			accountId: "account:test",
+			limit: 2,
+			cursor: bookmarkBatch.cursor,
+			db: home.db,
+		});
+
+		expect(liveBatch.cursor).toMatchObject({
+			localBookmarkUpdatedAt: bookmarkBatch.cursor.localBookmarkUpdatedAt,
+			localBookmarkAccountId: bookmarkBatch.cursor.localBookmarkAccountId,
+			localBookmarkTweetId: bookmarkBatch.cursor.localBookmarkTweetId,
+		});
+	});
+
+	it("restarts bookmark cursors when the source account changes", () => {
+		const home = getHome();
+		insertTestAccount(home.db, { id: "account:a", handle: "@a" });
+		insertTestAccount(home.db, {
+			id: "account:b",
+			handle: "@b",
+			externalUserId: "2000",
+			isDefault: 0,
+		});
+		insertTestProfile(home.db);
+		insertTestTweet(home.db);
+		const insertBookmark = home.db.prepare(
+			`insert into local_tweet_bookmarks (
+				account_id, tweet_id, is_bookmarked, created_at, updated_at
+			) values (?, 'tweet:test', 1, ?, ?)`,
+		);
+		insertBookmark.run(
+			"account:a",
+			"2026-08-03T10:00:00.000Z",
+			"2026-08-03T10:00:00.000Z",
+		);
+		insertBookmark.run(
+			"account:b",
+			"2026-08-03T08:00:00.000Z",
+			"2026-08-03T08:00:00.000Z",
+		);
+
+		const accountA = buildLocalCloudBridgeBatch({
+			purpose: "bookmarks",
+			accountId: "account:a",
+			db: home.db,
+		});
+		const accountB = buildLocalCloudBridgeBatch({
+			purpose: "bookmarks",
+			accountId: "account:b",
+			cursor: accountA.cursor,
+			db: home.db,
+		});
+
+		expect(accountA.cursor.bookmarkSourceAccountId).toBe("account:a");
+		expect(accountB.cursor.bookmarkSourceAccountId).toBe("account:b");
+		expect(accountB.localBookmarks).toEqual([
+			expect.objectContaining({
+				accountId: "account:b",
+				tweetId: "tweet:test",
+				updatedAt: "2026-08-03T08:00:00.000Z",
+			}),
+		]);
+	});
+
+	it("rejects malformed, duplicate, and cross-account bookmark rows", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		insertTestTweet(home.db);
+		const batch = buildLocalCloudBridgeBatch({
+			purpose: "bookmarks",
+			accountId: "account:test",
+			db: home.db,
+		});
+		const validRow = {
+			accountId: "account:test",
+			tweetId: "tweet:test",
+			isBookmarked: 1,
+			createdAt: "2026-08-03T08:00:00.000Z",
+			updatedAt: "2026-08-03T08:00:00.000Z",
+		};
+
+		await expect(
+			importLocalCloudBridgeBatch({
+				...batch,
+				localBookmarks: [validRow, validRow],
+			}),
+		).rejects.toThrow("Duplicate saved row identity");
+		await expect(
+			importLocalCloudBridgeBatch({
+				...batch,
+				localBookmarks: [
+					{ ...validRow, accountId: "account:other", updatedAt: "bad" },
+				],
+			}),
+		).rejects.toThrow("Invalid ISO datetime");
+	});
+
+	it("rejects a saved account whose stable X user id conflicts with cloud", async () => {
+		const home = getHome();
+		insertTestAccount(home.db, { externalUserId: "1000" });
+		const batch = buildLocalCloudBridgeBatch({
+			purpose: "bookmarks",
+			accountId: "account:test",
+			db: home.db,
+		});
+
+		home.switchHome();
+		process.env.BIRDCLAW_6551_FAILOVER_MODE = "1";
+		process.env.BIRDCLAW_6551_ACCOUNT_ID = "acct_primary";
+		insertTestAccount(home.db, {
+			id: "acct_primary",
+			externalUserId: "2000",
+			transport: "twitter6551",
+		});
+
+		await expect(importLocalCloudBridgeBatch(batch)).rejects.toThrow(
+			"does not match the canonical X user",
+		);
+	});
+
+	it("rejects a live batch with a conflicting stable X user id before writes", async () => {
+		const home = getHome();
+		insertTestAccount(home.db, { externalUserId: "1000" });
+		insertTestProfile(home.db);
+		insertTestTweet(home.db);
+		home.db
+			.prepare(
+				`insert into tweet_account_edges (
+					account_id, tweet_id, kind, first_seen_at, last_seen_at,
+					seen_count, source, raw_json, updated_at
+				) values ('account:test', 'tweet:test', 'home', ?, ?, 1, 'bird', '{}', ?)`,
+			)
+			.run(
+				"2026-08-03T08:00:00.000Z",
+				"2026-08-03T08:00:00.000Z",
+				"2026-08-03T08:00:00.000Z",
+			);
+		const batch = buildLocalCloudBridgeBatch({
+			purpose: "live",
+			accountId: "account:test",
+			lookbackHours: 24,
+			now: new Date("2026-08-03T09:00:00.000Z"),
+			db: home.db,
+		});
+
+		home.switchHome();
+		process.env.BIRDCLAW_6551_FAILOVER_MODE = "1";
+		process.env.BIRDCLAW_6551_ACCOUNT_ID = "acct_primary";
+		insertTestAccount(home.db, {
+			id: "acct_primary",
+			externalUserId: "2000",
+			transport: "twitter6551",
+		});
+
+		await expect(importLocalCloudBridgeBatch(batch)).rejects.toThrow(
+			"does not match the canonical X user",
+		);
+		expect(
+			home.db
+				.prepare(
+					"select external_user_id as externalUserId from accounts where id = ?",
+				)
+				.get("acct_primary"),
+		).toEqual({ externalUserId: "2000" });
+		expect(
+			home.db.prepare("select count(*) as count from tweets").get(),
+		).toEqual({
+			count: 0,
+		});
+		expect(
+			home.db
+				.prepare("select count(*) as count from tweet_account_edges")
+				.get(),
+		).toEqual({ count: 0 });
+	});
+
+	it("lets cloud bookmark tombstones win equal-time conflicts", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		insertTestTweet(home.db);
+		home.db
+			.prepare(
+				`insert into local_tweet_bookmarks (
+					account_id, tweet_id, is_bookmarked, created_at, updated_at
+				) values (?, ?, 1, ?, ?)`,
+			)
+			.run(
+				"account:test",
+				"tweet:test",
+				"2026-08-03T08:00:00.000Z",
+				"2026-08-03T09:00:00.000Z",
+			);
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			accountId: "account:test",
+			fetchImpl: vi.fn(async (_url, init) => {
+				const batch = JSON.parse(String(init?.body)) as {
+					purpose: "live" | "history" | "bookmarks";
+					caughtUp: boolean;
+				};
+				return Response.json({
+					ok: true,
+					bookmarkSyncVersion: 1,
+					localBookmarks:
+						batch.purpose !== "history" && batch.caughtUp
+							? [
+									{
+										accountId: "account:test",
+										tweetId: "tweet:test",
+										isBookmarked: 0,
+										createdAt: "2026-08-03T08:00:00.000Z",
+										updatedAt: "2026-08-03T09:00:00.000Z",
+									},
+								]
+							: [],
+					localBookmarkCursor: {
+						updatedAt: "2026-08-03T09:00:00.000Z",
+						accountId: "account:test",
+						tweetId: "tweet:test",
+					},
+					localBookmarksCaughtUp: true,
+				});
+			}),
+		});
+
+		await client.runOnce();
+		expect(
+			home.db
+				.prepare(
+					"select is_bookmarked, updated_at from local_tweet_bookmarks where account_id = ? and tweet_id = ?",
+				)
+				.get("account:test", "tweet:test"),
+		).toEqual({
+			is_bookmarked: 0,
+			updated_at: "2026-08-03T09:00:00.000Z",
+		});
+	});
+
+	it("exchanges bookmarks even when local collection is not healthy", async () => {
+		const fetchImpl = vi.fn(
+			async (_url: string | URL | Request, _init?: RequestInit) =>
+				Response.json({ ok: true }),
+		);
 		const client = new LocalCloudBridgeClient({
 			url: "http://127.0.0.1:3000",
 			token: "bridge-secret",
@@ -218,8 +666,217 @@ describe("local cloud bridge", () => {
 
 		await client.runOnce();
 
-		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(
+			JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)),
+		).toMatchObject({ purpose: "bookmarks" });
 		expect(client.getStatus().lastError).toContain("not fresh");
+	});
+
+	it("does not advance bookmark cursors when the cloud lacks the capability", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		insertTestTweet(home.db);
+		home.db
+			.prepare(
+				`insert into local_tweet_bookmarks (
+					account_id, tweet_id, is_bookmarked, created_at, updated_at
+				) values ('account:test', 'tweet:test', 1, ?, ?)`,
+			)
+			.run("2026-08-03T08:00:00.000Z", "2026-08-03T08:00:00.000Z");
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			accountId: "account:test",
+			fetchImpl: vi.fn(async () => Response.json({ ok: true })),
+		});
+
+		await client.runOnce();
+		const cursorRow = home.db
+			.prepare(
+				"select value_json as valueJson from sync_cache where cache_key like 'cloud-bridge:cursor:%'",
+			)
+			.get() as { valueJson: string };
+		expect(JSON.parse(cursorRow.valueJson)).toMatchObject({
+			localBookmarkUpdatedAt: "",
+			localBookmarkAccountId: "",
+			localBookmarkTweetId: "",
+		});
+	});
+
+	it("shrinks oversized bookmark pages below the bridge request limit", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		const largeRawJson = JSON.stringify({ blob: "x".repeat(960_000) });
+		const insertCollection = home.db.prepare(
+			`insert into tweet_collections (
+				account_id, tweet_id, kind, collected_at, source, raw_json, updated_at
+			) values ('account:test', ?, 'bookmarks', ?, 'xurl', ?, ?)`,
+		);
+		for (let index = 0; index < 8; index += 1) {
+			const tweetId = `large:${String(index)}`;
+			insertTestTweet(home.db, { id: tweetId });
+			insertCollection.run(
+				tweetId,
+				"2026-08-03T08:00:00.000Z",
+				largeRawJson,
+				"2026-08-03T08:00:00.000Z",
+			);
+		}
+		const bookmarkRequests: Array<{
+			bytes: number;
+			nativeRows: number;
+			savedPageSize: number;
+		}> = [];
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			accountId: "account:test",
+			batchSize: 100,
+			fetchImpl: vi.fn(async (_url, init) => {
+				const body = String(init?.body);
+				const batch = JSON.parse(body) as {
+					purpose: string;
+					savedPageSize: number;
+					nativeBookmarks: unknown[];
+					cursor: {
+						cloudBookmarkUpdatedAt: string;
+						cloudBookmarkAccountId: string;
+						cloudBookmarkTweetId: string;
+					};
+				};
+				if (batch.purpose !== "bookmarks") return Response.json({ ok: true });
+				bookmarkRequests.push({
+					bytes: Buffer.byteLength(body),
+					nativeRows: batch.nativeBookmarks.length,
+					savedPageSize: batch.savedPageSize,
+				});
+				return Response.json({
+					ok: true,
+					bookmarkSyncVersion: 1,
+					localBookmarks: [],
+					localBookmarkCursor: {
+						updatedAt: batch.cursor.cloudBookmarkUpdatedAt,
+						accountId: batch.cursor.cloudBookmarkAccountId,
+						tweetId: batch.cursor.cloudBookmarkTweetId,
+					},
+					localBookmarksCaughtUp: true,
+				});
+			}),
+		});
+
+		await client.runOnce();
+		expect(
+			bookmarkRequests.reduce((sum, page) => sum + page.nativeRows, 0),
+		).toBe(8);
+		expect(bookmarkRequests[0]?.savedPageSize).toBeLessThan(100);
+		expect(
+			bookmarkRequests.every((page) => page.bytes <= 7 * 1024 * 1024),
+		).toBe(true);
+		expect(client.getStatus().lastError).toBeNull();
+	});
+
+	it("continues live upload when an older cloud rejects bookmark purpose", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		insertTestTweet(home.db);
+		home.db
+			.prepare(
+				`insert into local_tweet_bookmarks (
+					account_id, tweet_id, is_bookmarked, created_at, updated_at
+				) values ('account:test', 'tweet:test', 1, ?, ?)`,
+			)
+			.run("2026-08-03T08:00:00.000Z", "2026-08-03T08:00:00.000Z");
+		home.db
+			.prepare(
+				`insert into tweet_account_edges (
+					account_id, tweet_id, kind, first_seen_at, last_seen_at,
+					seen_count, source, raw_json, updated_at
+				) values ('account:test', 'tweet:test', 'home', ?, ?, 1, 'bird', '{}', ?)`,
+			)
+			.run(
+				"2026-08-03T09:00:00.000Z",
+				"2026-08-03T09:00:00.000Z",
+				"2026-08-03T09:00:00.000Z",
+			);
+		const purposes: string[] = [];
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			accountId: "account:test",
+			lookbackHours: 24 * 365,
+			now: () => new Date("2026-08-04T00:00:00.000Z"),
+			fetchImpl: vi.fn(async (_url, init) => {
+				const batch = JSON.parse(String(init?.body)) as { purpose: string };
+				purposes.push(batch.purpose);
+				return batch.purpose === "bookmarks"
+					? Response.json(
+							{ ok: false, message: "Invalid enum value for purpose" },
+							{ status: 400 },
+						)
+					: Response.json({ ok: true });
+			}),
+		});
+
+		await client.runOnce();
+		expect(purposes).toContain("bookmarks");
+		expect(purposes).toContain("live");
+		expect(client.getStatus()).toMatchObject({
+			uploadedEdges: 1,
+			lastError: expect.stringContaining("Bookmark sync is pending"),
+		});
+		const cursorRow = home.db
+			.prepare(
+				"select value_json as valueJson from sync_cache where cache_key like 'cloud-bridge:cursor:%'",
+			)
+			.get() as { valueJson: string };
+		expect(JSON.parse(cursorRow.valueJson)).toMatchObject({
+			localBookmarkUpdatedAt: "",
+			localBookmarkAccountId: "",
+			localBookmarkTweetId: "",
+		});
+	});
+
+	it("rejects cloud bookmark rows for another source account", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			accountId: "account:test",
+			fetchImpl: vi.fn(async () =>
+				Response.json({
+					ok: true,
+					bookmarkSyncVersion: 1,
+					localBookmarks: [
+						{
+							accountId: "account:other",
+							tweetId: "tweet:test",
+							isBookmarked: 1,
+							createdAt: "2026-08-03T08:00:00.000Z",
+							updatedAt: "2026-08-03T08:00:00.000Z",
+						},
+					],
+					localBookmarkCursor: {
+						updatedAt: "2026-08-03T08:00:00.000Z",
+						accountId: "acct_primary",
+						tweetId: "tweet:test",
+					},
+					localBookmarksCaughtUp: true,
+				}),
+			),
+		});
+
+		const status = await client.runOnce();
+		expect(status.lastError).toContain("another account");
+		expect(
+			home.db
+				.prepare("select count(*) as count from local_tweet_bookmarks")
+				.get(),
+		).toEqual({ count: 0 });
 	});
 
 	it("uses one canonical account and merges profiles by handle", async () => {

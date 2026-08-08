@@ -25,13 +25,27 @@ const HISTORY_CACHE_PREFIX = "cloud-bridge:history:";
 const MAX_CLIENT_BODY_BYTES = 7 * 1024 * 1024;
 const MAX_PAGES_PER_RUN = 20;
 
-const bridgePurposeSchema = z.enum(["live", "history"]);
+const bridgePurposeSchema = z.enum(["live", "history", "bookmarks"]);
+const bridgeOptionalIsoCursorSchema = z.union([
+	z.literal(""),
+	z.iso.datetime(),
+]);
 
 const bridgeCursorSchema = z.object({
 	updatedAt: z.string().max(64),
 	accountId: z.string().max(256),
 	tweetId: z.string().max(256),
 	kind: z.string().max(64),
+	bookmarkSourceAccountId: z.string().max(256).optional().default(""),
+	localBookmarkUpdatedAt: bridgeOptionalIsoCursorSchema.optional().default(""),
+	localBookmarkAccountId: z.string().max(256).optional().default(""),
+	localBookmarkTweetId: z.string().max(256).optional().default(""),
+	nativeBookmarkUpdatedAt: bridgeOptionalIsoCursorSchema.optional().default(""),
+	nativeBookmarkAccountId: z.string().max(256).optional().default(""),
+	nativeBookmarkTweetId: z.string().max(256).optional().default(""),
+	cloudBookmarkUpdatedAt: bridgeOptionalIsoCursorSchema.optional().default(""),
+	cloudBookmarkAccountId: z.string().max(256).optional().default(""),
+	cloudBookmarkTweetId: z.string().max(256).optional().default(""),
 });
 
 const bridgeHistoryStateSchema = z.object({
@@ -152,29 +166,231 @@ const bridgeProfilePrioritySchema = z
 		}
 	});
 
-export const localCloudBridgeBatchSchema = z.object({
-	version: z.literal(1),
-	purpose: bridgePurposeSchema.optional().default("live"),
-	sentAt: z.string().max(64),
-	caughtUp: z.boolean(),
-	cursor: bridgeCursorSchema,
-	accounts: z.array(bridgeAccountSchema).max(MAX_BATCH_SIZE),
-	profiles: z.array(bridgeProfileSchema).max(MAX_BATCH_SIZE * 2),
-	tweets: z.array(bridgeTweetSchema).max(MAX_BATCH_SIZE * 2),
-	edges: z.array(bridgeEdgeSchema).max(MAX_BATCH_SIZE),
-	xRemarkSnapshot: bridgeXRemarkSnapshotSchema
-		.nullable()
-		.optional()
-		.default(null),
-	profilePriorities: z
-		.array(bridgeProfilePrioritySchema)
-		.max(50_000)
-		.optional()
-		.default([]),
+const bridgeLocalBookmarkSchema = z.object({
+	accountId: z.string().min(1).max(256),
+	tweetId: z.string().min(1).max(256),
+	isBookmarked: z.number().int().min(0).max(1),
+	createdAt: z.iso.datetime(),
+	updatedAt: z.iso.datetime(),
 });
 
-export type LocalCloudBridgeCursor = z.infer<typeof bridgeCursorSchema>;
+const bridgeNativeBookmarkSchema = z.object({
+	accountId: z.string().min(1).max(256),
+	tweetId: z.string().min(1).max(256),
+	collectedAt: z.iso.datetime().nullable(),
+	source: z.string().max(64),
+	rawJson: z.string().max(1_000_000),
+	updatedAt: z.iso.datetime(),
+});
+
+export const localCloudBridgeBatchSchema = z
+	.object({
+		version: z.literal(1),
+		purpose: bridgePurposeSchema.optional().default("live"),
+		sentAt: z.string().max(64),
+		caughtUp: z.boolean(),
+		cursor: bridgeCursorSchema,
+		accounts: z.array(bridgeAccountSchema).max(MAX_BATCH_SIZE),
+		profiles: z.array(bridgeProfileSchema).max(MAX_BATCH_SIZE * 6),
+		tweets: z.array(bridgeTweetSchema).max(MAX_BATCH_SIZE * 6),
+		edges: z.array(bridgeEdgeSchema).max(MAX_BATCH_SIZE),
+		savedPageSize: z
+			.number()
+			.int()
+			.min(1)
+			.max(MAX_BATCH_SIZE)
+			.optional()
+			.default(100),
+		savedAccountId: z
+			.string()
+			.min(1)
+			.max(256)
+			.nullable()
+			.optional()
+			.default(null),
+		localBookmarks: z
+			.array(bridgeLocalBookmarkSchema)
+			.max(MAX_BATCH_SIZE)
+			.optional()
+			.default([]),
+		nativeBookmarks: z
+			.array(bridgeNativeBookmarkSchema)
+			.max(MAX_BATCH_SIZE)
+			.optional()
+			.default([]),
+		xRemarkSnapshot: bridgeXRemarkSnapshotSchema
+			.nullable()
+			.optional()
+			.default(null),
+		profilePriorities: z
+			.array(bridgeProfilePrioritySchema)
+			.max(50_000)
+			.optional()
+			.default([]),
+	})
+	.superRefine((batch, context) => {
+		const accountIds = new Set(batch.accounts.map((account) => account.id));
+		if (batch.savedAccountId && !accountIds.has(batch.savedAccountId)) {
+			context.addIssue({
+				code: "custom",
+				path: ["savedAccountId"],
+				message: "Saved account is missing from the bridge account set.",
+			});
+		}
+		for (const [field, rows] of [
+			["localBookmarks", batch.localBookmarks],
+			["nativeBookmarks", batch.nativeBookmarks],
+		] as const) {
+			const identities = new Set<string>();
+			for (const [index, row] of rows.entries()) {
+				if (row.accountId !== batch.savedAccountId) {
+					context.addIssue({
+						code: "custom",
+						path: [field, index, "accountId"],
+						message: "Saved row does not belong to the bridge saved account.",
+					});
+				}
+				if (!accountIds.has(row.accountId)) {
+					context.addIssue({
+						code: "custom",
+						path: [field, index, "accountId"],
+						message:
+							"Saved row account is missing from the bridge account set.",
+					});
+				}
+				const identity = `${row.accountId}\u0000${row.tweetId}`;
+				if (identities.has(identity)) {
+					context.addIssue({
+						code: "custom",
+						path: [field, index],
+						message: "Duplicate saved row identity.",
+					});
+				}
+				identities.add(identity);
+			}
+		}
+	});
+
+export type LocalCloudBridgeCursor = z.input<typeof bridgeCursorSchema>;
 export type LocalCloudBridgeBatch = z.infer<typeof localCloudBridgeBatchSchema>;
+
+function listLocalBookmarkRows(
+	db: Database,
+	{
+		accountId,
+		updatedAt = "",
+		cursorAccountId = "",
+		tweetId = "",
+		limit = MAX_BATCH_SIZE,
+	}: {
+		accountId?: string;
+		updatedAt?: string;
+		cursorAccountId?: string;
+		tweetId?: string;
+		limit?: number;
+	} = {},
+) {
+	return db
+		.prepare(
+			`select account_id as accountId, tweet_id as tweetId,
+			        is_bookmarked as isBookmarked, created_at as createdAt,
+			        updated_at as updatedAt
+			 from local_tweet_bookmarks
+			 where (? = '' or account_id = ?)
+			   and (
+			     updated_at > ?
+			     or (updated_at = ? and account_id > ?)
+			     or (updated_at = ? and account_id = ? and tweet_id > ?)
+			   )
+			 order by updated_at, account_id, tweet_id
+			 limit ?`,
+		)
+		.all(
+			accountId ?? "",
+			accountId ?? "",
+			updatedAt,
+			updatedAt,
+			cursorAccountId,
+			updatedAt,
+			cursorAccountId,
+			tweetId,
+			limit,
+		) as z.infer<typeof bridgeLocalBookmarkSchema>[];
+}
+
+function listNativeBookmarkRows(
+	db: Database,
+	{
+		accountId,
+		updatedAt = "",
+		cursorAccountId = "",
+		tweetId = "",
+		limit = MAX_BATCH_SIZE,
+	}: {
+		accountId?: string;
+		updatedAt?: string;
+		cursorAccountId?: string;
+		tweetId?: string;
+		limit?: number;
+	} = {},
+) {
+	return db
+		.prepare(
+			`select account_id as accountId, tweet_id as tweetId,
+			        collected_at as collectedAt, source, raw_json as rawJson,
+			        updated_at as updatedAt
+			 from tweet_collections
+			 where kind = 'bookmarks' and (? = '' or account_id = ?)
+			   and (
+			     updated_at > ?
+			     or (updated_at = ? and account_id > ?)
+			     or (updated_at = ? and account_id = ? and tweet_id > ?)
+			   )
+			 order by updated_at, account_id, tweet_id
+			 limit ?`,
+		)
+		.all(
+			accountId ?? "",
+			accountId ?? "",
+			updatedAt,
+			updatedAt,
+			cursorAccountId,
+			updatedAt,
+			cursorAccountId,
+			tweetId,
+			limit,
+		) as z.infer<typeof bridgeNativeBookmarkSchema>[];
+}
+
+function mergeLocalBookmarkRows(
+	rows: readonly z.infer<typeof bridgeLocalBookmarkSchema>[],
+	db: Database,
+) {
+	const upsert = db.prepare(`
+		insert into local_tweet_bookmarks (
+			account_id, tweet_id, is_bookmarked, created_at, updated_at
+		) values (?, ?, ?, ?, ?)
+		on conflict(account_id, tweet_id) do update set
+			is_bookmarked = case
+				when excluded.updated_at > local_tweet_bookmarks.updated_at
+					then excluded.is_bookmarked
+				when excluded.updated_at = local_tweet_bookmarks.updated_at
+					then min(local_tweet_bookmarks.is_bookmarked, excluded.is_bookmarked)
+				else local_tweet_bookmarks.is_bookmarked
+			end,
+			created_at = min(local_tweet_bookmarks.created_at, excluded.created_at),
+			updated_at = max(local_tweet_bookmarks.updated_at, excluded.updated_at)
+	`);
+	for (const row of rows) {
+		upsert.run(
+			row.accountId,
+			row.tweetId,
+			row.isBookmarked,
+			row.createdAt,
+			row.updatedAt,
+		);
+	}
+}
 
 export interface LocalCloudBridgeClientStatus {
 	enabled: boolean;
@@ -235,6 +451,16 @@ function initialCursor(lookbackHours: number, now = new Date()) {
 		accountId: "",
 		tweetId: "",
 		kind: "",
+		bookmarkSourceAccountId: "",
+		localBookmarkUpdatedAt: "",
+		localBookmarkAccountId: "",
+		localBookmarkTweetId: "",
+		nativeBookmarkUpdatedAt: "",
+		nativeBookmarkAccountId: "",
+		nativeBookmarkTweetId: "",
+		cloudBookmarkUpdatedAt: "",
+		cloudBookmarkAccountId: "",
+		cloudBookmarkTweetId: "",
 	} satisfies LocalCloudBridgeCursor;
 }
 
@@ -258,6 +484,16 @@ function beginningCursor() {
 		accountId: "",
 		tweetId: "",
 		kind: "",
+		bookmarkSourceAccountId: "",
+		localBookmarkUpdatedAt: "",
+		localBookmarkAccountId: "",
+		localBookmarkTweetId: "",
+		nativeBookmarkUpdatedAt: "",
+		nativeBookmarkAccountId: "",
+		nativeBookmarkTweetId: "",
+		cloudBookmarkUpdatedAt: "",
+		cloudBookmarkAccountId: "",
+		cloudBookmarkTweetId: "",
 	} satisfies LocalCloudBridgeCursor;
 }
 
@@ -433,10 +669,15 @@ export function buildLocalCloudBridgeBatch({
 	db?: Database;
 } = {}): LocalCloudBridgeBatch {
 	const safeLimit = Math.max(1, Math.min(MAX_BATCH_SIZE, Math.floor(limit)));
-	const start = cursor ?? initialCursor(lookbackHours, now);
-	const edges = db
-		.prepare(
-			`
+	const start = bridgeCursorSchema.parse(
+		cursor ?? initialCursor(lookbackHours, now),
+	);
+	const edges =
+		purpose === "bookmarks"
+			? []
+			: (db
+					.prepare(
+						`
 			select
 				account_id as accountId,
 				tweet_id as tweetId,
@@ -460,33 +701,120 @@ export function buildLocalCloudBridgeBatch({
 			order by updated_at asc, account_id asc, tweet_id asc, kind asc
 			limit ?
 			`,
-		)
-		.all(
-			accountId ?? "",
-			accountId ?? "",
-			start.updatedAt,
-			start.updatedAt,
-			start.accountId,
-			start.updatedAt,
-			start.accountId,
-			start.tweetId,
-			start.updatedAt,
-			start.accountId,
-			start.tweetId,
-			start.kind,
-			safeLimit,
-		) as LocalCloudBridgeBatch["edges"];
+					)
+					.all(
+						accountId ?? "",
+						accountId ?? "",
+						start.updatedAt,
+						start.updatedAt,
+						start.accountId,
+						start.updatedAt,
+						start.accountId,
+						start.tweetId,
+						start.updatedAt,
+						start.accountId,
+						start.tweetId,
+						start.kind,
+						safeLimit,
+					) as LocalCloudBridgeBatch["edges"]);
 	const lastEdge = edges.at(-1);
-	const caughtUp = edges.length < safeLimit;
-	const nextCursor = lastEdge
+	const edgeCaughtUp = purpose === "bookmarks" || edges.length < safeLimit;
+	const nextEdgeCursor = lastEdge
 		? {
+				...start,
 				updatedAt: lastEdge.updatedAt,
 				accountId: lastEdge.accountId,
 				tweetId: lastEdge.tweetId,
 				kind: lastEdge.kind,
 			}
 		: start;
-	const primaryTweetIds = [...new Set(edges.map((edge) => edge.tweetId))];
+	const includeSavedRows = purpose === "bookmarks";
+	const savedAccountId = includeSavedRows
+		? (accountId ??
+			(
+				db
+					.prepare(
+						"select id from accounts order by is_default desc, created_at, id limit 1",
+					)
+					.get() as { id?: string } | undefined
+			)?.id ??
+			null)
+		: null;
+	const savedCursorStart =
+		includeSavedRows && start.bookmarkSourceAccountId !== (savedAccountId ?? "")
+			? {
+					...start,
+					bookmarkSourceAccountId: savedAccountId ?? "",
+					localBookmarkUpdatedAt: "",
+					localBookmarkAccountId: "",
+					localBookmarkTweetId: "",
+					nativeBookmarkUpdatedAt: "",
+					nativeBookmarkAccountId: "",
+					nativeBookmarkTweetId: "",
+					cloudBookmarkUpdatedAt: "",
+					cloudBookmarkAccountId: "",
+					cloudBookmarkTweetId: "",
+				}
+			: start;
+	const localBookmarks = includeSavedRows
+		? listLocalBookmarkRows(db, {
+				accountId: savedAccountId ?? undefined,
+				updatedAt: savedCursorStart.localBookmarkUpdatedAt,
+				cursorAccountId: savedCursorStart.localBookmarkAccountId,
+				tweetId: savedCursorStart.localBookmarkTweetId,
+				limit: safeLimit,
+			})
+		: [];
+	const nativeBookmarks = includeSavedRows
+		? listNativeBookmarkRows(db, {
+				accountId: savedAccountId ?? undefined,
+				updatedAt: savedCursorStart.nativeBookmarkUpdatedAt,
+				cursorAccountId: savedCursorStart.nativeBookmarkAccountId,
+				tweetId: savedCursorStart.nativeBookmarkTweetId,
+				limit: safeLimit,
+			})
+		: [];
+	const lastLocalBookmark = localBookmarks.at(-1);
+	const lastNativeBookmark = nativeBookmarks.at(-1);
+	const caughtUp =
+		edgeCaughtUp &&
+		localBookmarks.length < safeLimit &&
+		nativeBookmarks.length < safeLimit;
+	const nextCursor = {
+		...nextEdgeCursor,
+		...(includeSavedRows
+			? {
+					bookmarkSourceAccountId: savedAccountId ?? "",
+					localBookmarkUpdatedAt:
+						lastLocalBookmark?.updatedAt ??
+						savedCursorStart.localBookmarkUpdatedAt,
+					localBookmarkAccountId:
+						lastLocalBookmark?.accountId ??
+						savedCursorStart.localBookmarkAccountId,
+					localBookmarkTweetId:
+						lastLocalBookmark?.tweetId ?? savedCursorStart.localBookmarkTweetId,
+					nativeBookmarkUpdatedAt:
+						lastNativeBookmark?.updatedAt ??
+						savedCursorStart.nativeBookmarkUpdatedAt,
+					nativeBookmarkAccountId:
+						lastNativeBookmark?.accountId ??
+						savedCursorStart.nativeBookmarkAccountId,
+					nativeBookmarkTweetId:
+						lastNativeBookmark?.tweetId ??
+						savedCursorStart.nativeBookmarkTweetId,
+					cloudBookmarkUpdatedAt: savedCursorStart.cloudBookmarkUpdatedAt,
+					cloudBookmarkAccountId: savedCursorStart.cloudBookmarkAccountId,
+					cloudBookmarkTweetId: savedCursorStart.cloudBookmarkTweetId,
+				}
+			: {}),
+	};
+	const primaryTweetIds = [
+		...new Set([
+			...edges.map((edge) => edge.tweetId),
+			...localBookmarks.map((row) => row.tweetId),
+			...nativeBookmarks.map((row) => row.tweetId),
+		]),
+	];
 	const tweetSql = `
 		select
 			id,
@@ -546,7 +874,15 @@ export function buildLocalCloudBridgeBatch({
 		`,
 		profileIds,
 	);
-	const accountIds = [...new Set(edges.map((edge) => edge.accountId))];
+	const savedSnapshotAccountIds = savedAccountId ? [savedAccountId] : [];
+	const accountIds = [
+		...new Set([
+			...edges.map((edge) => edge.accountId),
+			...localBookmarks.map((row) => row.accountId),
+			...nativeBookmarks.map((row) => row.accountId),
+			...savedSnapshotAccountIds,
+		]),
+	];
 	const accounts = queryByIds<LocalCloudBridgeBatch["accounts"][number]>(
 		db,
 		`
@@ -569,10 +905,14 @@ export function buildLocalCloudBridgeBatch({
 		sentAt: now.toISOString(),
 		caughtUp,
 		cursor: nextCursor,
+		savedPageSize: safeLimit,
+		savedAccountId,
 		accounts,
 		profiles,
 		tweets,
 		edges,
+		localBookmarks,
+		nativeBookmarks,
 		xRemarkSnapshot:
 			caughtUp && purpose === "live" ? buildXRemarkSnapshot(db) : null,
 		profilePriorities:
@@ -722,6 +1062,53 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 					excluded.updated_at
 				)
 		`);
+		const upsertLocalBookmark = db.prepare(`
+			insert into local_tweet_bookmarks (
+				account_id, tweet_id, is_bookmarked, created_at, updated_at
+			) values (?, ?, ?, ?, ?)
+			on conflict(account_id, tweet_id) do update set
+				is_bookmarked = case
+					when excluded.updated_at > local_tweet_bookmarks.updated_at
+						then excluded.is_bookmarked
+					when excluded.updated_at = local_tweet_bookmarks.updated_at
+						then min(
+							local_tweet_bookmarks.is_bookmarked,
+							excluded.is_bookmarked
+						)
+					else local_tweet_bookmarks.is_bookmarked
+				end,
+				created_at = min(
+					local_tweet_bookmarks.created_at,
+					excluded.created_at
+				),
+				updated_at = max(
+					local_tweet_bookmarks.updated_at,
+					excluded.updated_at
+				)
+		`);
+		const upsertNativeBookmark = db.prepare(`
+			insert into tweet_collections (
+				account_id, tweet_id, kind, collected_at, source, raw_json, updated_at
+			) values (?, ?, 'bookmarks', ?, ?, ?, ?)
+			on conflict(account_id, tweet_id, kind) do update set
+				collected_at = coalesce(
+					tweet_collections.collected_at,
+					excluded.collected_at
+				),
+				source = coalesce(
+					nullif(excluded.source, ''),
+					tweet_collections.source
+				),
+				raw_json = case
+					when excluded.raw_json not in ('', '{}', 'null')
+						then excluded.raw_json
+					else tweet_collections.raw_json
+				end,
+				updated_at = max(
+					tweet_collections.updated_at,
+					excluded.updated_at
+				)
+		`);
 		const mergeLocalBookmarks = db.prepare(`
 			insert into local_tweet_bookmarks (
 				account_id, tweet_id, is_bookmarked, created_at, updated_at
@@ -731,8 +1118,13 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 			where account_id = ?
 			on conflict(account_id, tweet_id) do update set
 				is_bookmarked = case
-					when excluded.updated_at >= local_tweet_bookmarks.updated_at
+					when excluded.updated_at > local_tweet_bookmarks.updated_at
 						then excluded.is_bookmarked
+					when excluded.updated_at = local_tweet_bookmarks.updated_at
+						then min(
+							local_tweet_bookmarks.is_bookmarked,
+							excluded.is_bookmarked
+						)
 					else local_tweet_bookmarks.is_bookmarked
 				end,
 				created_at = min(
@@ -774,6 +1166,38 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 		const canonicalAccountId = twitter6551Config.failoverMode
 			? twitter6551Config.accountId
 			: "";
+		const savedSourceAccount = batch.savedAccountId
+			? batch.accounts.find((account) => account.id === batch.savedAccountId)
+			: undefined;
+		if (canonicalAccountId) {
+			const existingCanonical = db
+				.prepare(
+					"select external_user_id as externalUserId from accounts where id = ?",
+				)
+				.get(canonicalAccountId) as
+				| { externalUserId: string | null }
+				| undefined;
+			const incomingExternalUserIds = new Set(
+				batch.accounts
+					.map((account) => account.externalUserId)
+					.filter((value): value is string => Boolean(value)),
+			);
+			if (incomingExternalUserIds.size > 1) {
+				throw new Error(
+					"Cloud bridge batch contains multiple stable X user identities",
+				);
+			}
+			for (const incomingExternalUserId of incomingExternalUserIds) {
+				if (
+					existingCanonical?.externalUserId &&
+					existingCanonical.externalUserId !== incomingExternalUserId
+				) {
+					throw new Error(
+						"Cloud bridge source account does not match the canonical X user",
+					);
+				}
+			}
+		}
 		const mappedAccountId = (accountId: string) =>
 			canonicalAccountId || accountId;
 		let canonicalHandle = canonicalAccountId
@@ -944,6 +1368,25 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 				row.updatedAt,
 			);
 		}
+		for (const row of batch.localBookmarks) {
+			upsertLocalBookmark.run(
+				mappedAccountId(row.accountId),
+				row.tweetId,
+				row.isBookmarked,
+				row.createdAt,
+				row.updatedAt,
+			);
+		}
+		for (const row of batch.nativeBookmarks) {
+			upsertNativeBookmark.run(
+				mappedAccountId(row.accountId),
+				row.tweetId,
+				row.collectedAt,
+				row.source,
+				row.rawJson,
+				row.updatedAt,
+			);
+		}
 		if (batch.xRemarkSnapshot) {
 			db.prepare("delete from xremark_profile_notes").run();
 			for (const annotation of batch.xRemarkSnapshot.annotations) {
@@ -974,6 +1417,28 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 				db,
 			);
 		}
+		const returnedLocalBookmarks =
+			batch.purpose === "bookmarks" && savedSourceAccount
+				? listLocalBookmarkRows(db, {
+						accountId: mappedAccountId(savedSourceAccount.id),
+						updatedAt: batch.cursor.cloudBookmarkUpdatedAt,
+						cursorAccountId: batch.cursor.cloudBookmarkAccountId,
+						tweetId: batch.cursor.cloudBookmarkTweetId,
+						limit: batch.savedPageSize,
+					}).map((row) => ({ ...row, accountId: savedSourceAccount.id }))
+				: [];
+		const lastReturnedLocalBookmark = returnedLocalBookmarks.at(-1);
+		const returnedLocalBookmarkCursor = lastReturnedLocalBookmark
+			? {
+					updatedAt: lastReturnedLocalBookmark.updatedAt,
+					accountId: mappedAccountId(lastReturnedLocalBookmark.accountId),
+					tweetId: lastReturnedLocalBookmark.tweetId,
+				}
+			: {
+					updatedAt: batch.cursor.cloudBookmarkUpdatedAt,
+					accountId: batch.cursor.cloudBookmarkAccountId,
+					tweetId: batch.cursor.cloudBookmarkTweetId,
+				};
 		return {
 			purpose: batch.purpose,
 			caughtUp: batch.caughtUp,
@@ -981,6 +1446,17 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 			profiles: batch.profiles.length,
 			tweets: batch.tweets.length,
 			edges: batch.edges.length,
+			localBookmarkRows: batch.localBookmarks.length,
+			nativeBookmarkRows: batch.nativeBookmarks.length,
+			...(batch.purpose === "bookmarks"
+				? {
+						bookmarkSyncVersion: 1 as const,
+						localBookmarks: returnedLocalBookmarks,
+						localBookmarkCursor: returnedLocalBookmarkCursor,
+						localBookmarksCaughtUp:
+							returnedLocalBookmarks.length < batch.savedPageSize,
+					}
+				: {}),
 			xRemarkAnnotations: batch.xRemarkSnapshot?.annotations.length ?? 0,
 			profilePriorities:
 				batch.purpose === "live" && batch.caughtUp
@@ -1142,6 +1618,19 @@ export class LocalCloudBridgeClient {
 			.object({
 				ok: z.boolean(),
 				message: z.string().optional(),
+				bookmarkSyncVersion: z.literal(1).optional(),
+				localBookmarks: z
+					.array(bridgeLocalBookmarkSchema)
+					.max(MAX_BATCH_SIZE)
+					.optional(),
+				localBookmarkCursor: z
+					.object({
+						updatedAt: bridgeOptionalIsoCursorSchema,
+						accountId: z.string().max(256),
+						tweetId: z.string().max(256),
+					})
+					.optional(),
+				localBookmarksCaughtUp: z.boolean().optional(),
 				profilePriorities: z
 					.array(bridgeProfilePrioritySchema)
 					.max(50_000)
@@ -1166,7 +1655,49 @@ export class LocalCloudBridgeClient {
 				),
 			);
 		}
-		return batch;
+		if (payload.data.bookmarkSyncVersion !== 1) {
+			return purpose === "bookmarks"
+				? {
+						...batch,
+						caughtUp: true,
+						cursor: bridgeCursorSchema.parse(cursor),
+					}
+				: batch;
+		}
+		if (
+			!payload.data.localBookmarks ||
+			!payload.data.localBookmarkCursor ||
+			payload.data.localBookmarksCaughtUp === undefined
+		) {
+			throw new Error(
+				"BirdClaw cloud bridge returned incomplete bookmark sync data",
+			);
+		}
+		if (
+			payload.data.localBookmarks.some(
+				(row) =>
+					!batch.savedAccountId || row.accountId !== batch.savedAccountId,
+			)
+		) {
+			throw new Error(
+				"BirdClaw cloud bridge returned bookmarks for another account",
+			);
+		}
+		if (payload.data.localBookmarks.length > 0) {
+			await enqueueDatabaseWrite((writeDb) =>
+				mergeLocalBookmarkRows(payload.data.localBookmarks ?? [], writeDb),
+			);
+		}
+		return {
+			...batch,
+			caughtUp: batch.caughtUp && payload.data.localBookmarksCaughtUp,
+			cursor: {
+				...batch.cursor,
+				cloudBookmarkUpdatedAt: payload.data.localBookmarkCursor.updatedAt,
+				cloudBookmarkAccountId: payload.data.localBookmarkCursor.accountId,
+				cloudBookmarkTweetId: payload.data.localBookmarkCursor.tweetId,
+			},
+		};
 	}
 
 	private async uploadLivePages() {
@@ -1193,6 +1724,29 @@ export class LocalCloudBridgeClient {
 			if (caughtUp) break;
 		}
 		return caughtUp;
+	}
+
+	private async exchangeBookmarkPages() {
+		for (let page = 0; page < MAX_PAGES_PER_RUN && !this.stopped; page += 1) {
+			const db = getNativeDb({ seedDemoData: false });
+			const cursor = readBridgeCursor(
+				db,
+				this.url,
+				this.lookbackHours,
+				this.now(),
+			);
+			const batch = await this.sendBatch(db, cursor, "bookmarks");
+			await enqueueDatabaseWrite((writeDb) =>
+				writeBridgeCursor(writeDb, this.url, batch.cursor, this.now()),
+			);
+			this.status = {
+				...this.status,
+				lastSuccessAt: this.now().toISOString(),
+				lastError: null,
+			};
+			if (batch.caughtUp) return true;
+		}
+		return false;
 	}
 
 	private async uploadHistoryPages() {
@@ -1234,17 +1788,25 @@ export class LocalCloudBridgeClient {
 
 	async runOnce() {
 		if (this.stopped || this.running) return this.getStatus();
-		if (this.options.isReady && !this.options.isReady()) {
-			this.status = {
-				...this.status,
-				lastError:
-					"Local Twitter collection is not fresh; cloud failover remains active",
-			};
-			return this.getStatus();
-		}
 		this.running = true;
 		this.status = { ...this.status, running: true };
 		try {
+			let bookmarkSyncError: string | null = null;
+			try {
+				await this.exchangeBookmarkPages();
+			} catch (error) {
+				bookmarkSyncError = errorMessage(error);
+			}
+			if (this.options.isReady && !this.options.isReady()) {
+				this.status = {
+					...this.status,
+					lastError:
+						bookmarkSyncError === null
+							? "Local Twitter collection is not fresh; bookmark sync succeeded but cloud failover remains active"
+							: `Local Twitter collection is not fresh; bookmark sync is pending (${bookmarkSyncError})`,
+				};
+				return this.getStatus();
+			}
 			const liveCaughtUp = await this.uploadLivePages();
 			if (liveCaughtUp && !this.stopped) {
 				try {
@@ -1255,6 +1817,12 @@ export class LocalCloudBridgeClient {
 						backfillLastError: errorMessage(error),
 					};
 				}
+			}
+			if (bookmarkSyncError !== null) {
+				this.status = {
+					...this.status,
+					lastError: `Bookmark sync is pending (${bookmarkSyncError})`,
+				};
 			}
 		} catch (error) {
 			this.status = { ...this.status, lastError: errorMessage(error) };

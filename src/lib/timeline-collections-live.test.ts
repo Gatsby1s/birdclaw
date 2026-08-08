@@ -528,6 +528,66 @@ describe("live timeline collection sync", () => {
 		);
 	});
 
+	it("keeps an explicit one-page bookmark request at the requested limit", async () => {
+		setupTempHome();
+		mocks.listBookmarkedTweetsViaXurl.mockResolvedValue({ data: [], meta: {} });
+		const { syncTimelineCollection } =
+			await import("./timeline-collections-live");
+
+		await syncTimelineCollection({
+			kind: "bookmarks",
+			mode: "xurl",
+			limit: 100,
+			maxPages: 1,
+			refresh: true,
+		});
+
+		expect(mocks.listBookmarkedTweetsViaXurl).toHaveBeenCalledWith(
+			expect.objectContaining({
+				maxResults: 100,
+				isPaginatedWalk: false,
+			}),
+		);
+	});
+
+	it("persists a 90 plus 9 item X bookmark walk without truncation", async () => {
+		setupTempHome();
+		mocks.listBookmarkedTweetsViaXurl
+			.mockResolvedValueOnce({
+				data: Array.from({ length: 90 }, (_, index) =>
+					makeTweet(`bookmark_page1_${String(index)}`, "page one bookmark"),
+				),
+				includes: { users: [makeUser()] },
+				meta: { result_count: 90, next_token: "page-2" },
+			})
+			.mockResolvedValueOnce({
+				data: Array.from({ length: 9 }, (_, index) =>
+					makeTweet(`bookmark_page2_${String(index)}`, "page two bookmark"),
+				),
+				includes: { users: [makeUser()] },
+				meta: { result_count: 9 },
+			});
+		const { syncTimelineCollection } =
+			await import("./timeline-collections-live");
+
+		const result = await syncTimelineCollection({
+			kind: "bookmarks",
+			mode: "xurl",
+			limit: 100,
+			all: true,
+			refresh: true,
+		});
+
+		expect(result.count).toBe(99);
+		expect(
+			getNativeDb()
+				.prepare(
+					"select count(*) as count from tweet_collections where kind = 'bookmarks' and tweet_id like 'bookmark_page%'",
+				)
+				.get(),
+		).toEqual({ count: 99 });
+	});
+
 	it("stops xurl collection paging when a page is fully existing rows", async () => {
 		setupTempHome();
 		insertCollectionRow({ tweetId: "liked_existing" });
@@ -637,6 +697,10 @@ describe("live timeline collection sync", () => {
 		});
 		expect(result).not.toHaveProperty("saturated_at_page");
 		expect(mocks.listBookmarkedTweetsViaXurl).toHaveBeenCalledTimes(2);
+		expect(mocks.listBookmarkedTweetsViaXurl).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({ isPaginatedWalk: true }),
+		);
 	});
 
 	it("caps early-stop pagination when max-pages is omitted", async () => {
