@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.72 - 2026-08-08
+
+### Fixed
+
+- Keep Thread, Reply, Analyse, local bookmark, and like count fully inside mobile timeline cards down to 320px, with 44px touch targets and no clipped actions.
+- Put the local bookmark directly in the primary mobile action row while preserving its saved state across reloads and keeping imported X bookmark metadata independent.
+
 ## 0.8.71 - 2026-08-07
 
 ### Added
