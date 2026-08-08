@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.73 - 2026-08-09
+
+### Added
+
+- Keep BirdClaw local bookmarks synchronized between the Mac and Railway with paginated two-way replication, account isolation, deterministic tombstone conflict handling, and safe replay across rolling upgrades.
+- Replicate X-native bookmarks collected on the Mac, including their tweet and profile data, into the unified Bookmarks view on mobile and cloud deployments.
+
+### Fixed
+
+- Apply X's 90-item bookmark page cap only to real multi-page xurl walks so 99+ saved posts continue across page tokens while explicit single-page requests keep their full requested size.
+
 ## 0.8.72 - 2026-08-08
 
 ### Fixed
