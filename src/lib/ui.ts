@@ -101,13 +101,13 @@ export const feedRowTimestampClass =
 	"shrink-0 text-[var(--ink-soft)] hover:underline";
 
 export const feedRowActionsClass =
-	"mt-2 flex max-w-md items-center justify-between text-[var(--ink-soft)]";
+	"mt-2 flex w-full max-w-md flex-col items-stretch text-[var(--ink-soft)] max-sm:-ml-[52px] max-sm:w-[calc(100%+52px)] max-sm:max-w-none";
 
 export const feedActionButtonClass =
-	"action-button group/action inline-flex items-center gap-1 rounded-full border-0 bg-transparent px-2 py-1 text-[13px] text-[var(--ink-soft)] transition-colors duration-150 hover:text-[var(--accent)] disabled:cursor-default disabled:opacity-55";
+	"action-button group/action inline-flex items-center gap-1 rounded-full border-0 bg-transparent px-2 py-1 text-[13px] text-[var(--ink-soft)] transition-colors duration-150 hover:text-[var(--accent)] disabled:cursor-default disabled:opacity-55 max-sm:min-h-11 max-sm:min-w-0 max-sm:flex-col max-sm:justify-center max-sm:gap-0 max-sm:px-0";
 
 export const feedActionIconWrapClass =
-	"grid size-[34px] place-items-center rounded-full transition-colors duration-150 group-hover/action:bg-[var(--accent-soft)]";
+	"grid size-[34px] place-items-center rounded-full transition-colors duration-150 group-hover/action:bg-[var(--accent-soft)] max-sm:size-7";
 
 export const feedActionIconClass = "size-[18px]";
 

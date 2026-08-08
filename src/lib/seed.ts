@@ -234,7 +234,7 @@ export function seedDemoData(db: Database) {
 			authorProfileId: "profile_des",
 			kind: "home",
 			text: "@sam The best product teams spend more time pruning scope than adding it.",
-			createdAt: isoMinutesAgo(42),
+			createdAt: linkMinutesAgo(42),
 			isReplied: 1,
 			replyToId: "tweet_001",
 			likeCount: 382,

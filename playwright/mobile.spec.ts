@@ -1,4 +1,57 @@
 import { expect, test } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+
+async function expectCoreActionsInsideCard({
+	card,
+	page,
+}: {
+	card: Locator;
+	page: Page;
+}) {
+	const actionBar = card.locator('[data-perf="timeline-actions"]');
+	await expect(actionBar).toBeVisible();
+	const actions = [
+		actionBar.getByRole("button", { name: /conversation$/ }),
+		actionBar.getByRole("button", { name: "Reply", exact: true }),
+		actionBar.getByRole("link", { name: /^Analyse @/ }),
+		actionBar.getByRole("button", {
+			name: /^(?:Bookmark locally|Remove local bookmark)$/,
+		}),
+		actionBar.getByLabel(/ likes$/),
+	];
+	const cardBox = await card.boundingBox();
+	const actionBarBox = await actionBar.boundingBox();
+	const viewport = page.viewportSize();
+	expect(cardBox).not.toBeNull();
+	expect(actionBarBox).not.toBeNull();
+	expect(viewport).not.toBeNull();
+	if (!cardBox || !actionBarBox || !viewport) return;
+
+	for (const action of actions) {
+		await expect(action).toBeVisible();
+		const box = await action.boundingBox();
+		expect(box).not.toBeNull();
+		if (!box) continue;
+		expect(box.x).toBeGreaterThanOrEqual(cardBox.x - 0.5);
+		expect(box.x + box.width).toBeLessThanOrEqual(
+			Math.min(cardBox.x + cardBox.width, viewport.width) + 0.5,
+		);
+		expect(box.x).toBeGreaterThanOrEqual(actionBarBox.x - 0.5);
+		expect(box.x + box.width).toBeLessThanOrEqual(
+			actionBarBox.x + actionBarBox.width + 0.5,
+		);
+	}
+
+	for (const action of actions.slice(0, 4)) {
+		const box = await action.boundingBox();
+		expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+	}
+	const dimensions = await page.evaluate(() => ({
+		clientWidth: document.documentElement.clientWidth,
+		scrollWidth: document.documentElement.scrollWidth,
+	}));
+	expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+}
 
 test.describe("mobile shell", () => {
 	test.use({ viewport: { width: 390, height: 844 } });
@@ -73,6 +126,67 @@ test.describe("mobile shell", () => {
 			profileNote.getByText("Mobile profile description"),
 		).toBeVisible();
 		await expect(page.getByRole("button", { name: "Edit note" })).toBeVisible();
+	});
+
+	test("keeps every card action in view and persists a local bookmark", async ({
+		page,
+	}) => {
+		await page.goto("/");
+		const surveyCard = page.locator('[data-perf="timeline-card"]').filter({
+			hasText: "New developer-platform pricing survey",
+		});
+		await expect(surveyCard).toBeVisible();
+		await expectCoreActionsInsideCard({ card: surveyCard, page });
+
+		await page.setViewportSize({ width: 320, height: 800 });
+		await expectCoreActionsInsideCard({ card: surveyCard, page });
+		const bookmarkButton = surveyCard.getByRole("button", {
+			name: "Bookmark locally",
+		});
+		const bookmarkResponse = page.waitForResponse(
+			(response) =>
+				response.url().endsWith("/api/bookmark") &&
+				response.request().method() === "POST",
+		);
+		await bookmarkButton.click();
+		expect((await bookmarkResponse).ok()).toBe(true);
+		await expect(
+			surveyCard.getByRole("button", { name: "Remove local bookmark" }),
+		).toHaveAttribute("aria-pressed", "true");
+
+		await page.reload();
+		const reloadedSurveyCard = page
+			.locator('[data-perf="timeline-card"]')
+			.filter({ hasText: "New developer-platform pricing survey" });
+		await expect(
+			reloadedSurveyCard.getByRole("button", {
+				name: "Remove local bookmark",
+			}),
+		).toHaveAttribute("aria-pressed", "true");
+
+		await page.goto("/bookmarks");
+		const savedSurveyCard = page
+			.locator('[data-perf="timeline-card"]')
+			.filter({ hasText: "New developer-platform pricing survey" });
+		await expect(savedSurveyCard).toBeVisible();
+		const removeResponse = page.waitForResponse(
+			(response) =>
+				response.url().endsWith("/api/bookmark") &&
+				response.request().method() === "POST",
+		);
+		await savedSurveyCard
+			.getByRole("button", { name: "Remove local bookmark" })
+			.click();
+		expect((await removeResponse).ok()).toBe(true);
+		await expect(savedSurveyCard).toHaveCount(0);
+
+		await page.goto("/");
+		await expect(
+			page
+				.locator('[data-perf="timeline-card"]')
+				.filter({ hasText: "New developer-platform pricing survey" })
+				.getByRole("button", { name: "Bookmark locally" }),
+		).toHaveAttribute("aria-pressed", "false");
 	});
 });
 

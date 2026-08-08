@@ -401,6 +401,37 @@ describe("TimelineCard", () => {
 		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 	});
 
+	it("keeps the local bookmark in the primary mobile action row before likes", () => {
+		const { container } = render(
+			<TimelineCard
+				item={{ ...item, localBookmarked: false }}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		const actionBar = container.querySelector('[data-perf="timeline-actions"]');
+		expect(actionBar).not.toBeNull();
+		expect(actionBar?.firstElementChild).toHaveClass("max-sm:grid");
+		const actionItems = Array.from(
+			actionBar?.firstElementChild?.children ?? [],
+		);
+		const bookmarkButton = screen.getByRole("button", {
+			name: "Bookmark locally",
+		});
+		const likes = screen.getByLabelText("12 likes");
+		expect(actionItems.indexOf(bookmarkButton)).toBeGreaterThanOrEqual(0);
+		expect(actionItems.indexOf(bookmarkButton)).toBeLessThan(
+			actionItems.indexOf(likes),
+		);
+		expect(bookmarkButton).toHaveClass("max-sm:min-h-11");
+		expect(
+			screen.getByLabelText("Saved on X or in an imported archive"),
+		).toHaveClass("max-sm:hidden");
+		expect(screen.getByLabelText("1 media attachments")).toHaveClass(
+			"max-sm:hidden",
+		);
+	});
+
 	it("rolls back an optimistic local bookmark when persistence fails", async () => {
 		vi.stubGlobal(
 			"fetch",

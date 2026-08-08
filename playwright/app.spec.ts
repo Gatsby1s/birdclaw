@@ -118,8 +118,14 @@ test("manual sync controls are available on syncable surfaces", async ({
 
 test("filters the home timeline by reply state", async ({ page }) => {
 	await page.goto("/");
-
 	const cards = page.locator('[data-perf="timeline-card"]');
+	await expect.poll(async () => cards.count()).toBeGreaterThanOrEqual(2);
+
+	const repliesToOthers = page.getByRole("checkbox", {
+		name: "Replies to others",
+	});
+	await repliesToOthers.setChecked(true);
+	await expect(repliesToOthers).toBeChecked();
 	await expect.poll(async () => cards.count()).toBeGreaterThanOrEqual(3);
 	await expect(page.getByLabel("Part of a conversation").first()).toBeVisible();
 

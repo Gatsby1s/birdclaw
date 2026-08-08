@@ -758,8 +758,8 @@ export function TimelineCard({
 					tweet={presentedTweet}
 					visibleUrlCards={visibleUrlCards}
 				/>
-				<footer className={feedRowActionsClass}>
-					<div className="flex items-center gap-3 text-[13px] text-[var(--ink-soft)]">
+				<footer className={feedRowActionsClass} data-perf="timeline-actions">
+					<div className="flex items-center gap-3 text-[13px] text-[var(--ink-soft)] max-sm:grid max-sm:w-full max-sm:grid-flow-col max-sm:auto-cols-fr max-sm:gap-0">
 						<button
 							aria-expanded={conversation.isOpen}
 							aria-label={
@@ -778,7 +778,7 @@ export function TimelineCard({
 									strokeWidth={1.7}
 								/>
 							</span>
-							<span className="text-[13px]">
+							<span className="max-sm:max-w-full max-sm:truncate max-sm:text-[11px] max-sm:leading-4">
 								{conversation.isOpen ? "Hide thread" : "Thread"}
 							</span>
 						</button>
@@ -798,7 +798,9 @@ export function TimelineCard({
 										strokeWidth={1.7}
 									/>
 								</span>
-								<span className="text-[13px]">Reply</span>
+								<span className="max-sm:max-w-full max-sm:truncate max-sm:text-[11px] max-sm:leading-4">
+									Reply
+								</span>
 							</button>
 						) : null}
 						<a
@@ -813,25 +815,10 @@ export function TimelineCard({
 							<span className={feedActionIconWrapClass}>
 								<UserSearch className={feedActionIconClass} strokeWidth={1.7} />
 							</span>
-							<span className="text-[13px]">Analyse</span>
-						</a>
-						{showLikeIndicator ? (
-							<span
-								aria-label={`${formatCompactNumber(displayLikeCount)} likes`}
-								className={cx(
-									"inline-flex items-center gap-1 px-2 py-1 text-[13px]",
-									displayLiked && "text-[var(--like)]",
-								)}
-								title={`${formatCompactNumber(displayLikeCount)} likes`}
-							>
-								<Heart
-									className={feedActionIconClass}
-									strokeWidth={1.7}
-									fill={displayLiked ? "currentColor" : "none"}
-								/>
-								<span>{formatCompactNumber(displayLikeCount)}</span>
+							<span className="max-sm:max-w-full max-sm:truncate max-sm:text-[11px] max-sm:leading-4">
+								Analyse
 							</span>
-						) : null}
+						</a>
 						<button
 							aria-label={
 								bookmarked ? "Remove local bookmark" : "Bookmark locally"
@@ -862,14 +849,33 @@ export function TimelineCard({
 									<Bookmark className={feedActionIconClass} strokeWidth={1.7} />
 								)}
 							</span>
-							<span className="text-[13px]">
+							<span className="max-sm:max-w-full max-sm:truncate max-sm:text-[11px] max-sm:leading-4">
 								{bookmarked ? "Saved" : "Save"}
 							</span>
 						</button>
+						{showLikeIndicator ? (
+							<span
+								aria-label={`${formatCompactNumber(displayLikeCount)} likes`}
+								className={cx(
+									"inline-flex items-center gap-1 whitespace-nowrap px-2 py-1 text-[13px] tabular-nums max-sm:min-h-11 max-sm:min-w-0 max-sm:flex-col max-sm:justify-center max-sm:gap-0 max-sm:px-0",
+									displayLiked && "text-[var(--like)]",
+								)}
+								title={`${formatCompactNumber(displayLikeCount)} likes`}
+							>
+								<Heart
+									className={feedActionIconClass}
+									strokeWidth={1.7}
+									fill={displayLiked ? "currentColor" : "none"}
+								/>
+								<span className="max-sm:text-[11px] max-sm:leading-4">
+									{formatCompactNumber(displayLikeCount)}
+								</span>
+							</span>
+						) : null}
 						{displayBookmarked ? (
 							<span
 								aria-label="Saved on X or in an imported archive"
-								className="inline-flex items-center px-2 py-1 text-[var(--ink-soft)]"
+								className="inline-flex items-center px-2 py-1 text-[var(--ink-soft)] max-sm:hidden"
 								title="Saved on X or in an imported archive"
 							>
 								<BookmarkCheck
@@ -881,7 +887,7 @@ export function TimelineCard({
 						{showMediaIndicator ? (
 							<span
 								aria-label={`${String(displayMediaCount)} media attachments`}
-								className="inline-flex items-center gap-1 px-2 py-1 text-[13px]"
+								className="inline-flex items-center gap-1 px-2 py-1 text-[13px] max-sm:hidden"
 								title={`${String(displayMediaCount)} media attachments`}
 							>
 								<Image className={feedActionIconClass} strokeWidth={1.7} />

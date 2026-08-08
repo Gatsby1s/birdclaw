@@ -736,8 +736,8 @@ describe("birdclaw queries", () => {
 
 		expect(items.map((item) => item.id)).toEqual([
 			"tweet_001",
-			"tweet_003",
 			"tweet_002",
+			"tweet_003",
 		]);
 		expect(items.map((item) => item.accountId)).toEqual([
 			"acct_primary",
