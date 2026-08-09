@@ -6,6 +6,7 @@ import {
 	Cloud,
 	Copy,
 	Database,
+	Download,
 	KeyRound,
 	Radio,
 	RefreshCw,
@@ -21,6 +22,7 @@ import {
 	type BirdclawSettings,
 	type ProfileAnalysisSourceSetting,
 	twitter6551RuntimeStatusSchema,
+	twillotManagementResponseSchema,
 	xRemarkLiveSyncStatusSchema,
 	xRemarkPairingResultSchema,
 	xRemarkSyncStatusSchema,
@@ -68,6 +70,16 @@ const sourceOptions = [
 	detail: string;
 	icon: typeof Database;
 }>;
+
+const twillotCaptureLabels = {
+	capture_requested: "Queued",
+	waiting_for_twillot: "Waiting for Twillot",
+	capturing: "Capturing",
+	ingesting: "Importing",
+	caught_up_unverified: "Caught up · verify",
+	verified_complete: "Verified complete",
+	needs_attention: "Needs attention",
+} as const;
 
 async function fetchSettings() {
 	return fetchJson(
@@ -172,6 +184,31 @@ async function manageXRemarkLiveSync(
 			);
 }
 
+async function manageTwillotHistory(input: {
+	action: "pair" | "disconnect" | "verify" | "retry";
+	jobId?: string;
+}) {
+	return fetchJson(
+		"/api/twillot-history",
+		{
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(input),
+		},
+		twillotManagementResponseSchema,
+		"Twillot history update failed",
+	);
+}
+
+async function fetchTwillotHistory() {
+	return fetchJson(
+		"/api/twillot-history",
+		{ cache: "no-store" },
+		twillotManagementResponseSchema,
+		"Twillot history status unavailable",
+	);
+}
+
 async function importXRemarkBackup(file: File) {
 	if (file.size > 25 * 1024 * 1024) {
 		throw new Error(
@@ -217,10 +254,20 @@ function SettingsRoute() {
 		refetchInterval: 5_000,
 		staleTime: 0,
 	});
+	const twillotQuery = useQuery({
+		queryKey: queryKeys.twillotHistory,
+		queryFn: fetchTwillotHistory,
+		refetchInterval: 5_000,
+		staleTime: 0,
+	});
 	const settings = settingsQuery.data ?? null;
 	const [primaryModel, setPrimaryModel] = useState<SummaryProvider>("openai");
 	const [backupModel, setBackupModel] = useState<SummaryProvider>("deepseek");
 	const [deepSeekApiKey, setDeepSeekApiKey] = useState("");
+	const [twillotPairing, setTwillotPairing] = useState<{
+		token: string;
+		endpoint: string;
+	} | null>(null);
 	const mutation = useMutation({
 		mutationFn: updateProfileSource,
 		onSuccess: (data) => {
@@ -255,6 +302,22 @@ function SettingsRoute() {
 			queryClient.setQueryData(queryKeys.xRemarkLive, data);
 		},
 	});
+	const twillotMutation = useMutation({
+		mutationFn: manageTwillotHistory,
+		onSuccess: (data, input) => {
+			const { token: _token, ...statusOnly } = data;
+			queryClient.setQueryData(queryKeys.twillotHistory, statusOnly);
+			if (data.token) {
+				setTwillotPairing({ token: data.token, endpoint: data.endpoint });
+			} else if (input.action === "disconnect") {
+				setTwillotPairing(null);
+			}
+			void queryClient.invalidateQueries({
+				queryKey: queryKeys.twillotHistory,
+			});
+			void queryClient.invalidateQueries({ queryKey: queryKeys.timelines });
+		},
+	});
 	const twitter6551Mutation = useMutation({
 		mutationFn: syncTwitter6551,
 		onSuccess: () => {
@@ -267,6 +330,12 @@ function SettingsRoute() {
 	const pendingSource = mutation.variables;
 	const saving = mutation.isPending;
 	const twitter6551 = settings?.providers.twitter6551;
+	const twillot = twillotQuery.data?.status;
+	const twillotManagementAvailable =
+		twillotQuery.data?.managementAvailable ?? false;
+	const twillotPairingToken = twillotPairing?.token;
+	const twillotEndpoint =
+		twillotPairing?.endpoint ?? twillotQuery.data?.endpoint;
 	const twitter6551Runtime = twitter6551Mutation.data ?? twitter6551?.runtime;
 	const xRemarkStatus = xRemarkMutation.data ?? xRemarkQuery.data;
 	const xRemarkLiveStatus = xRemarkLiveQuery.data ?? xRemarkLiveMutation.data;
@@ -334,6 +403,20 @@ function SettingsRoute() {
 					{twitter6551Mutation.error instanceof Error
 						? twitter6551Mutation.error.message
 						: "6551 sync failed"}
+				</div>
+			) : null}
+			{twillotMutation.error ? (
+				<div className={errorCopyClass}>
+					{twillotMutation.error instanceof Error
+						? twillotMutation.error.message
+						: "Twillot history update failed"}
+				</div>
+			) : null}
+			{twillotQuery.error ? (
+				<div className={errorCopyClass}>
+					{twillotQuery.error instanceof Error
+						? twillotQuery.error.message
+						: "Twillot history status unavailable"}
 				</div>
 			) : null}
 			{settings ? (
@@ -433,6 +516,166 @@ function SettingsRoute() {
 							{backupModel === "openai" ? "ChatGPT" : "DeepSeek V4 / Flash"}.
 							Tokens are stored only in this Mac’s private BirdClaw config.
 						</p>
+					</section>
+					<section className="border-b border-[var(--line)] px-4 py-4">
+						<div className="flex flex-col gap-3">
+							<div className="flex flex-col gap-3 min-[760px]:flex-row min-[760px]:items-start min-[760px]:justify-between">
+								<div className="min-w-0">
+									<div className="flex items-center gap-2 text-[16px] font-bold text-[var(--ink)]">
+										<Download className="size-4.5" strokeWidth={1.9} />
+										<span>Twillot History Queue</span>
+									</div>
+									<p className="mt-1 text-[13px] text-[var(--ink-soft)]">
+										{twillotQuery.data && !twillotManagementAvailable
+											? "The capture queue runs beside Chrome. Open local BirdClaw at 127.0.0.1:3001 to manage it."
+											: twillot
+												? `${twillot.capturedToday.toLocaleString()} / ${twillot.dailyLimit.toLocaleString()} processed today · ${twillot.remainingToday.toLocaleString()} remaining`
+												: "Preparing the Twillot history queue."}
+									</p>
+									{twillot && twillotManagementAvailable ? (
+										<p className="mt-1 text-[12px] text-[var(--ink-soft)]">
+											{String(twillot.queueCounts.queued)} queued ·{" "}
+											{String(twillot.queueCounts.active)} active ·{" "}
+											{String(twillot.queueCounts.deferred)} next-day ·{" "}
+											{twillot.followDetection.enabled
+												? `following checked every ${String(twillot.followDetection.intervalMinutes)} min`
+												: "automatic follow detection starts after pairing"}
+										</p>
+									) : null}
+								</div>
+								{twillotManagementAvailable ? (
+									<div className="flex shrink-0 flex-wrap items-center gap-2">
+										{twillot?.companion.paired ? (
+											<button
+												className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1 text-[13px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)] disabled:opacity-55"
+												disabled={twillotMutation.isPending}
+												onClick={() =>
+													twillotMutation.mutate({ action: "disconnect" })
+												}
+												type="button"
+											>
+												<Unplug className="size-4" strokeWidth={2} />
+												Disconnect
+											</button>
+										) : null}
+										<button
+											className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1 text-[13px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)] disabled:opacity-55"
+											disabled={twillotMutation.isPending}
+											onClick={() => twillotMutation.mutate({ action: "pair" })}
+											type="button"
+										>
+											<KeyRound className="size-4" strokeWidth={2} />
+											{twillotMutation.isPending
+												? "Preparing"
+												: twillot?.companion.paired
+													? "Reset token"
+													: "Pair companion"}
+										</button>
+									</div>
+								) : null}
+							</div>
+
+							{twillotPairingToken && twillotEndpoint ? (
+								<div className="grid gap-2 rounded-xl border border-[var(--line)] bg-[var(--bg-subtle)] p-3">
+									<p className="text-[12px] font-semibold text-[var(--ink)]">
+										Save these once in the BirdClaw Twillot bridge.
+									</p>
+									{[
+										["Endpoint", twillotEndpoint],
+										["Pairing token", twillotPairingToken],
+									].map(([label, value]) => (
+										<div
+											className="flex min-w-0 items-center gap-2"
+											key={label}
+										>
+											<span className="w-24 shrink-0 text-[11px] font-semibold text-[var(--ink-soft)]">
+												{label}
+											</span>
+											<code className="min-w-0 flex-1 truncate text-[12px] text-[var(--ink)]">
+												{value}
+											</code>
+											<button
+												aria-label={`Copy ${label}`}
+												className="inline-flex size-11 shrink-0 items-center justify-center rounded-full border border-[var(--line-strong)] text-[var(--ink)] hover:bg-[var(--bg-hover)]"
+												onClick={() =>
+													void navigator.clipboard.writeText(value)
+												}
+												type="button"
+											>
+												<Copy className="size-4" strokeWidth={2} />
+											</button>
+										</div>
+									))}
+									<button
+										className="min-h-11 justify-self-start rounded-full border border-[var(--line-strong)] px-3 text-[12px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)]"
+										onClick={() => setTwillotPairing(null)}
+										type="button"
+									>
+										Hide pairing secret
+									</button>
+								</div>
+							) : null}
+
+							{twillotManagementAvailable && twillot?.jobs.length ? (
+								<div className="grid gap-2">
+									{twillot.jobs.slice(0, 8).map((job) => (
+										<div
+											className="flex min-w-0 flex-col gap-2 rounded-xl border border-[var(--line)] px-3 py-2 min-[600px]:flex-row min-[600px]:items-center min-[600px]:justify-between"
+											key={job.id}
+										>
+											<div className="min-w-0">
+												<p className="truncate text-[13px] font-bold text-[var(--ink)]">
+													@{job.handle}
+												</p>
+												<p className="text-[11px] text-[var(--ink-soft)]">
+													{twillotCaptureLabels[job.captureStatus]} ·{" "}
+													{job.importedCount.toLocaleString()} imported
+												</p>
+											</div>
+											{job.captureStatus === "caught_up_unverified" ? (
+												<button
+													className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border border-[var(--line-strong)] px-3 text-[12px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)]"
+													disabled={twillotMutation.isPending}
+													onClick={() =>
+														twillotMutation.mutate({
+															action: "verify",
+															jobId: job.id,
+														})
+													}
+													type="button"
+												>
+													Mark verified
+												</button>
+											) : job.captureStatus === "needs_attention" ? (
+												<button
+													className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border border-[var(--line-strong)] px-3 text-[12px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)]"
+													disabled={twillotMutation.isPending}
+													onClick={() =>
+														twillotMutation.mutate({
+															action: "retry",
+															jobId: job.id,
+														})
+													}
+													type="button"
+												>
+													Retry
+												</button>
+											) : null}
+										</div>
+									))}
+								</div>
+							) : null}
+
+							<p className="text-[11px] leading-5 text-[var(--ink-soft)]">
+								Mini is treated as a 20,000-record daily soft budget. The queue
+								executes locally beside Chrome; imported canonical tweets are
+								forwarded to Railway by BirdClaw’s existing cloud bridge.
+								Twillot has no supported task API or remaining-quota endpoint,
+								so the bridge opens the official page and waits for you to start
+								the export. A finished capture remains unverified until its
+								history boundary is checked.
+							</p>
+						</div>
 					</section>
 					<section className="border-b border-[var(--line)] px-4 py-4">
 						<div className="flex flex-col gap-3 min-[760px]:flex-row min-[760px]:items-center min-[760px]:justify-between">

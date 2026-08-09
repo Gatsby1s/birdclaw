@@ -551,11 +551,16 @@ function mergeBridgeTweetHydration(
 		) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		on conflict(id) do update set
 			handle = coalesce(nullif(excluded.handle, ''), profiles.handle),
-			display_name = coalesce(
-				nullif(excluded.display_name, ''),
-				profiles.display_name
-			),
-			bio = coalesce(nullif(excluded.bio, ''), profiles.bio),
+			display_name = case
+				when length(trim(excluded.display_name)) > length(trim(profiles.display_name))
+					then excluded.display_name
+				else profiles.display_name
+			end,
+			bio = case
+				when length(trim(excluded.bio)) > length(trim(profiles.bio))
+					then excluded.bio
+				else profiles.bio
+			end,
 			followers_count = max(
 				profiles.followers_count,
 				excluded.followers_count
@@ -565,7 +570,7 @@ function mergeBridgeTweetHydration(
 				excluded.following_count
 			),
 			public_metrics_json = case
-				when excluded.public_metrics_json not in ('', '{}', 'null')
+				when length(excluded.public_metrics_json) > length(profiles.public_metrics_json)
 					then excluded.public_metrics_json
 				else profiles.public_metrics_json
 			end,
@@ -581,12 +586,12 @@ function mergeBridgeTweetHydration(
 				profiles.verified_type
 			),
 			entities_json = case
-				when excluded.entities_json not in ('', '{}', 'null')
+				when length(excluded.entities_json) > length(profiles.entities_json)
 					then excluded.entities_json
 				else profiles.entities_json
 			end,
 			raw_json = case
-				when excluded.raw_json not in ('', '{}', 'null')
+				when length(excluded.raw_json) > length(profiles.raw_json)
 					then excluded.raw_json
 				else profiles.raw_json
 			end,
@@ -598,16 +603,26 @@ function mergeBridgeTweetHydration(
 			like_count, media_count, entities_json, media_json, quoted_tweet_id
 		) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		on conflict(id) do update set
-			author_profile_id = excluded.author_profile_id,
-			text = excluded.text,
-			created_at = excluded.created_at,
+			author_profile_id = coalesce(
+				nullif(tweets.author_profile_id, ''),
+				excluded.author_profile_id
+			),
+			text = case
+				when length(excluded.text) > length(tweets.text) then excluded.text
+				else tweets.text
+			end,
+			created_at = coalesce(nullif(tweets.created_at, ''), excluded.created_at),
 			is_replied = max(tweets.is_replied, excluded.is_replied),
 			reply_to_id = coalesce(tweets.reply_to_id, excluded.reply_to_id),
-			like_count = excluded.like_count,
+			like_count = max(tweets.like_count, excluded.like_count),
 			media_count = max(tweets.media_count, excluded.media_count),
-			entities_json = excluded.entities_json,
+			entities_json = case
+				when length(excluded.entities_json) > length(tweets.entities_json)
+					then excluded.entities_json
+				else tweets.entities_json
+			end,
 			media_json = case
-				when excluded.media_json not in ('', '[]', 'null')
+				when length(excluded.media_json) > length(tweets.media_json)
 					then excluded.media_json
 				else tweets.media_json
 			end,
@@ -664,7 +679,10 @@ function mergeBridgeTweetHydration(
 			row.mediaJson,
 			row.quotedTweetId,
 		);
-		replaceTweetFts(db, row.id, row.text);
+		const canonical = db
+			.prepare("select text from tweets where id = ?")
+			.get(row.id) as { text: string };
+		replaceTweetFts(db, row.id, canonical.text);
 	}
 }
 

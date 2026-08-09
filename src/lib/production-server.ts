@@ -43,6 +43,10 @@ import {
 	startWeeklyDigestScheduler,
 	stopWeeklyDigestScheduler,
 } from "./weekly-digest-scheduler";
+import {
+	startTwillotFollowScheduler,
+	stopTwillotFollowScheduler,
+} from "./twillot-follow-scheduler";
 import { handleRagMcpHttpRequest } from "./rag-mcp-server";
 import {
 	getTwitter6551RuntimeConfig,
@@ -721,6 +725,7 @@ export async function startProductionServer({
 	server.once("close", () => {
 		stopPeriodDigestScheduler();
 		stopWeeklyDigestScheduler();
+		stopTwillotFollowScheduler();
 		stopLocalCloudBridgeClient();
 		stopLocalAnalysisBridgeWorker();
 		stopLocalTwitterCollector();
@@ -733,6 +738,7 @@ export async function startProductionServer({
 	try {
 		startPeriodDigestScheduler();
 		startWeeklyDigestScheduler();
+		startTwillotFollowScheduler();
 		startLocalTwitterCollector();
 		startLocalCloudBridgeClient();
 		startLocalAnalysisBridgeWorker();
@@ -767,6 +773,7 @@ export async function runProductionServer(options: ProductionServerOptions) {
 			removeHandlers();
 			stopPeriodDigestScheduler();
 			stopWeeklyDigestScheduler();
+			stopTwillotFollowScheduler();
 			stopLocalCloudBridgeClient();
 			stopLocalAnalysisBridgeWorker();
 			stopLocalTwitterCollector();

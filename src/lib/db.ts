@@ -772,6 +772,92 @@ function ensureFollowGraphTables(db: Database) {
 	`);
 }
 
+function ensureTwillotHistoryQueueTables(db: Database) {
+	db.exec(`
+    create table if not exists twillot_history_jobs (
+      id text primary key,
+      account_id text not null,
+      profile_id text not null,
+      provider text not null,
+      external_user_id text,
+      handle text not null,
+      state text not null check (
+        state in ('queued', 'leased', 'deferred', 'completed', 'failed')
+      ),
+      capture_status text not null check (
+        capture_status in (
+          'capture_requested', 'waiting_for_twillot', 'capturing', 'ingesting',
+          'caught_up_unverified', 'verified_complete', 'needs_attention'
+        )
+      ),
+      cursor_json text not null default 'null',
+      next_run_at text not null,
+      lease_token text,
+      lease_expires_at text,
+      lease_usage_day text,
+      lease_allowance integer not null default 0 check (lease_allowance >= 0),
+      attempt_count integer not null default 0 check (attempt_count >= 0),
+      downloaded_count integer not null default 0 check (downloaded_count >= 0),
+      imported_count integer not null default 0 check (imported_count >= 0),
+      last_error text,
+      created_at text not null,
+      updated_at text not null,
+      completed_at text,
+      unique (account_id, profile_id, provider)
+    );
+
+    create table if not exists twillot_history_batches (
+      provider text not null,
+      batch_id text not null,
+      job_id text not null,
+      lease_token text not null,
+      usage_day text not null,
+      downloaded_count integer not null check (downloaded_count >= 0),
+      imported_count integer not null check (imported_count >= 0),
+      cursor_json text not null default 'null',
+      done integer not null check (done in (0, 1)),
+      resulting_state text not null check (
+        resulting_state in ('queued', 'deferred', 'completed')
+      ),
+      next_run_at text,
+      created_at text not null,
+      primary key (provider, batch_id)
+    );
+
+    create table if not exists twillot_history_daily_usage (
+      provider text not null,
+      usage_day text not null,
+      downloaded_count integer not null default 0 check (downloaded_count >= 0),
+      updated_at text not null,
+      primary key (provider, usage_day)
+    );
+
+    create table if not exists twillot_companion_sync (
+      id integer primary key check (id = 1),
+      token_hash text not null,
+      token_created_at text not null,
+      source_id text,
+      last_seen_at text,
+      last_job_id text,
+      last_error text
+    );
+
+    create table if not exists twillot_follow_sync_state (
+      id integer primary key check (id = 1),
+      last_started_at text,
+      last_success_at text,
+      last_error text
+    );
+
+    create index if not exists idx_twillot_history_jobs_ready
+      on twillot_history_jobs(provider, state, next_run_at, created_at);
+    create index if not exists idx_twillot_history_jobs_lease
+      on twillot_history_jobs(provider, state, lease_expires_at);
+    create index if not exists idx_twillot_history_batches_job
+      on twillot_history_batches(job_id, created_at);
+	`);
+}
+
 function ensureDiscussionHistoryTable(db: Database) {
 	db.exec(`
     create table if not exists discussion_history (
@@ -1260,6 +1346,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add BirdClaw profile priorities",
 		up: (db) => {
 			ensureBirdclawProfilePrioritiesTable(db);
+		},
+	},
+	{
+		version: 15,
+		name: "add durable Twillot history queue",
+		up: (db) => {
+			ensureTwillotHistoryQueueTables(db);
 		},
 	},
 ];

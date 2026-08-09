@@ -34,6 +34,57 @@ function settingsPayload(profileSource: "local" | "xurl" | "6551") {
 	};
 }
 
+function twillotPayload(): any {
+	return {
+		ok: true,
+		endpoint: "http://127.0.0.1:3001/api/integrations/twillot-history",
+		localQueueExecutor: true,
+		managementAvailable: true,
+		status: {
+			plan: "Mini",
+			monthlyPriceUsd: 4.99,
+			dailyLimit: 20_000,
+			softBudget: true,
+			usageDay: "2026-08-10",
+			capturedToday: 0,
+			reservedToday: 0,
+			remainingToday: 20_000,
+			nextResetAt: "2026-08-10T16:00:00.000Z",
+			nextEligibleAt: null,
+			totalImported: 0,
+			queueCounts: {
+				queued: 0,
+				active: 0,
+				deferred: 0,
+				caughtUpUnverified: 0,
+				verifiedComplete: 0,
+				needsAttention: 0,
+			},
+			companion: {
+				paired: false,
+				connected: false,
+				tokenCreatedAt: null,
+				lastSeenAt: null,
+				lastError: null,
+			},
+			followDetection: {
+				enabled: false,
+				running: false,
+				intervalMinutes: 360,
+				lastStartedAt: null,
+				lastSuccessAt: null,
+				lastError: null,
+			},
+			jobs: [],
+			limitations: {
+				vendorStartRequiresUser: true,
+				providerRemainingUnknown: true,
+				caughtUpRequiresVerification: true,
+			},
+		},
+	};
+}
+
 afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
@@ -44,6 +95,9 @@ describe("settings route", () => {
 		const fetchMock = vi.fn(
 			async (input: RequestInfo | URL, init?: RequestInit) => {
 				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/twillot-history") {
+					return Response.json(twillotPayload());
+				}
 				if (url.pathname === "/api/xremark") {
 					return Response.json({
 						imported: false,
@@ -102,6 +156,9 @@ describe("settings route", () => {
 		const fetchMock = vi.fn(
 			async (input: RequestInfo | URL, init?: RequestInit) => {
 				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/twillot-history") {
+					return Response.json(twillotPayload());
+				}
 				if (url.pathname === "/api/settings") {
 					return Response.json(settingsPayload("local"));
 				}
@@ -173,6 +230,9 @@ describe("settings route", () => {
 		const fetchMock = vi.fn(
 			async (input: RequestInfo | URL, init?: RequestInit) => {
 				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/twillot-history") {
+					return Response.json(twillotPayload());
+				}
 				if (url.pathname === "/api/settings") {
 					return Response.json(settingsPayload("local"));
 				}
@@ -225,5 +285,205 @@ describe("settings route", () => {
 				"Connected · saved and deleted notes appear automatically",
 			),
 		).toBeVisible();
+	});
+
+	it("refreshes Twillot status after pairing instead of pinning mutation data", async () => {
+		let paired = false;
+		const fetchMock = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/settings") {
+					return Response.json(settingsPayload("local"));
+				}
+				if (url.pathname === "/api/xremark") {
+					return Response.json({
+						imported: false,
+						annotationCount: 0,
+						matchedProfileCount: 0,
+					});
+				}
+				if (url.pathname === "/api/integrations/xremark") {
+					return Response.json({
+						paired: false,
+						connected: false,
+						extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
+						endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+						lastSequence: 0,
+					});
+				}
+				if (url.pathname === "/api/twillot-history") {
+					if (init?.method === "POST") {
+						paired = true;
+						const response = twillotPayload();
+						response.status.capturedToday = 1;
+						response.status.remainingToday = 19_999;
+						return Response.json({ ...response, token: "t".repeat(43) });
+					}
+					const response = twillotPayload();
+					if (paired) {
+						response.status.capturedToday = 2;
+						response.status.remainingToday = 19_998;
+						response.status.companion.paired = true;
+					}
+					return Response.json(response);
+				}
+				throw new Error(`Unexpected URL: ${url.pathname}`);
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const { queryClient } = render(<SettingsRoute />);
+		expect(
+			await screen.findByText("Twillot History Queue"),
+		).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Pair companion" }));
+		expect(await screen.findByText("t".repeat(43))).toBeInTheDocument();
+		await queryClient.refetchQueries({ queryKey: queryKeys.twillotHistory });
+		expect(
+			await screen.findByText("2 / 20,000 processed today · 19,998 remaining"),
+		).toBeVisible();
+		fireEvent.click(
+			screen.getByRole("button", { name: "Hide pairing secret" }),
+		);
+		expect(screen.queryByText("t".repeat(43))).not.toBeInTheDocument();
+	});
+
+	it("renders active Twillot queue states and sends verify and retry actions", async () => {
+		const twillot = twillotPayload();
+		twillot.status.capturedToday = 345;
+		twillot.status.reservedToday = 200;
+		twillot.status.remainingToday = 19_455;
+		twillot.status.companion = {
+			paired: true,
+			connected: true,
+			tokenCreatedAt: "2026-08-10T00:00:00.000Z",
+			lastSeenAt: "2026-08-10T01:00:00.000Z",
+			lastError: null,
+		};
+		twillot.status.followDetection = {
+			enabled: true,
+			running: false,
+			intervalMinutes: 360,
+			lastStartedAt: "2026-08-10T00:00:00.000Z",
+			lastSuccessAt: "2026-08-10T00:01:00.000Z",
+			lastError: null,
+		};
+		twillot.status.queueCounts = {
+			queued: 1,
+			active: 1,
+			deferred: 1,
+			caughtUpUnverified: 1,
+			verifiedComplete: 0,
+			needsAttention: 1,
+		};
+		twillot.status.jobs = [
+			{
+				id: "00000000-0000-4000-8000-000000000001",
+				handle: "caught_up",
+				state: "completed",
+				captureStatus: "caught_up_unverified",
+				nextRunAt: "2026-08-10T01:00:00.000Z",
+				importedCount: 120,
+				downloadedCount: 120,
+				attemptCount: 1,
+				lastError: null,
+				updatedAt: "2026-08-10T01:00:00.000Z",
+			},
+			{
+				id: "00000000-0000-4000-8000-000000000002",
+				handle: "failed_target",
+				state: "failed",
+				captureStatus: "needs_attention",
+				nextRunAt: "2026-08-10T01:00:00.000Z",
+				importedCount: 4,
+				downloadedCount: 4,
+				attemptCount: 2,
+				lastError: "schema changed",
+				updatedAt: "2026-08-10T01:00:00.000Z",
+			},
+		];
+		const actions: unknown[] = [];
+		const fetchMock = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/settings")
+					return Response.json(settingsPayload("local"));
+				if (url.pathname === "/api/xremark")
+					return Response.json({
+						imported: false,
+						annotationCount: 0,
+						matchedProfileCount: 0,
+					});
+				if (url.pathname === "/api/integrations/xremark")
+					return Response.json({
+						paired: false,
+						connected: false,
+						extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
+						endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+						lastSequence: 0,
+					});
+				if (url.pathname === "/api/twillot-history") {
+					if (init?.method === "POST")
+						actions.push(JSON.parse(String(init.body)));
+					return Response.json(twillot);
+				}
+				throw new Error(`Unexpected URL: ${url.pathname}`);
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<SettingsRoute />);
+		expect(await screen.findByText("@caught_up")).toBeVisible();
+		expect(screen.getByText("@failed_target")).toBeVisible();
+		expect(screen.getByText(/following checked every 360 min/)).toBeVisible();
+		fireEvent.click(screen.getByRole("button", { name: "Mark verified" }));
+		await waitFor(() =>
+			expect(actions).toContainEqual({
+				action: "verify",
+				jobId: "00000000-0000-4000-8000-000000000001",
+			}),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+		await waitFor(() =>
+			expect(actions).toContainEqual({
+				action: "retry",
+				jobId: "00000000-0000-4000-8000-000000000002",
+			}),
+		);
+	});
+
+	it("explains that remote Settings cannot manage the local Twillot executor", async () => {
+		const remote = twillotPayload();
+		remote.managementAvailable = false;
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/settings")
+				return Response.json(settingsPayload("local"));
+			if (url.pathname === "/api/twillot-history") return Response.json(remote);
+			if (url.pathname === "/api/xremark")
+				return Response.json({
+					imported: false,
+					annotationCount: 0,
+					matchedProfileCount: 0,
+				});
+			return Response.json({
+				paired: false,
+				connected: false,
+				extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
+				endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+				lastSequence: 0,
+			});
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<SettingsRoute />);
+		expect(
+			await screen.findByText(
+				"The capture queue runs beside Chrome. Open local BirdClaw at 127.0.0.1:3001 to manage it.",
+			),
+		).toBeVisible();
+		expect(
+			screen.queryByRole("button", { name: "Pair companion" }),
+		).not.toBeInTheDocument();
 	});
 });

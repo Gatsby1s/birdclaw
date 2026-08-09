@@ -18,6 +18,7 @@ export const queryKeys = {
 	xRemark: ["xremark"] as const,
 	profilePriority: ["profile-priority"] as const,
 	xRemarkLive: ["xremark-live"] as const,
+	twillotHistory: ["twillot-history"] as const,
 	rateLimits: ["rate-limits"] as const,
 };
 

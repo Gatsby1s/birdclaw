@@ -12,7 +12,7 @@ import {
 describe("backup table codecs", () => {
 	it("owns every portable table and path exactly once", () => {
 		expect(assertBackupTableCodecRegistry()).toBe(true);
-		expect(BACKUP_TABLE_CODECS).toHaveLength(26);
+		expect(BACKUP_TABLE_CODECS).toHaveLength(29);
 		expect(BACKUP_TABLE_CODECS.map((codec) => codec.name)).toEqual([
 			"accounts",
 			"profiles",
@@ -40,12 +40,15 @@ describe("backup table codecs", () => {
 			"follow_snapshot_members",
 			"follow_edges",
 			"follow_events",
+			"twillot_history_jobs",
+			"twillot_history_batches",
+			"twillot_history_daily_usage",
 		]);
 		expect(
 			BACKUP_TABLE_CODECS.map((codec) => codec.merge.order).sort(
 				(left, right) => left - right,
 			),
-		).toEqual(Array.from({ length: 26 }, (_, index) => index));
+		).toEqual(Array.from({ length: 29 }, (_, index) => index));
 
 		const sample = { created_at: "2026-01-02T00:00:00.000Z", kind: "likes" };
 		for (const codec of BACKUP_TABLE_CODECS) {

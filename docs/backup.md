@@ -31,6 +31,9 @@ data/follow_snapshots.jsonl
 data/follow_snapshot_members.jsonl
 data/follow_edges.jsonl
 data/follow_events.jsonl
+data/twillot/history-jobs.jsonl
+data/twillot/history-batches.jsonl
+data/twillot/daily-usage.jsonl
 ```
 
 Design rules:
@@ -46,6 +49,7 @@ Design rules:
 - **profile notes** preserve BirdClaw's private profile remarks and descriptions
 - **profile priorities** preserve special-follow choices, including disabled tombstones so a newer unfollow wins during cross-device merges
 - **follow graph** shards preserve followers/following snapshots, snapshot members, current edges, and append-only churn events
+- **Twillot history queue** shards preserve resumable jobs, idempotent batch receipts, and daily soft-budget usage; active leases and pairing tokens are intentionally excluded
 - **discussion history** preserves completed Discuss results and only their cited tweet/DM snapshots, so old analyses can be restored without another model call
 - **no SQLite WAL/SHM, FTS shadow tables, or transient live cache rows** ever land in the backup
 

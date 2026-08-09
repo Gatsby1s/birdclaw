@@ -17,6 +17,7 @@ import type {
 	XurlPublicMetrics,
 } from "./types";
 import { upsertProfileFromXUser } from "./x-profile";
+import { enqueueTwillotHistoryJob } from "./twillot-history-queue";
 
 const DEFAULT_FOLLOW_CACHE_TTL_MS = 24 * 60 * 60_000;
 const DEFAULT_FOLLOW_PAGE_LIMIT = 1000;
@@ -484,6 +485,16 @@ function mergeFollowPayloadIntoLocalStore({
 
 	return db.transaction(() => {
 		const existingEdges = getExistingEdges(db, accountId, direction);
+		const hadCompleteSnapshot = Boolean(
+			db
+				.prepare(
+					`select 1 as found
+					 from follow_snapshots
+					 where account_id = ? and direction = ? and status = 'complete'
+					 limit 1`,
+				)
+				.get(accountId, direction),
+		);
 		const currentProfileIds = new Set<string>();
 
 		insertSnapshot.run(
@@ -524,6 +535,26 @@ function mergeFollowPayloadIntoLocalStore({
 				now,
 				now,
 			);
+			if (direction === "following" && previous?.current === 1) {
+				db.prepare(
+					`update twillot_history_jobs
+					 set external_user_id = coalesce(?, external_user_id),
+					     handle = ?,
+					     updated_at = ?
+					 where account_id = ?
+					   and profile_id = ?
+					   and provider = 'twillot'
+					   and (handle <> ? or coalesce(external_user_id, '') <> coalesce(?, ''))`,
+				).run(
+					resolved.externalUserId,
+					resolved.profile.handle,
+					now,
+					accountId,
+					resolved.profile.id,
+					resolved.profile.handle,
+					resolved.externalUserId,
+				);
+			}
 			if (!previous || previous.current === 0) {
 				insertEvent.run(
 					`follow_event_${randomUUID()}`,
@@ -535,6 +566,15 @@ function mergeFollowPayloadIntoLocalStore({
 					now,
 					snapshotId,
 				);
+				if (direction === "following" && hadCompleteSnapshot) {
+					enqueueTwillotHistoryJob(db, {
+						accountId,
+						profileId: resolved.profile.id,
+						externalUserId: resolved.externalUserId,
+						handle: resolved.profile.handle,
+						now: new Date(now),
+					});
+				}
 			}
 		});
 

@@ -81,8 +81,14 @@ export function getBirdclawPaths(): BirdclawPaths {
 		return cachedPaths;
 	}
 
+	const testHome =
+		process.env.NODE_ENV === "test" || process.env.VITEST === "true"
+			? process.env.BIRDCLAW_TEST_HOME?.trim()
+			: undefined;
 	const rootDir =
-		process.env.BIRDCLAW_HOME?.trim() || path.join(os.homedir(), ".birdclaw");
+		process.env.BIRDCLAW_HOME?.trim() ||
+		testHome ||
+		path.join(os.homedir(), ".birdclaw");
 
 	cachedPaths = {
 		rootDir,
