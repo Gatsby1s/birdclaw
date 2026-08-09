@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.75 - 2026-08-09
+
+### Added
+
+- Make paired Mac and Railway bookmarks visibly automatic: remove the misleading cloud collection command, refresh the open Bookmarks view every 30 seconds and on focus, and retain an explicit `Sync from X` fallback only for unpaired local installs.
+
+### Fixed
+
+- Hydrate cloud-only bookmarks with their tweet, author, and one-level quote data before merging state on the Mac, including a resumable capability-gated replay for bookmarks skipped by older deployments.
+- Bound large bookmark hydration responses with safe pagination while preserving cursors, tombstones, idempotent replay, and rollback compatibility.
+
 ## 0.8.74 - 2026-08-09
 
 ### Fixed
