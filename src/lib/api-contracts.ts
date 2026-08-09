@@ -330,6 +330,7 @@ export const queryEnvelopeSchema = z.object({
 	accounts: z.array(accountRecordSchema),
 	archives: z.array(archiveCandidateSchema),
 	transport: transportStatusSchema,
+	bookmarkSyncMode: z.enum(["automatic", "manual"]).default("manual"),
 	stats: z.object({
 		home: z.number(),
 		mentions: z.number(),

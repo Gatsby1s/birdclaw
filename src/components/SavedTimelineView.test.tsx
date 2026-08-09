@@ -83,6 +83,7 @@ describe("SavedTimelineView", () => {
 					JSON.stringify({
 						stats: { home: 3, mentions: 1, dms: 4, needsReply: 2, inbox: 3 },
 						transport: { statusText: "local" },
+						bookmarkSyncMode: "automatic",
 						accounts: [],
 						archives: [],
 					}),
@@ -117,6 +118,136 @@ describe("SavedTimelineView", () => {
 		const queryUrl = queryUrls[0];
 		expect(queryUrl?.searchParams.get("bookmarked")).toBe("true");
 		expect(queryUrl?.searchParams.get("liked")).toBeNull();
+		expect(
+			screen.getByRole("status", { name: "Bookmarks sync automatically" }),
+		).toHaveTextContent("Auto sync");
+		expect(
+			screen.queryByRole("button", { name: "Sync bookmarks" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("labels the local-only fallback as an X collection instead of cloud sync", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = String(input);
+				if (url.endsWith("/api/status")) {
+					return new Response(
+						JSON.stringify({
+							stats: {
+								home: 0,
+								mentions: 0,
+								dms: 0,
+								needsReply: 0,
+								inbox: 0,
+							},
+							transport: { statusText: "local" },
+							bookmarkSyncMode: "manual",
+							accounts: [],
+							archives: [],
+						}),
+					);
+				}
+				if (url.includes("/api/query")) {
+					return new Response(JSON.stringify({ resource: "home", items: [] }));
+				}
+				throw new Error(`Unexpected fetch ${url}`);
+			}),
+		);
+
+		render(
+			<SavedTimelineView
+				eyebrow="bookmarks"
+				filter="bookmarked"
+				loadingLabel="Loading bookmarks..."
+				searchPlaceholder="Search bookmarks"
+				title="Bookmarks"
+			/>,
+		);
+
+		expect(
+			await screen.findByRole("button", { name: "Sync from X" }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("status", { name: "Bookmarks sync automatically" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.getByText(
+				"Use Sync from X to collect bookmarks into this local view.",
+			),
+		).toBeInTheDocument();
+	});
+
+	it("refreshes bookmarks automatically without posting a sync command", async () => {
+		vi.useFakeTimers();
+		try {
+			const queryUrls: URL[] = [];
+			const syncBodies: unknown[] = [];
+			const fetchMock = vi.fn(
+				async (input: RequestInfo | URL, init?: RequestInit) => {
+					const url = String(input);
+					if (url.endsWith("/api/status")) {
+						return new Response(
+							JSON.stringify({
+								stats: {
+									home: 3,
+									mentions: 1,
+									dms: 4,
+									needsReply: 2,
+									inbox: 3,
+								},
+								transport: { statusText: "local" },
+								bookmarkSyncMode: "automatic",
+								accounts: [],
+								archives: [],
+							}),
+						);
+					}
+					if (url.includes("/api/query")) {
+						queryUrls.push(new URL(url));
+						return new Response(
+							JSON.stringify({
+								resource: "home",
+								items: [{ id: "bookmark_auto", text: "automatic bookmark" }],
+							}),
+						);
+					}
+					if (url.endsWith("/api/sync") && init?.body) {
+						syncBodies.push(JSON.parse(String(init.body)));
+					}
+					throw new Error(`Unexpected fetch ${url}`);
+				},
+			);
+			vi.stubGlobal("fetch", fetchMock);
+
+			render(
+				<SavedTimelineView
+					eyebrow="bookmarks"
+					filter="bookmarked"
+					loadingLabel="Loading bookmarks..."
+					searchPlaceholder="Search bookmarks"
+					title="Bookmarks"
+				/>,
+			);
+
+			await vi.waitFor(() => {
+				expect(screen.getByText("automatic bookmark")).toBeInTheDocument();
+			});
+			const initialQueryCount = queryUrls.length;
+			window.dispatchEvent(new Event("visibilitychange"));
+			await vi.waitFor(() => {
+				expect(queryUrls.length).toBeGreaterThan(initialQueryCount);
+			});
+			const focusedQueryCount = queryUrls.length;
+
+			await vi.advanceTimersByTimeAsync(30_000);
+			await vi.waitFor(() => {
+				expect(queryUrls.length).toBeGreaterThan(focusedQueryCount);
+			});
+			expect(syncBodies).toEqual([]);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("shows item count before status metadata arrives and trims search params", async () => {

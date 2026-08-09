@@ -22,6 +22,7 @@ interface UseTimelineRouteDataOptions {
 	resource: Exclude<ResourceKind, "dms">;
 	search: string;
 	errorFallback: string;
+	refreshIntervalMs?: number;
 	author?: string;
 	allAccounts?: boolean;
 	replyFilter?: ReplyFilter;
@@ -90,6 +91,7 @@ export function useTimelineRouteData({
 	resource,
 	search,
 	errorFallback,
+	refreshIntervalMs,
 	author,
 	allAccounts = false,
 	replyFilter,
@@ -147,6 +149,9 @@ export function useTimelineRouteData({
 				: undefined;
 		},
 		staleTime: TIMELINE_STALE_TIME_MS,
+		refetchInterval: refreshIntervalMs,
+		refetchIntervalInBackground: false,
+		refetchOnWindowFocus: refreshIntervalMs ? "always" : undefined,
 	});
 	const items = useMemo(() => {
 		const seen = new Set<string>();

@@ -9,6 +9,19 @@ import { getTransportStatusEffect } from "./xurl";
 
 export type { QueryEnvelope } from "./api-contracts";
 
+function getBookmarkSyncMode() {
+	const cloudReceiverConfigured = Boolean(
+		process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN?.trim(),
+	);
+	const cloudClientConfigured = Boolean(
+		process.env.BIRDCLAW_CLOUD_BRIDGE_URL?.trim() &&
+		process.env.BIRDCLAW_CLOUD_BRIDGE_TOKEN?.trim(),
+	);
+	return cloudReceiverConfigured || cloudClientConfigured
+		? ("automatic" as const)
+		: ("manual" as const);
+}
+
 function toError(error: unknown) {
 	return error instanceof Error ? error : new Error(String(error));
 }
@@ -108,6 +121,7 @@ export function getQueryEnvelopeEffect({
 		});
 
 		return {
+			bookmarkSyncMode: getBookmarkSyncMode(),
 			stats: {
 				home: homeCount,
 				mentions: mentionCount,

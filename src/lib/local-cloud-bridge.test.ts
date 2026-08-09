@@ -291,6 +291,539 @@ describe("local cloud bridge", () => {
 		]);
 	});
 
+	it("hydrates a cloud-only local bookmark into the Mac bookmark view", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db, {
+			id: "profile:cloud",
+			handle: "cloud_author",
+			displayName: "Cloud Author",
+			avatarUrl: "https://example.com/cloud-author.jpg",
+		});
+		insertTestProfile(home.db, {
+			id: "profile:quote",
+			handle: "quoted_author",
+			displayName: "Quoted Author",
+			avatarUrl: "https://example.com/quoted-author.jpg",
+		});
+		insertTestTweet(home.db, {
+			id: "tweet:quote",
+			authorProfileId: "profile:quote",
+			text: "Quoted from the cloud",
+		});
+		insertTestTweet(home.db, {
+			id: "tweet:cloud-only",
+			authorProfileId: "profile:cloud",
+			text: "Bookmarked only in the cloud",
+			quotedTweetId: "tweet:quote",
+		});
+		home.db
+			.prepare(
+				`insert into local_tweet_bookmarks (
+					account_id, tweet_id, is_bookmarked, created_at, updated_at
+				) values (?, ?, 1, ?, ?)`,
+			)
+			.run(
+				"account:test",
+				"tweet:cloud-only",
+				"2026-08-03T08:00:00.000Z",
+				"2026-08-03T08:00:00.000Z",
+			);
+
+		const cloudResponse = await importLocalCloudBridgeBatch(
+			buildLocalCloudBridgeBatch({
+				purpose: "bookmarks",
+				accountId: "account:test",
+				db: home.db,
+			}),
+		);
+		expect(cloudResponse).toMatchObject({
+			bookmarkSyncVersion: 1,
+			bookmarkProfiles: expect.arrayContaining([
+				expect.objectContaining({ id: "profile:cloud" }),
+				expect.objectContaining({ id: "profile:quote" }),
+			]),
+			bookmarkTweets: expect.arrayContaining([
+				expect.objectContaining({ id: "tweet:cloud-only" }),
+				expect.objectContaining({ id: "tweet:quote" }),
+			]),
+		});
+
+		home.switchHome();
+		insertTestAccount(home.db);
+		const client = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			accountId: "account:test",
+			fetchImpl: vi.fn(async (_url, init) => {
+				const request = JSON.parse(String(init?.body)) as { purpose: string };
+				return Response.json(
+					request.purpose === "bookmarks" ? cloudResponse : { ok: true },
+				);
+			}),
+		});
+
+		await client.runOnce();
+		await client.runOnce();
+
+		const items = listTimelineItems({
+			resource: "home",
+			bookmarkedOnly: true,
+			limit: 10,
+		});
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject({
+			id: "tweet:cloud-only",
+			text: "Bookmarked only in the cloud",
+			author: {
+				id: "profile:cloud",
+				handle: "cloud_author",
+				avatarUrl: "https://example.com/cloud-author.jpg",
+			},
+			quotedTweet: {
+				id: "tweet:quote",
+				text: "Quoted from the cloud",
+				author: {
+					id: "profile:quote",
+					handle: "quoted_author",
+					avatarUrl: "https://example.com/quoted-author.jpg",
+				},
+			},
+		});
+		expect(
+			home.db.prepare("select count(*) as count from profiles").get(),
+		).toEqual({ count: 2 });
+		expect(
+			home.db.prepare("select count(*) as count from tweets").get(),
+		).toEqual({
+			count: 2,
+		});
+		expect(
+			home.db.prepare("select count(*) as count from tweets_fts").get(),
+		).toEqual({ count: 2 });
+		expect(
+			home.db
+				.prepare("select count(*) as count from local_tweet_bookmarks")
+				.get(),
+		).toEqual({ count: 1 });
+	});
+
+	it("paginates large bookmark hydration responses below the safe byte budget", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		const oversizedMediaJson = JSON.stringify([
+			{ type: "photo", url: `https://example.com/${"x".repeat(900_000)}` },
+		]);
+		for (let index = 0; index < 8; index += 1) {
+			const tweetId = `tweet:large-hydration:${String(index)}`;
+			const updatedAt = `2026-08-03T08:00:0${String(index)}.000Z`;
+			insertTestTweet(home.db, {
+				id: tweetId,
+				text: `Large bookmark ${String(index)}`,
+				mediaCount: 1,
+				mediaJson: oversizedMediaJson,
+			});
+			home.db
+				.prepare(
+					`insert into local_tweet_bookmarks (
+						account_id, tweet_id, is_bookmarked, created_at, updated_at
+					) values (?, ?, 1, ?, ?)`,
+				)
+				.run("account:test", tweetId, updatedAt, updatedAt);
+		}
+
+		const makeRequest = (cloudCursor?: {
+			updatedAt: string;
+			accountId: string;
+			tweetId: string;
+		}) =>
+			buildLocalCloudBridgeBatch({
+				purpose: "bookmarks",
+				accountId: "account:test",
+				limit: 8,
+				cursor: {
+					updatedAt: "2099-01-01T00:00:00.000Z",
+					accountId: "",
+					tweetId: "",
+					kind: "",
+					bookmarkSourceAccountId: "account:test",
+					localBookmarkUpdatedAt: "2099-01-01T00:00:00.000Z",
+					localBookmarkAccountId: "account:test",
+					localBookmarkTweetId: "",
+					cloudBookmarkUpdatedAt: cloudCursor?.updatedAt ?? "",
+					cloudBookmarkAccountId: cloudCursor?.accountId ?? "",
+					cloudBookmarkTweetId: cloudCursor?.tweetId ?? "",
+				},
+				db: home.db,
+			});
+
+		const first = await importLocalCloudBridgeBatch(makeRequest());
+		expect(first.localBookmarks).toHaveLength(4);
+		expect(first.localBookmarksCaughtUp).toBe(false);
+		expect(
+			Buffer.byteLength(
+				JSON.stringify({
+					localBookmarks: first.localBookmarks,
+					bookmarkProfiles: first.bookmarkProfiles,
+					bookmarkTweets: first.bookmarkTweets,
+				}),
+			),
+		).toBeLessThanOrEqual(6 * 1024 * 1024);
+
+		const second = await importLocalCloudBridgeBatch(
+			makeRequest(first.localBookmarkCursor),
+		);
+		expect(second.localBookmarks).toHaveLength(4);
+		expect(second.localBookmarksCaughtUp).toBe(true);
+		expect([
+			...(first.localBookmarks ?? []),
+			...(second.localBookmarks ?? []),
+		]).toHaveLength(8);
+	});
+
+	it("replays advanced cloud bookmark cursors only after hydration capability is available", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		const localTimestamp = "2026-08-03T07:00:00.000Z";
+		const timestampOne = "2026-08-03T08:00:00.000Z";
+		const timestampTwo = "2026-08-03T09:00:00.000Z";
+		const timestampThree = "2026-08-03T10:00:00.000Z";
+		const profile = (id: string, handle: string) => ({
+			id,
+			handle,
+			displayName: handle,
+			bio: "",
+			followersCount: 0,
+			followingCount: 0,
+			publicMetricsJson: "{}",
+			avatarHue: 1,
+			avatarUrl: null,
+			location: null,
+			url: null,
+			verifiedType: null,
+			entitiesJson: "{}",
+			rawJson: "{}",
+			createdAt: timestampOne,
+		});
+		const tweet = (id: string, authorProfileId: string, text: string) => ({
+			id,
+			authorProfileId,
+			text,
+			createdAt: timestampOne,
+			isReplied: 0,
+			replyToId: null,
+			likeCount: 0,
+			mediaCount: 0,
+			entitiesJson: "{}",
+			mediaJson: "[]",
+			quotedTweetId: null,
+		});
+		const bookmark = (tweetId: string, updatedAt: string) => ({
+			accountId: "account:test",
+			tweetId,
+			isBookmarked: 1,
+			createdAt: updatedAt,
+			updatedAt,
+		});
+		const profileOne = profile("profile:one", "one");
+		const profileTwo = profile("profile:two", "two");
+		const tweetOne = tweet("tweet:one", profileOne.id, "First cloud bookmark");
+		const tweetTwo = tweet("tweet:two", profileTwo.id, "Second cloud bookmark");
+		const profileThree = profile("profile:three", "three");
+		const tweetThree = tweet(
+			"tweet:three",
+			profileThree.id,
+			"Third cloud bookmark",
+		);
+		const cloudPage = ({
+			rows,
+			profiles,
+			tweets,
+			updatedAt,
+			caughtUp,
+			capability = true,
+		}: {
+			rows: Array<ReturnType<typeof bookmark>>;
+			profiles: Array<ReturnType<typeof profile>>;
+			tweets: Array<ReturnType<typeof tweet>>;
+			updatedAt: string;
+			caughtUp: boolean;
+			capability?: boolean;
+		}) => ({
+			ok: true,
+			bookmarkSyncVersion: 1,
+			...(capability ? { bookmarkHydrationVersion: 1 } : {}),
+			localBookmarks: rows,
+			...(capability
+				? { bookmarkProfiles: profiles, bookmarkTweets: tweets }
+				: {}),
+			localBookmarkCursor: {
+				updatedAt,
+				accountId: updatedAt ? "account:test" : "",
+				tweetId:
+					rows.at(-1)?.tweetId ??
+					(updatedAt === timestampThree
+						? tweetThree.id
+						: updatedAt
+							? tweetTwo.id
+							: ""),
+			},
+			localBookmarksCaughtUp: caughtUp,
+		});
+		insertTestProfile(home.db, { id: "profile:seed", handle: "seed" });
+		insertTestTweet(home.db, {
+			id: "tweet:seed",
+			authorProfileId: "profile:seed",
+		});
+		home.db
+			.prepare(
+				`insert into local_tweet_bookmarks (
+					account_id, tweet_id, is_bookmarked, created_at, updated_at
+				) values ('account:test', 'tweet:seed', 1, ?, ?)`,
+			)
+			.run(localTimestamp, localTimestamp);
+		home.db
+			.prepare(
+				`insert into tweet_collections (
+					account_id, tweet_id, kind, collected_at, source, raw_json, updated_at
+				) values ('account:test', 'tweet:seed', 'bookmarks', ?, 'test', '{}', ?)`,
+			)
+			.run(localTimestamp, localTimestamp);
+		const oldCloudClient = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			accountId: "account:test",
+			batchSize: 1,
+			fetchImpl: vi.fn(async (_url, init) => {
+				const request = JSON.parse(String(init?.body)) as { purpose: string };
+				return Response.json(
+					request.purpose === "bookmarks"
+						? cloudPage({
+								rows: [],
+								profiles: [],
+								tweets: [],
+								updatedAt: timestampTwo,
+								caughtUp: true,
+								capability: false,
+							})
+						: { ok: true },
+				);
+			}),
+		});
+
+		await oldCloudClient.runOnce();
+		const cursorRow = () =>
+			home.db
+				.prepare(
+					"select value_json as valueJson from sync_cache where cache_key like 'cloud-bridge:cursor:%'",
+				)
+				.get() as { valueJson: string };
+		const hydrationRow = () =>
+			home.db
+				.prepare(
+					"select value_json as valueJson from sync_cache where cache_key like 'cloud-bridge:bookmark-hydration:%'",
+				)
+				.get() as { valueJson: string } | undefined;
+		expect(JSON.parse(cursorRow().valueJson)).toMatchObject({
+			cloudBookmarkUpdatedAt: timestampTwo,
+			localBookmarkUpdatedAt: localTimestamp,
+			nativeBookmarkUpdatedAt: localTimestamp,
+		});
+		expect(hydrationRow()).toBeUndefined();
+		home.db
+			.prepare(
+				"delete from tweet_collections where account_id = 'account:test' and tweet_id = 'tweet:seed'",
+			)
+			.run();
+		home.db
+			.prepare(
+				"delete from local_tweet_bookmarks where account_id = 'account:test' and tweet_id = 'tweet:seed'",
+			)
+			.run();
+		home.db.prepare("delete from tweets where id = 'tweet:seed'").run();
+		home.db.prepare("delete from profiles where id = 'profile:seed'").run();
+
+		let removeCapabilityAtSecondPage = true;
+		let completedCloudRollback = false;
+		let thirdBookmarkAvailable = false;
+		const replayCursors: string[] = [];
+		const upgradedFetch = vi.fn(async (_url, init) => {
+			const request = JSON.parse(String(init?.body)) as {
+				purpose: string;
+				cursor: { cloudBookmarkUpdatedAt: string };
+			};
+			if (request.purpose !== "bookmarks") return Response.json({ ok: true });
+			const cursor = request.cursor.cloudBookmarkUpdatedAt;
+			replayCursors.push(cursor);
+			if (cursor === "") {
+				return Response.json(
+					cloudPage({
+						rows: [bookmark(tweetOne.id, timestampOne)],
+						profiles: [profileOne],
+						tweets: [tweetOne],
+						updatedAt: timestampOne,
+						caughtUp: false,
+					}),
+				);
+			}
+			if (cursor === timestampOne) {
+				const response = cloudPage({
+					rows: [bookmark(tweetTwo.id, timestampTwo)],
+					profiles: [profileTwo],
+					tweets: [tweetTwo],
+					updatedAt: timestampTwo,
+					caughtUp: false,
+					capability: !removeCapabilityAtSecondPage,
+				});
+				removeCapabilityAtSecondPage = false;
+				return Response.json(response);
+			}
+			if (cursor === timestampTwo && thirdBookmarkAvailable) {
+				return Response.json(
+					cloudPage({
+						rows: [bookmark(tweetThree.id, timestampThree)],
+						profiles: [profileThree],
+						tweets: [tweetThree],
+						updatedAt: timestampThree,
+						caughtUp: false,
+						capability: !completedCloudRollback,
+					}),
+				);
+			}
+			return Response.json(
+				cloudPage({
+					rows: [],
+					profiles: [],
+					tweets: [],
+					updatedAt: cursor || timestampTwo,
+					caughtUp: true,
+				}),
+			);
+		});
+		const firstUpgradedClient = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			accountId: "account:test",
+			batchSize: 1,
+			fetchImpl: upgradedFetch,
+		});
+
+		await firstUpgradedClient.runOnce();
+		expect(replayCursors).toEqual([timestampTwo, "", timestampOne]);
+		expect(firstUpgradedClient.getStatus().lastError).toContain(
+			"hydration capability disappeared",
+		);
+		expect(JSON.parse(cursorRow().valueJson)).toMatchObject({
+			cloudBookmarkUpdatedAt: timestampOne,
+			localBookmarkUpdatedAt: localTimestamp,
+			nativeBookmarkUpdatedAt: localTimestamp,
+		});
+		expect(JSON.parse(hydrationRow()?.valueJson ?? "{}")).toMatchObject({
+			version: 1,
+			accountId: "account:test",
+			status: "replaying",
+			completedAt: null,
+		});
+		expect(
+			home.db
+				.prepare(
+					"select tweet_id as tweetId from local_tweet_bookmarks order by tweet_id",
+				)
+				.all(),
+		).toEqual([{ tweetId: "tweet:one" }]);
+
+		const restartedClient = new LocalCloudBridgeClient({
+			url: "http://127.0.0.1:3000",
+			token: "bridge-secret",
+			accountId: "account:test",
+			batchSize: 1,
+			fetchImpl: upgradedFetch,
+		});
+		await restartedClient.runOnce();
+		expect(replayCursors.slice(3)).toEqual([
+			timestampOne,
+			timestampTwo,
+			timestampTwo,
+		]);
+		expect(JSON.parse(cursorRow().valueJson)).toMatchObject({
+			cloudBookmarkUpdatedAt: timestampTwo,
+		});
+		expect(JSON.parse(hydrationRow()?.valueJson ?? "{}")).toMatchObject({
+			version: 1,
+			accountId: "account:test",
+			status: "completed",
+			completedAt: expect.any(String),
+		});
+		expect(
+			listTimelineItems({
+				resource: "home",
+				bookmarkedOnly: true,
+				limit: 10,
+			})
+				.map((item) => item.id)
+				.sort(),
+		).toEqual(["tweet:one", "tweet:two"]);
+
+		const countsBefore = home.db
+			.prepare(
+				`select
+					(select count(*) from profiles) as profiles,
+					(select count(*) from tweets) as tweets,
+					(select count(*) from local_tweet_bookmarks) as bookmarks`,
+			)
+			.get();
+		const requestCountBefore = replayCursors.length;
+		await restartedClient.runOnce();
+		expect(replayCursors.slice(requestCountBefore)).toEqual([timestampTwo]);
+		expect(
+			home.db
+				.prepare(
+					`select
+						(select count(*) from profiles) as profiles,
+						(select count(*) from tweets) as tweets,
+						(select count(*) from local_tweet_bookmarks) as bookmarks`,
+				)
+				.get(),
+		).toEqual(countsBefore);
+
+		thirdBookmarkAvailable = true;
+		completedCloudRollback = true;
+		const rollbackRequestCount = replayCursors.length;
+		await restartedClient.runOnce();
+		expect(replayCursors.slice(rollbackRequestCount)).toEqual([timestampTwo]);
+		expect(restartedClient.getStatus().lastError).toContain(
+			"hydration capability disappeared",
+		);
+		expect(JSON.parse(cursorRow().valueJson)).toMatchObject({
+			cloudBookmarkUpdatedAt: timestampTwo,
+		});
+		expect(JSON.parse(hydrationRow()?.valueJson ?? "{}")).toMatchObject({
+			status: "completed",
+			completedAt: expect.any(String),
+		});
+		expect(
+			home.db
+				.prepare("select count(*) as count from local_tweet_bookmarks")
+				.get(),
+		).toEqual({ count: 2 });
+
+		completedCloudRollback = false;
+		await restartedClient.runOnce();
+		expect(JSON.parse(cursorRow().valueJson)).toMatchObject({
+			cloudBookmarkUpdatedAt: timestampThree,
+		});
+		expect(
+			listTimelineItems({
+				resource: "home",
+				bookmarkedOnly: true,
+				limit: 10,
+			})
+				.map((item) => item.id)
+				.sort(),
+		).toEqual(["tweet:one", "tweet:three", "tweet:two"]);
+	});
+
 	it("renders all 99 native X bookmarks after a 90 plus 9 cloud bridge walk", async () => {
 		const home = getHome();
 		insertTestAccount(home.db);
