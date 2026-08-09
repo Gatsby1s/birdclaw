@@ -23,6 +23,10 @@ const schedulerMocks = vi.hoisted(() => ({
 	startWeekly: vi.fn(),
 	stopWeekly: vi.fn(),
 }));
+const localTwitterCollectorMocks = vi.hoisted(() => ({
+	start: vi.fn(),
+	stop: vi.fn(),
+}));
 
 vi.mock("./period-digest-scheduler", () => ({
 	startPeriodDigestScheduler: schedulerMocks.startDaily,
@@ -32,6 +36,16 @@ vi.mock("./period-digest-scheduler", () => ({
 vi.mock("./weekly-digest-scheduler", () => ({
 	startWeeklyDigestScheduler: schedulerMocks.startWeekly,
 	stopWeeklyDigestScheduler: schedulerMocks.stopWeekly,
+}));
+
+vi.mock("./local-twitter-collector", () => ({
+	getLocalTwitterCollectorStatus: vi.fn(() => ({
+		lastTimelineSuccessAt: null,
+	})),
+	isLocalTwitterCollectorFresh: vi.fn(() => false),
+	resolveLocalTwitterCollectorAccountId: vi.fn(() => "account:test"),
+	startLocalTwitterCollector: localTwitterCollectorMocks.start,
+	stopLocalTwitterCollector: localTwitterCollectorMocks.stop,
 }));
 
 const tempDirs: string[] = [];
@@ -83,6 +97,7 @@ describe("production server", () => {
 		});
 		expect(schedulerMocks.startDaily).toHaveBeenCalledTimes(1);
 		expect(schedulerMocks.startWeekly).toHaveBeenCalledTimes(1);
+		expect(localTwitterCollectorMocks.start).toHaveBeenCalledTimes(1);
 		try {
 			const address = server.address();
 			if (!address || typeof address === "string") {
@@ -112,6 +127,7 @@ describe("production server", () => {
 		}
 		expect(schedulerMocks.stopDaily).toHaveBeenCalledTimes(1);
 		expect(schedulerMocks.stopWeekly).toHaveBeenCalledTimes(1);
+		expect(localTwitterCollectorMocks.stop).toHaveBeenCalledTimes(1);
 	});
 
 	it("protects remote pages with the signed mobile login flow", async () => {
@@ -301,6 +317,7 @@ describe("production server", () => {
 						homeTweets: 1,
 					},
 				});
+				const heartbeatBeforeLegacyBatch = getTwitter6551RuntimeStatus();
 				const accepted = await fetch(url, {
 					method: "POST",
 					headers: {
@@ -313,17 +330,113 @@ describe("production server", () => {
 				await expect(accepted.json()).resolves.toMatchObject({
 					ok: true,
 					purpose: "live",
+					homeTimelineSyncedAt: null,
 					caughtUp: true,
 					edges: 0,
 				});
-				const heartbeatAfterLive = getTwitter6551RuntimeStatus();
+				expect(getTwitter6551RuntimeStatus()).toMatchObject({
+					lastLocalHeartbeatAt: heartbeatBeforeLegacyBatch.lastLocalHeartbeatAt,
+					localBridgeIngestedCount:
+						heartbeatBeforeLegacyBatch.localBridgeIngestedCount,
+				});
+
+				const homeTimelineSyncedAt = new Date(Date.now() - 1_000).toISOString();
+				const attested = await fetch(url, {
+					method: "POST",
+					headers: {
+						authorization: "Bearer bridge-secret",
+						"content-type": "application/json",
+					},
+					body: JSON.stringify({ ...batch, homeTimelineSyncedAt }),
+				});
+				expect(attested.status).toBe(200);
+				await expect(attested.json()).resolves.toMatchObject({
+					ok: true,
+					purpose: "live",
+					homeTimelineSyncedAt,
+					caughtUp: true,
+				});
+				const heartbeatAfterAttestedLive = getTwitter6551RuntimeStatus();
+				expect(heartbeatAfterAttestedLive.lastLocalHeartbeatAt).toBe(
+					homeTimelineSyncedAt,
+				);
+
+				const withinSkewSyncedAt = new Date(Date.now() + 10_000).toISOString();
+				const beforeWithinSkewHeartbeat = Date.now();
+				const withinSkew = await fetch(url, {
+					method: "POST",
+					headers: {
+						authorization: "Bearer bridge-secret",
+						"content-type": "application/json",
+					},
+					body: JSON.stringify({
+						...batch,
+						homeTimelineSyncedAt: withinSkewSyncedAt,
+					}),
+				});
+				expect(withinSkew.status).toBe(200);
+				const afterWithinSkewHeartbeat = Date.now();
+				const heartbeatAfterWithinSkew = getTwitter6551RuntimeStatus();
+				const recordedWithinSkewMs = Date.parse(
+					heartbeatAfterWithinSkew.lastLocalHeartbeatAt ?? "",
+				);
+				expect(recordedWithinSkewMs).toBeGreaterThanOrEqual(
+					beforeWithinSkewHeartbeat,
+				);
+				expect(recordedWithinSkewMs).toBeLessThanOrEqual(
+					afterWithinSkewHeartbeat,
+				);
+				expect(recordedWithinSkewMs).toBeLessThan(
+					Date.parse(withinSkewSyncedAt),
+				);
+
+				const future = await fetch(url, {
+					method: "POST",
+					headers: {
+						authorization: "Bearer bridge-secret",
+						"content-type": "application/json",
+					},
+					body: JSON.stringify({
+						...batch,
+						homeTimelineSyncedAt: new Date(Date.now() + 60_000).toISOString(),
+					}),
+				});
+				expect(future.status).toBe(200);
+				expect(getTwitter6551RuntimeStatus()).toMatchObject({
+					lastLocalHeartbeatAt: heartbeatAfterWithinSkew.lastLocalHeartbeatAt,
+					localBridgeIngestedCount:
+						heartbeatAfterWithinSkew.localBridgeIngestedCount,
+				});
+
+				const stale = await fetch(url, {
+					method: "POST",
+					headers: {
+						authorization: "Bearer bridge-secret",
+						"content-type": "application/json",
+					},
+					body: JSON.stringify({
+						...batch,
+						homeTimelineSyncedAt: "2026-01-01T00:00:00.000Z",
+					}),
+				});
+				expect(stale.status).toBe(200);
+				expect(getTwitter6551RuntimeStatus()).toMatchObject({
+					lastLocalHeartbeatAt: heartbeatAfterWithinSkew.lastLocalHeartbeatAt,
+					localBridgeIngestedCount:
+						heartbeatAfterWithinSkew.localBridgeIngestedCount,
+				});
+
 				const historyAccepted = await fetch(url, {
 					method: "POST",
 					headers: {
 						authorization: "Bearer bridge-secret",
 						"content-type": "application/json",
 					},
-					body: JSON.stringify({ ...batch, purpose: "history" }),
+					body: JSON.stringify({
+						...batch,
+						purpose: "history",
+						homeTimelineSyncedAt,
+					}),
 				});
 				expect(historyAccepted.status).toBe(200);
 				await expect(historyAccepted.json()).resolves.toMatchObject({
@@ -332,8 +445,9 @@ describe("production server", () => {
 					caughtUp: true,
 				});
 				expect(getTwitter6551RuntimeStatus()).toMatchObject({
-					lastLocalHeartbeatAt: heartbeatAfterLive.lastLocalHeartbeatAt,
-					localBridgeIngestedCount: heartbeatAfterLive.localBridgeIngestedCount,
+					lastLocalHeartbeatAt: heartbeatAfterWithinSkew.lastLocalHeartbeatAt,
+					localBridgeIngestedCount:
+						heartbeatAfterWithinSkew.localBridgeIngestedCount,
 				});
 			} finally {
 				await new Promise<void>((resolve) => server.close(() => resolve()));

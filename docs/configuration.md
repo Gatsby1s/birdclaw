@@ -103,10 +103,12 @@ See [Backup](backup.md). When `autoSync` is enabled, read commands pull + merge 
 | `BIRDCLAW_CLOUD_BRIDGE_INTERVAL_SECONDS`    | Local heartbeat and upload interval; defaults to `60`                                                                                                |
 | `BIRDCLAW_CLOUD_BRIDGE_LOOKBACK_HOURS`      | Bounded replay window used when no acknowledged local cursor exists; defaults to `24`                                                                |
 | `BIRDCLAW_LOCAL_COLLECTOR_ENABLED`          | Set to `1` on the Mac to collect watched accounts and target threads through the local `bird` session before heartbeating                            |
+| `BIRDCLAW_LOCAL_COLLECTOR_HOME_TIMELINE_ENABLED` | Set to `1` with the local collector to refresh the complete Following home timeline in the background before heartbeating                        |
 | `BIRDCLAW_LOCAL_COLLECTOR_WATCH_USERS`      | Local comma-separated account watch list; may mirror the 6551 watch list                                                                             |
 | `BIRDCLAW_LOCAL_COLLECTOR_TARGET_TWEETS`    | Local comma-separated target posts whose threads and quote tweets are refreshed                                                                      |
 | `BIRDCLAW_LOCAL_COLLECTOR_ACCOUNT_ID`       | Optional local account scope to collect and upload; defaults to BirdClaw's default account                                                           |
 | `BIRDCLAW_LOCAL_COLLECTOR_INTERVAL_SECONDS` | Local collection interval; defaults to `120`                                                                                                         |
+| `BIRDCLAW_LOCAL_COLLECTOR_MAX_RESULTS`      | Result limit for each local collector request, including the Following timeline; defaults to `100`                                                   |
 | `TWITTER_TOKEN`                             | 6551 Bearer token; `OPENNEWS_TOKEN` is accepted as a compatibility fallback                                                                          |
 | `BIRDCLAW_BACKUP_AUTO_SYNC`                 | Set to `0` to disable auto-sync for one process                                                                                                      |
 | `NO_COLOR`                                  | Disable ANSI color in human output                                                                                                                   |

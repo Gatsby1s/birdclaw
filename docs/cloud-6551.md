@@ -44,15 +44,21 @@ BIRDCLAW_CLOUD_BRIDGE_TOKEN=<the same random bridge token>
 BIRDCLAW_CLOUD_BRIDGE_INTERVAL_SECONDS=60
 BIRDCLAW_CLOUD_BRIDGE_LOOKBACK_HOURS=24
 BIRDCLAW_LOCAL_COLLECTOR_ENABLED=1
+BIRDCLAW_LOCAL_COLLECTOR_HOME_TIMELINE_ENABLED=1
 BIRDCLAW_LOCAL_COLLECTOR_WATCH_USERS=TingHu888
 BIRDCLAW_LOCAL_COLLECTOR_TARGET_TWEETS=2082353480547660173
 BIRDCLAW_LOCAL_COLLECTOR_INTERVAL_SECONDS=120
+BIRDCLAW_LOCAL_COLLECTOR_MAX_RESULTS=100
 ```
 
-While the Mac is online, its BirdClaw server refreshes the watched account,
-target thread, and quote tweets through the local `bird` session. Only after a
-successful local collection does it upload normalized timeline increments and
-a heartbeat. The cloud process then keeps 6551 on standby. After 180 seconds
+While the Mac is online, its BirdClaw production server refreshes the complete
+Following home timeline, watched account, target thread, and quote tweets
+through the local `bird` session every 120 seconds without depending on an open
+browser tab. Normalized timeline increments continue uploading when a
+supplemental target fails, so one partial failure cannot freeze the cloud Home
+feed. The cloud accepts a heartbeat only after the full timeline and every
+configured target have completed successfully. A watched-account-only success
+cannot keep 6551 on standby when the full timeline is stale. After 180 seconds
 without a healthy heartbeat, 6551 takes over. A returning Mac replays the last
 24 hours idempotently before the cloud process returns 6551 to standby.
 
