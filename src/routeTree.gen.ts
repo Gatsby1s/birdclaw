@@ -29,6 +29,7 @@ import { Route as AuthorsHandleRouteImport } from './routes/authors.$handle'
 import { Route as ApiXurlRateLimitsRouteImport } from './routes/api/xurl-rate-limits'
 import { Route as ApiXremarkRouteImport } from './routes/api/xremark'
 import { Route as ApiWeeklyDigestHistoryRouteImport } from './routes/api/weekly-digest-history'
+import { Route as ApiTwillotHistoryRouteImport } from './routes/api/twillot-history'
 import { Route as ApiTweetVideoRouteImport } from './routes/api/tweet-video'
 import { Route as ApiTweetTranslationRouteImport } from './routes/api/tweet-translation'
 import { Route as ApiTweetExpandRouteImport } from './routes/api/tweet-expand'
@@ -55,6 +56,7 @@ import { Route as ApiAvatarRouteImport } from './routes/api/avatar'
 import { Route as ApiActionRouteImport } from './routes/api/action'
 import { Route as ApiIntegrationsXremarkRouteImport } from './routes/api/integrations.xremark'
 import { Route as ApiIntegrationsTwitter6551RouteImport } from './routes/api/integrations.twitter6551'
+import { Route as ApiIntegrationsTwillotHistoryRouteImport } from './routes/api/integrations.twillot-history'
 import { Route as ApiIntegrationsXremarkSnapshotRouteImport } from './routes/api/integrations.xremark.snapshot'
 
 const TodayRoute = TodayRouteImport.update({
@@ -155,6 +157,11 @@ const ApiXremarkRoute = ApiXremarkRouteImport.update({
 const ApiWeeklyDigestHistoryRoute = ApiWeeklyDigestHistoryRouteImport.update({
   id: '/api/weekly-digest-history',
   path: '/api/weekly-digest-history',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTwillotHistoryRoute = ApiTwillotHistoryRouteImport.update({
+  id: '/api/twillot-history',
+  path: '/api/twillot-history',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTweetVideoRoute = ApiTweetVideoRouteImport.update({
@@ -288,6 +295,12 @@ const ApiIntegrationsTwitter6551Route =
     path: '/api/integrations/twitter6551',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiIntegrationsTwillotHistoryRoute =
+  ApiIntegrationsTwillotHistoryRouteImport.update({
+    id: '/api/integrations/twillot-history',
+    path: '/api/integrations/twillot-history',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiIntegrationsXremarkSnapshotRoute =
   ApiIntegrationsXremarkSnapshotRouteImport.update({
     id: '/snapshot',
@@ -335,11 +348,13 @@ export interface FileRoutesByFullPath {
   '/api/tweet-expand': typeof ApiTweetExpandRoute
   '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
+  '/api/twillot-history': typeof ApiTwillotHistoryRoute
   '/api/weekly-digest-history': typeof ApiWeeklyDigestHistoryRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
   '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
@@ -384,11 +399,13 @@ export interface FileRoutesByTo {
   '/api/tweet-expand': typeof ApiTweetExpandRoute
   '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
+  '/api/twillot-history': typeof ApiTwillotHistoryRoute
   '/api/weekly-digest-history': typeof ApiWeeklyDigestHistoryRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
   '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
@@ -434,11 +451,13 @@ export interface FileRoutesById {
   '/api/tweet-expand': typeof ApiTweetExpandRoute
   '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
+  '/api/twillot-history': typeof ApiTwillotHistoryRoute
   '/api/weekly-digest-history': typeof ApiWeeklyDigestHistoryRoute
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
   '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
@@ -485,11 +504,13 @@ export interface FileRouteTypes {
     | '/api/tweet-expand'
     | '/api/tweet-translation'
     | '/api/tweet-video'
+    | '/api/twillot-history'
     | '/api/weekly-digest-history'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
     | '/profiles/$handle'
+    | '/api/integrations/twillot-history'
     | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
     | '/api/integrations/xremark/snapshot'
@@ -534,11 +555,13 @@ export interface FileRouteTypes {
     | '/api/tweet-expand'
     | '/api/tweet-translation'
     | '/api/tweet-video'
+    | '/api/twillot-history'
     | '/api/weekly-digest-history'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
     | '/profiles/$handle'
+    | '/api/integrations/twillot-history'
     | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
     | '/api/integrations/xremark/snapshot'
@@ -583,11 +606,13 @@ export interface FileRouteTypes {
     | '/api/tweet-expand'
     | '/api/tweet-translation'
     | '/api/tweet-video'
+    | '/api/twillot-history'
     | '/api/weekly-digest-history'
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
     | '/profiles/$handle'
+    | '/api/integrations/twillot-history'
     | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
     | '/api/integrations/xremark/snapshot'
@@ -633,11 +658,13 @@ export interface RootRouteChildren {
   ApiTweetExpandRoute: typeof ApiTweetExpandRoute
   ApiTweetTranslationRoute: typeof ApiTweetTranslationRoute
   ApiTweetVideoRoute: typeof ApiTweetVideoRoute
+  ApiTwillotHistoryRoute: typeof ApiTwillotHistoryRoute
   ApiWeeklyDigestHistoryRoute: typeof ApiWeeklyDigestHistoryRoute
   ApiXremarkRoute: typeof ApiXremarkRoute
   ApiXurlRateLimitsRoute: typeof ApiXurlRateLimitsRoute
   AuthorsHandleRoute: typeof AuthorsHandleRoute
   ProfilesHandleRoute: typeof ProfilesHandleRoute
+  ApiIntegrationsTwillotHistoryRoute: typeof ApiIntegrationsTwillotHistoryRoute
   ApiIntegrationsTwitter6551Route: typeof ApiIntegrationsTwitter6551Route
   ApiIntegrationsXremarkRoute: typeof ApiIntegrationsXremarkRouteWithChildren
 }
@@ -782,6 +809,13 @@ declare module '@tanstack/react-router' {
       path: '/api/weekly-digest-history'
       fullPath: '/api/weekly-digest-history'
       preLoaderRoute: typeof ApiWeeklyDigestHistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/twillot-history': {
+      id: '/api/twillot-history'
+      path: '/api/twillot-history'
+      fullPath: '/api/twillot-history'
+      preLoaderRoute: typeof ApiTwillotHistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/tweet-video': {
@@ -966,6 +1000,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiIntegrationsTwitter6551RouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/integrations/twillot-history': {
+      id: '/api/integrations/twillot-history'
+      path: '/api/integrations/twillot-history'
+      fullPath: '/api/integrations/twillot-history'
+      preLoaderRoute: typeof ApiIntegrationsTwillotHistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/integrations/xremark/snapshot': {
       id: '/api/integrations/xremark/snapshot'
       path: '/snapshot'
@@ -1030,11 +1071,13 @@ const rootRouteChildren: RootRouteChildren = {
   ApiTweetExpandRoute: ApiTweetExpandRoute,
   ApiTweetTranslationRoute: ApiTweetTranslationRoute,
   ApiTweetVideoRoute: ApiTweetVideoRoute,
+  ApiTwillotHistoryRoute: ApiTwillotHistoryRoute,
   ApiWeeklyDigestHistoryRoute: ApiWeeklyDigestHistoryRoute,
   ApiXremarkRoute: ApiXremarkRoute,
   ApiXurlRateLimitsRoute: ApiXurlRateLimitsRoute,
   AuthorsHandleRoute: AuthorsHandleRoute,
   ProfilesHandleRoute: ProfilesHandleRoute,
+  ApiIntegrationsTwillotHistoryRoute: ApiIntegrationsTwillotHistoryRoute,
   ApiIntegrationsTwitter6551Route: ApiIntegrationsTwitter6551Route,
   ApiIntegrationsXremarkRoute: ApiIntegrationsXremarkRouteWithChildren,
 }

@@ -47,6 +47,9 @@ function switchHome(prefix: string) {
 function clearData() {
 	const db = getNativeDb();
 	db.exec(`
+	delete from twillot_history_batches;
+	delete from twillot_history_daily_usage;
+	delete from twillot_history_jobs;
 	delete from birdclaw_profile_priorities;
 	delete from birdclaw_profile_notes;
 	delete from weekly_digest_history;
@@ -318,6 +321,34 @@ function seedBackupFixture() {
       'external_friend', 'started', '2025-01-10T00:00:01.000Z',
       'follow_snapshot_1'
     );
+
+    insert into twillot_history_jobs (
+      id, account_id, profile_id, provider, external_user_id, handle, state,
+      capture_status, cursor_json, next_run_at, lease_token, lease_expires_at,
+      lease_usage_day, lease_allowance, attempt_count, downloaded_count,
+      imported_count, last_error, created_at, updated_at, completed_at
+    ) values (
+      'twillot_job_1', 'acct_primary', 'profile_friend', 'twillot',
+      'external_friend', 'friend', 'completed', 'caught_up_unverified',
+      '{"tweetId":"tweet_2025"}', '2025-01-10T00:00:02.000Z', null, null,
+      null, 0, 1, 2, 2, null, '2025-01-10T00:00:01.000Z',
+      '2025-01-10T00:00:02.000Z', '2025-01-10T00:00:02.000Z'
+    );
+
+    insert into twillot_history_batches (
+      provider, batch_id, job_id, lease_token, usage_day, downloaded_count,
+      imported_count, cursor_json, done, resulting_state, next_run_at, created_at
+    ) values (
+      'twillot', 'twillot_batch_1', 'twillot_job_1', 'expired-lease',
+      '2025-01-10', 2, 2, '{"tweetId":"tweet_2025"}', 1, 'completed',
+      null, '2025-01-10T00:00:02.000Z'
+    );
+
+    insert into twillot_history_daily_usage (
+      provider, usage_day, downloaded_count, updated_at
+    ) values (
+      'twillot', '2025-01-10', 2, '2025-01-10T00:00:02.000Z'
+    );
   `);
 }
 
@@ -503,6 +534,9 @@ describe("text backup", () => {
 			follow_snapshot_members: 1,
 			follow_edges: 1,
 			follow_events: 1,
+			twillot_history_jobs: 1,
+			twillot_history_batches: 1,
+			twillot_history_daily_usage: 1,
 		});
 		expect(existsSync(path.join(repoPath, "data/tweets/2024.jsonl"))).toBe(
 			true,
@@ -519,6 +553,9 @@ describe("text backup", () => {
 		).toBe(true);
 		expect(
 			existsSync(path.join(repoPath, "data/links/occurrences.jsonl")),
+		).toBe(true);
+		expect(
+			existsSync(path.join(repoPath, "data/twillot/history-jobs.jsonl")),
 		).toBe(true);
 		expect(
 			readFileSync(
@@ -681,6 +718,19 @@ describe("text backup", () => {
 		).toEqual({ count: 1 });
 		expect(
 			getNativeDb({ seedDemoData: false })
+				.prepare(
+					`select state, capture_status, downloaded_count, imported_count
+					 from twillot_history_jobs where id = 'twillot_job_1'`,
+				)
+				.get(),
+		).toEqual({
+			state: "completed",
+			capture_status: "caught_up_unverified",
+			downloaded_count: 2,
+			imported_count: 2,
+		});
+		expect(
+			getNativeDb({ seedDemoData: false })
 				.prepare("select id, title from discussion_history order by id")
 				.all(),
 		).toEqual([{ id: "discussion_1", title: "Backup discussion" }]);
@@ -769,7 +819,101 @@ describe("text backup", () => {
 		});
 	}, 20000);
 
-	it("emits byte-identical schema-v8 data and still accepts schema v2", async () => {
+	it("replace removes Twillot queue rows that are absent from the backup", async () => {
+		switchHome("birdclaw-backup-empty-twillot-src-");
+		const repoPath = makeTempDir("birdclaw-backup-empty-twillot-repo-");
+		await exportBackup({ repoPath });
+
+		switchHome("birdclaw-backup-stale-twillot-dest-");
+		const db = getNativeDb({ seedDemoData: false });
+		db.prepare(
+			`insert into accounts (
+			 id, name, handle, external_user_id, transport, is_default, created_at
+			) values ('stale-account', 'Stale', 'stale', '1', 'xurl', 1, ?)`,
+		).run("2026-08-10T00:00:00.000Z");
+		db.prepare(
+			`insert into twillot_history_jobs (
+			 id, account_id, profile_id, provider, external_user_id, handle,
+			 state, capture_status, next_run_at, created_at, updated_at
+			) values (
+			 'stale-job', 'stale-account', 'profile_user_2', 'twillot', '2',
+			 'stale-target', 'queued', 'capture_requested', ?, ?, ?
+			)`,
+		).run(
+			"2026-08-10T00:00:00.000Z",
+			"2026-08-10T00:00:00.000Z",
+			"2026-08-10T00:00:00.000Z",
+		);
+		db.prepare(
+			`insert into twillot_history_batches (
+			 provider, batch_id, job_id, lease_token, usage_day, downloaded_count,
+			 imported_count, cursor_json, done, resulting_state, created_at
+			) values ('twillot', 'stale-batch', 'stale-job', '', '2026-08-10',
+			 1, 1, 'null', 1, 'completed', ?)`,
+		).run("2026-08-10T00:00:00.000Z");
+		db.prepare(
+			`insert into twillot_history_daily_usage (
+			 provider, usage_day, downloaded_count, updated_at
+			) values ('twillot', '2026-08-10', 1, ?)`,
+		).run("2026-08-10T00:00:00.000Z");
+
+		await importBackup({ repoPath, mode: "replace" });
+		expect(
+			db.prepare("select count(*) as count from twillot_history_jobs").get(),
+		).toEqual({ count: 0 });
+		expect(
+			db.prepare("select count(*) as count from twillot_history_batches").get(),
+		).toEqual({ count: 0 });
+		expect(
+			db
+				.prepare("select count(*) as count from twillot_history_daily_usage")
+				.get(),
+		).toEqual({ count: 0 });
+	}, 20000);
+
+	it("does not restore an orphan Twillot batch receipt when job ids differ", async () => {
+		switchHome("birdclaw-backup-twillot-source-");
+		seedBackupFixture();
+		const repoPath = makeTempDir("birdclaw-backup-twillot-conflict-repo-");
+		await exportBackup({ repoPath });
+
+		switchHome("birdclaw-backup-twillot-destination-");
+		seedBackupFixture();
+		const db = getNativeDb({ seedDemoData: false });
+		db.exec(`
+			delete from twillot_history_batches;
+			delete from twillot_history_jobs;
+		`);
+		db.prepare(
+			`insert into twillot_history_jobs (
+			 id, account_id, profile_id, provider, external_user_id, handle, state,
+			 capture_status, next_run_at, created_at, updated_at
+			) values (
+			 'local-job-id', 'acct_primary', 'profile_friend', 'twillot',
+			 'external_friend', 'friend', 'queued', 'capture_requested', ?, ?, ?
+			)`,
+		).run(
+			"2026-08-10T00:00:00.000Z",
+			"2026-08-10T00:00:00.000Z",
+			"2026-08-10T00:00:00.000Z",
+		);
+
+		await importBackup({ repoPath, mode: "merge" });
+
+		expect(
+			db
+				.prepare(
+					`select id from twillot_history_jobs
+					 where account_id = 'acct_primary' and profile_id = 'profile_friend'`,
+				)
+				.get(),
+		).toEqual({ id: "local-job-id" });
+		expect(
+			db.prepare("select count(*) as count from twillot_history_batches").get(),
+		).toEqual({ count: 0 });
+	}, 20000);
+
+	it("emits byte-identical schema-v9 data and still accepts schema v2", async () => {
 		switchHome("birdclaw-backup-stable-src-");
 		seedBackupFixture();
 		const firstRepoPath = makeTempDir("birdclaw-backup-stable-first-");
@@ -778,10 +922,7 @@ describe("text backup", () => {
 		const first = await exportBackup({ repoPath: firstRepoPath });
 		const second = await exportBackup({ repoPath: secondRepoPath });
 
-		expect(first.manifest.schemaVersion).toBe(8);
-		expect(first.manifest.backupHash).toBe(
-			"d4b55cdf198e0728bc57ced9c64878cc9b260524fe12d480a771645559e53a8a",
-		);
+		expect(first.manifest.schemaVersion).toBe(9);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);
 		expect(second.manifest.backupHash).toBe(first.manifest.backupHash);
@@ -995,6 +1136,9 @@ describe("text backup", () => {
 			follow_snapshot_members: 1,
 			follow_edges: 1,
 			follow_events: 1,
+			twillot_history_jobs: 1,
+			twillot_history_batches: 1,
+			twillot_history_daily_usage: 1,
 		});
 		expectNoDemoSeedRows();
 		expect(

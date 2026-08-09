@@ -332,6 +332,67 @@ describe("follow graph sync and cache-only queries", () => {
 		).toEqual(["bob", "alice"]);
 	});
 
+	it("enqueues only newly followed profiles after a complete following baseline", async () => {
+		setupTempHome();
+		mocks.listFollowUsersViaXurl
+			.mockResolvedValueOnce({
+				data: [user("1", "alice", 100)],
+				meta: { result_count: 1 },
+			})
+			.mockResolvedValueOnce({
+				data: [user("1", "alice", 100), user("2", "bob", 500)],
+				meta: { result_count: 2 },
+			});
+		const { syncFollowGraph } = await import("./follow-graph");
+
+		await syncFollowGraph({ direction: "following", yes: true, refresh: true });
+		expect(
+			getNativeDb()
+				.prepare("select count(*) as count from twillot_history_jobs")
+				.get(),
+		).toEqual({ count: 0 });
+
+		await syncFollowGraph({ direction: "following", yes: true, refresh: true });
+		expect(
+			getNativeDb()
+				.prepare(
+					`select handle, capture_status
+					 from twillot_history_jobs order by handle`,
+				)
+				.all(),
+		).toEqual([{ handle: "bob", capture_status: "capture_requested" }]);
+	});
+
+	it("refreshes a queued target after the followed account changes handle", async () => {
+		setupTempHome();
+		mocks.listFollowUsersViaXurl
+			.mockResolvedValueOnce({
+				data: [user("1", "alice", 100)],
+				meta: { result_count: 1 },
+			})
+			.mockResolvedValueOnce({
+				data: [user("1", "alice", 100), user("2", "bob", 500)],
+				meta: { result_count: 2 },
+			})
+			.mockResolvedValueOnce({
+				data: [user("1", "alice", 100), user("2", "bob_renamed", 500)],
+				meta: { result_count: 2 },
+			});
+		const { syncFollowGraph } = await import("./follow-graph");
+
+		await syncFollowGraph({ direction: "following", yes: true, refresh: true });
+		await syncFollowGraph({ direction: "following", yes: true, refresh: true });
+		await syncFollowGraph({ direction: "following", yes: true, refresh: true });
+
+		expect(
+			getNativeDb()
+				.prepare(
+					"select handle, external_user_id from twillot_history_jobs where profile_id = 'profile_user_2'",
+				)
+				.get(),
+		).toEqual({ handle: "bob_renamed", external_user_id: "2" });
+	});
+
 	it("records incomplete capped snapshots without ending existing edges", async () => {
 		setupTempHome();
 		mocks.listFollowUsersViaXurl

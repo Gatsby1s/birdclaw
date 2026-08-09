@@ -96,6 +96,9 @@ export class ImportRepository {
 
 	clearBackupImport() {
 		this.db.exec(`
+	  delete from twillot_history_batches;
+	  delete from twillot_history_daily_usage;
+	  delete from twillot_history_jobs;
 	  delete from birdclaw_profile_priorities;
 	  delete from birdclaw_profile_notes;
 	  delete from weekly_digest_history;

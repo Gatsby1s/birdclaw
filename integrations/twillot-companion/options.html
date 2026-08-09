@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>BirdClaw Twillot Companion</title>
+		<link rel="stylesheet" href="birdclaw-twillot-options.css" />
+	</head>
+	<body>
+		<main>
+			<h1>BirdClaw Twillot Companion</h1>
+			<p class="lede">
+				Pairs this browser with BirdClaw on this Mac. The companion never asks
+				for X.com, cookie, or browsing-history access.
+			</p>
+
+			<form id="settings-form">
+				<label for="endpoint">BirdClaw loopback endpoint</label>
+				<input
+					id="endpoint"
+					name="endpoint"
+					type="url"
+					required
+					spellcheck="false"
+					autocomplete="off"
+				/>
+
+				<label for="token">Pairing token</label>
+				<input
+					id="token"
+					name="token"
+					type="password"
+					minlength="16"
+					maxlength="2048"
+					required
+					autocomplete="off"
+				/>
+
+				<div class="actions">
+					<button type="submit">Save and check queue</button>
+					<button id="sync-now" type="button" class="secondary">
+						Check now
+					</button>
+				</div>
+			</form>
+
+			<section aria-live="polite" aria-labelledby="status-heading">
+				<h2 id="status-heading">Status</h2>
+				<dl>
+					<div>
+						<dt>Pairing</dt>
+						<dd id="pairing-status">Checking…</dd>
+					</div>
+					<div>
+						<dt>Queue</dt>
+						<dd id="queue-status">Checking…</dd>
+					</div>
+					<div>
+						<dt>Last success</dt>
+						<dd id="last-success">Never</dd>
+					</div>
+					<div>
+						<dt>Last error</dt>
+						<dd id="last-error">None</dd>
+					</div>
+				</dl>
+			</section>
+
+			<p class="warning">
+				A Twillot page must remain open while Twillot downloads. BirdClaw only
+				labels the local snapshot <code>caught_up_unverified</code>; it never
+				claims Twillot's public history is verified complete.
+			</p>
+		</main>
+		<script src="birdclaw-twillot-options.js"></script>
+	</body>
+</html>

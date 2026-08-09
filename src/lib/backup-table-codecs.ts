@@ -1250,6 +1250,147 @@ const definitions = {
 			],
 		},
 	},
+	twillot_history_jobs: {
+		exportSql: `
+      select id, account_id, profile_id, provider, external_user_id, handle,
+        case when state = 'leased' then 'queued' else state end as state,
+        case when state = 'leased' then 'capture_requested' else capture_status end as capture_status,
+        cursor_json, next_run_at,
+        null as lease_token, null as lease_expires_at, null as lease_usage_day,
+        0 as lease_allowance, attempt_count, downloaded_count, imported_count,
+        last_error, created_at, updated_at, completed_at
+      from twillot_history_jobs
+      order by provider, account_id, profile_id, id
+    `,
+		...fixedShard("data/twillot/history-jobs.jsonl", "twillot_history_jobs"),
+		merge: {
+			order: 26,
+			sql: `
+      insert into twillot_history_jobs (
+        id, account_id, profile_id, provider, external_user_id, handle, state,
+        capture_status, cursor_json, next_run_at, lease_token,
+        lease_expires_at, lease_usage_day, lease_allowance, attempt_count,
+        downloaded_count, imported_count, last_error, created_at, updated_at,
+        completed_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict(account_id, profile_id, provider) do update set
+        external_user_id = coalesce(excluded.external_user_id, twillot_history_jobs.external_user_id),
+        handle = case when excluded.updated_at >= twillot_history_jobs.updated_at then excluded.handle else twillot_history_jobs.handle end,
+        state = case when excluded.updated_at >= twillot_history_jobs.updated_at then excluded.state else twillot_history_jobs.state end,
+        capture_status = case when excluded.updated_at >= twillot_history_jobs.updated_at then excluded.capture_status else twillot_history_jobs.capture_status end,
+        cursor_json = case when excluded.updated_at >= twillot_history_jobs.updated_at then excluded.cursor_json else twillot_history_jobs.cursor_json end,
+        next_run_at = case when excluded.updated_at >= twillot_history_jobs.updated_at then excluded.next_run_at else twillot_history_jobs.next_run_at end,
+        lease_token = null,
+        lease_expires_at = null,
+        lease_usage_day = null,
+        lease_allowance = 0,
+        attempt_count = max(twillot_history_jobs.attempt_count, excluded.attempt_count),
+        downloaded_count = max(twillot_history_jobs.downloaded_count, excluded.downloaded_count),
+        imported_count = max(twillot_history_jobs.imported_count, excluded.imported_count),
+        last_error = case when excluded.updated_at >= twillot_history_jobs.updated_at then excluded.last_error else twillot_history_jobs.last_error end,
+        created_at = min(twillot_history_jobs.created_at, excluded.created_at),
+        updated_at = max(twillot_history_jobs.updated_at, excluded.updated_at),
+        completed_at = coalesce(max(twillot_history_jobs.completed_at, excluded.completed_at), twillot_history_jobs.completed_at, excluded.completed_at)
+      `,
+			columns: [
+				"id",
+				"account_id",
+				"profile_id",
+				"provider",
+				"external_user_id",
+				"handle",
+				"state",
+				"capture_status",
+				"cursor_json",
+				"next_run_at",
+				"lease_token",
+				"lease_expires_at",
+				"lease_usage_day",
+				"lease_allowance",
+				"attempt_count",
+				"downloaded_count",
+				"imported_count",
+				"last_error",
+				"created_at",
+				"updated_at",
+				"completed_at",
+			],
+		},
+	},
+	twillot_history_batches: {
+		exportSql: `
+      select provider, batch_id, job_id, '' as lease_token, usage_day,
+        downloaded_count, imported_count, cursor_json, done, resulting_state,
+        next_run_at, created_at
+      from twillot_history_batches
+      order by provider, created_at, batch_id
+    `,
+		...fixedShard(
+			"data/twillot/history-batches.jsonl",
+			"twillot_history_batches",
+		),
+		merge: {
+			order: 27,
+			sql: `
+      insert into twillot_history_batches (
+        provider, batch_id, job_id, lease_token, usage_day, downloaded_count,
+        imported_count, cursor_json, done, resulting_state, next_run_at,
+        created_at
+      )
+      select incoming.provider, incoming.batch_id, incoming.job_id,
+        incoming.lease_token, incoming.usage_day, incoming.downloaded_count,
+        incoming.imported_count, incoming.cursor_json, incoming.done,
+        incoming.resulting_state, incoming.next_run_at, incoming.created_at
+      from (
+        select ? as provider, ? as batch_id, ? as job_id, ? as lease_token,
+          ? as usage_day, ? as downloaded_count, ? as imported_count,
+          ? as cursor_json, ? as done, ? as resulting_state,
+          ? as next_run_at, ? as created_at
+      ) as incoming
+      where exists (
+        select 1 from twillot_history_jobs where id = incoming.job_id
+      )
+      on conflict(provider, batch_id) do nothing
+      `,
+			columns: [
+				"provider",
+				"batch_id",
+				"job_id",
+				"lease_token",
+				"usage_day",
+				"downloaded_count",
+				"imported_count",
+				"cursor_json",
+				"done",
+				"resulting_state",
+				"next_run_at",
+				"created_at",
+			],
+		},
+	},
+	twillot_history_daily_usage: {
+		exportSql: `
+      select provider, usage_day, downloaded_count, updated_at
+      from twillot_history_daily_usage
+      order by provider, usage_day
+    `,
+		...fixedShard(
+			"data/twillot/daily-usage.jsonl",
+			"twillot_history_daily_usage",
+		),
+		merge: {
+			order: 28,
+			sql: `
+      insert into twillot_history_daily_usage (
+        provider, usage_day, downloaded_count, updated_at
+      ) values (?, ?, ?, ?)
+      on conflict(provider, usage_day) do update set
+        downloaded_count = max(twillot_history_daily_usage.downloaded_count, excluded.downloaded_count),
+        updated_at = max(twillot_history_daily_usage.updated_at, excluded.updated_at)
+      `,
+			columns: ["provider", "usage_day", "downloaded_count", "updated_at"],
+		},
+	},
 } as const satisfies Record<string, BackupTableCodecDefinition>;
 
 export type BackupTableName = keyof typeof definitions;

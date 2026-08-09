@@ -581,6 +581,82 @@ export type Twitter6551RuntimeStatus = z.infer<
 	typeof twitter6551RuntimeStatusSchema
 >;
 
+export const twillotCaptureStatusSchema = z.enum([
+	"capture_requested",
+	"waiting_for_twillot",
+	"capturing",
+	"ingesting",
+	"caught_up_unverified",
+	"verified_complete",
+	"needs_attention",
+]);
+
+export const twillotHistoryPublicJobSchema = z.object({
+	id: z.string(),
+	handle: z.string(),
+	state: z.enum(["queued", "leased", "deferred", "completed", "failed"]),
+	captureStatus: twillotCaptureStatusSchema,
+	nextRunAt: z.string(),
+	downloadedCount: z.number().int().nonnegative(),
+	importedCount: z.number().int().nonnegative(),
+	attemptCount: z.number().int().nonnegative(),
+	lastError: z.string().nullable(),
+	updatedAt: z.string(),
+});
+
+export const twillotProviderStatusSchema = z.object({
+	plan: z.literal("Mini"),
+	monthlyPriceUsd: z.literal(4.99),
+	dailyLimit: z.number().int().positive(),
+	softBudget: z.literal(true),
+	usageDay: z.string(),
+	capturedToday: z.number().int().nonnegative(),
+	reservedToday: z.number().int().nonnegative(),
+	remainingToday: z.number().int().nonnegative(),
+	nextResetAt: z.string(),
+	nextEligibleAt: z.string().nullable(),
+	totalImported: z.number().int().nonnegative(),
+	queueCounts: z.object({
+		queued: z.number().int().nonnegative(),
+		active: z.number().int().nonnegative(),
+		deferred: z.number().int().nonnegative(),
+		caughtUpUnverified: z.number().int().nonnegative(),
+		verifiedComplete: z.number().int().nonnegative(),
+		needsAttention: z.number().int().nonnegative(),
+	}),
+	companion: z.object({
+		paired: z.boolean(),
+		connected: z.boolean(),
+		tokenCreatedAt: z.string().nullable(),
+		lastSeenAt: z.string().nullable(),
+		lastError: z.string().nullable(),
+	}),
+	followDetection: z.object({
+		enabled: z.boolean(),
+		running: z.boolean(),
+		intervalMinutes: z.number().int().positive(),
+		lastStartedAt: z.string().nullable(),
+		lastSuccessAt: z.string().nullable(),
+		lastError: z.string().nullable(),
+	}),
+	jobs: z.array(twillotHistoryPublicJobSchema),
+	limitations: z.object({
+		vendorStartRequiresUser: z.literal(true),
+		providerRemainingUnknown: z.literal(true),
+		caughtUpRequiresVerification: z.literal(true),
+	}),
+});
+export type TwillotProviderStatus = z.infer<typeof twillotProviderStatusSchema>;
+
+export const twillotManagementResponseSchema = z.object({
+	ok: z.literal(true),
+	endpoint: z.string().url(),
+	localQueueExecutor: z.literal(true),
+	managementAvailable: z.boolean(),
+	token: z.string().optional(),
+	status: twillotProviderStatusSchema,
+});
+
 export const birdclawSettingsSchema = z.object({
 	analysis: z.object({
 		profileSource: profileAnalysisSourceSchema,

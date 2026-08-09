@@ -209,6 +209,98 @@ describe("local cloud bridge", () => {
 		});
 	});
 
+	it("does not let sparse Twillot hydration downgrade richer cloud rows", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db, {
+			displayName: "T",
+			bio: "",
+			publicMetricsJson: "{}",
+			entitiesJson: "{}",
+			rawJson: "{}",
+		});
+		insertTestTweet(home.db, {
+			text: "short",
+			createdAt: "2026-08-10T00:00:00.000Z",
+			likeCount: 1,
+			entitiesJson: "{}",
+			mediaJson: "[]",
+		});
+		home.db
+			.prepare(
+				`insert into tweet_account_edges (
+				 account_id, tweet_id, kind, first_seen_at, last_seen_at,
+				 seen_count, source, raw_json, updated_at
+				) values (?, ?, 'profile', ?, ?, 1, 'twillot', '{}', ?)`,
+			)
+			.run(
+				"account:test",
+				"tweet:test",
+				"2026-08-10T00:00:00.000Z",
+				"2026-08-10T00:00:00.000Z",
+				"2026-08-10T00:00:00.000Z",
+			);
+		const batch = buildLocalCloudBridgeBatch({
+			cursor: { updatedAt: "", accountId: "", tweetId: "", kind: "" },
+			db: home.db,
+		});
+
+		home.switchHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db, {
+			displayName: "Target Person",
+			bio: "A richer canonical cloud profile",
+			followersCount: 99,
+			publicMetricsJson: '{"followers_count":99,"verified":true}',
+			entitiesJson: '{"url":{"urls":[{"expanded_url":"https://example.com"}]}}',
+			rawJson: '{"source":"hydrated","verified":true}',
+		});
+		insertTestTweet(home.db, {
+			text: "A complete canonical tweet that must stay intact",
+			createdAt: "2025-01-01T00:00:00.000Z",
+			likeCount: 99,
+			mediaCount: 1,
+			entitiesJson: '{"urls":[{"expanded_url":"https://example.com"}]}',
+			mediaJson: '[{"type":"photo","url":"https://example.com/a.jpg"}]',
+		});
+
+		await importLocalCloudBridgeBatch(batch);
+
+		expect(
+			home.db
+				.prepare(
+					`select text, created_at as createdAt, like_count as likeCount,
+					 entities_json as entitiesJson, media_json as mediaJson
+					 from tweets where id = 'tweet:test'`,
+				)
+				.get(),
+		).toEqual({
+			text: "A complete canonical tweet that must stay intact",
+			createdAt: "2025-01-01T00:00:00.000Z",
+			likeCount: 99,
+			entitiesJson: '{"urls":[{"expanded_url":"https://example.com"}]}',
+			mediaJson: '[{"type":"photo","url":"https://example.com/a.jpg"}]',
+		});
+		expect(
+			home.db
+				.prepare(
+					`select display_name as displayName, bio, followers_count as followersCount,
+					 raw_json as rawJson from profiles where id = 'profile:test'`,
+				)
+				.get(),
+		).toEqual({
+			displayName: "Target Person",
+			bio: "A richer canonical cloud profile",
+			followersCount: 99,
+			rawJson: '{"source":"hydrated","verified":true}',
+		});
+		expect(
+			home.db
+				.prepare("select text from tweets_fts where tweet_id = 'tweet:test'")
+				.get(),
+		).toEqual({ text: "A complete canonical tweet that must stay intact" });
+	});
+
 	it("ships native X bookmarks to cloud and returns newer local bookmark state", async () => {
 		const home = getHome();
 		insertTestAccount(home.db);

@@ -70,8 +70,11 @@ try {
 	const files = tarOutput.trim().split("\n");
 	for (const required of [
 		"package/bin/birdclaw.mjs",
+		"package/bin/migration-backup.mjs",
 		"package/dist/cli/birdclaw.js",
 		"package/dist/server/server.js",
+		"package/integrations/twillot-companion/birdclaw-twillot-worker.js",
+		"package/integrations/twillot-companion/build.mjs",
 	]) {
 		if (!files.includes(required))
 			throw new Error(`Tarball missing ${required}`);

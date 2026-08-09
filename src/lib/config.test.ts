@@ -25,11 +25,15 @@ import {
 
 const tempRoots: string[] = [];
 const originalPath = process.env.PATH;
+const originalTestHome = process.env.BIRDCLAW_TEST_HOME;
+const runnerHome = process.env.BIRDCLAW_HOME;
 
 afterEach(() => {
 	resetBirdclawPathsForTests();
 	process.env.PATH = originalPath;
 	delete process.env.BIRDCLAW_HOME;
+	if (originalTestHome === undefined) delete process.env.BIRDCLAW_TEST_HOME;
+	else process.env.BIRDCLAW_TEST_HOME = originalTestHome;
 	delete process.env.BIRDCLAW_CONFIG;
 	delete process.env.BIRDCLAW_ACTIONS_TRANSPORT;
 	delete process.env.BIRDCLAW_BIRD_COMMAND;
@@ -44,6 +48,12 @@ afterEach(() => {
 });
 
 describe("config", () => {
+	it("starts Vitest in an isolated home even when run directly", () => {
+		expect(runnerHome).toBeTruthy();
+		expect(runnerHome).toBe(originalTestHome);
+		expect(runnerHome).not.toBe(path.join(os.homedir(), ".birdclaw"));
+	});
+
 	it("uses BIRDCLAW_HOME when set", () => {
 		const tempRoot = mkdtempSync(path.join(os.tmpdir(), "birdclaw-config-"));
 		tempRoots.push(tempRoot);
@@ -54,6 +64,15 @@ describe("config", () => {
 		expect(paths.rootDir).toBe(tempRoot);
 		expect(paths.dbPath).toBe(path.join(tempRoot, "birdclaw.sqlite"));
 		expect(paths.configPath).toBe(path.join(tempRoot, "config.json"));
+	});
+
+	it("never falls back to the real home during Vitest", () => {
+		const tempRoot = mkdtempSync(path.join(os.tmpdir(), "birdclaw-test-home-"));
+		tempRoots.push(tempRoot);
+		delete process.env.BIRDCLAW_HOME;
+		process.env.BIRDCLAW_TEST_HOME = tempRoot;
+
+		expect(getBirdclawPaths().rootDir).toBe(tempRoot);
 	});
 
 	it("creates expected media directories", () => {
