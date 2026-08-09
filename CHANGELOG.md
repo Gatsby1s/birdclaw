@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.74 - 2026-08-09
+
+### Fixed
+
+- Keep the cloud Home timeline fresh without an open browser tab by syncing the full Following feed through the local collector every two minutes and continuing to upload new data during partial supplemental-source failures.
+- Require a fresh full-timeline attestation before local bridge batches can keep 6551 on standby, rejecting missing, stale, or implausibly future heartbeats while preserving the configured failover window.
+
 ## 0.8.73 - 2026-08-09
 
 ### Added
