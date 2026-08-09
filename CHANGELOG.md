@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 0.8.76 - 2026-08-10
+
+### Added
+
+- Queue newly followed profiles for Twillot history capture with a persistent 20,000-post daily processing budget, resumable leases, idempotent batches, and explicit unverified/verified completion states.
+- Add a local, same-ID Twillot companion that reads only the audited extension database, uploads whitelisted public-post fields into BirdClaw, and preserves a vanilla rollback copy.
+- Surface pairing, queue health, retries, and verification controls in Settings while periodically refreshing complete Following snapshots after pairing.
+
+### Fixed
+
+- Preserve richer canonical tweet and profile data when Twillot history is merged locally or replicated to Railway.
+- Back up and validate pre-v15 SQLite databases before migration, including capacity checks, stale-partial recovery, and portable backup/restore support for the new queue tables.
+
 ## 0.8.75 - 2026-08-09
 
 ### Added
