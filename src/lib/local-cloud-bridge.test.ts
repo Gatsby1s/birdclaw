@@ -95,6 +95,7 @@ describe("local cloud bridge", () => {
 			now: new Date("2026-07-31T08:01:00.000Z"),
 			db: home.db,
 		});
+		expect(batch.homeTimelineSyncedAt).toBeNull();
 		expect(batch.edges).toHaveLength(1);
 		expect(batch.tweets[0]).toMatchObject({
 			id: "tweet:test",
@@ -652,24 +653,56 @@ describe("local cloud bridge", () => {
 		});
 	});
 
-	it("exchanges bookmarks even when local collection is not healthy", async () => {
+	it("uploads live data without a heartbeat when local collection is not healthy", async () => {
+		const home = getHome();
+		insertTestAccount(home.db);
+		insertTestProfile(home.db);
+		insertTestTweet(home.db);
+		home.db
+			.prepare(
+				`insert into tweet_account_edges (
+				 account_id, tweet_id, kind, first_seen_at, last_seen_at,
+				 seen_count, source, raw_json, updated_at
+				) values (?, ?, 'home', ?, ?, 1, 'bird', '{}', ?)`,
+			)
+			.run(
+				"account:test",
+				"tweet:test",
+				"2026-08-03T08:00:00.000Z",
+				"2026-08-03T08:00:00.000Z",
+				"2026-08-03T08:00:00.000Z",
+			);
+		const sentBatches: Array<{
+			purpose: "live" | "history" | "bookmarks";
+			homeTimelineSyncedAt: string | null;
+			edges: unknown[];
+		}> = [];
 		const fetchImpl = vi.fn(
-			async (_url: string | URL | Request, _init?: RequestInit) =>
-				Response.json({ ok: true }),
+			async (_url: string | URL | Request, init?: RequestInit) => {
+				sentBatches.push(JSON.parse(String(init?.body)));
+				return Response.json({ ok: true });
+			},
 		);
 		const client = new LocalCloudBridgeClient({
 			url: "http://127.0.0.1:3000",
 			token: "bridge-secret",
 			fetchImpl,
 			isReady: () => false,
+			getHomeTimelineSyncedAt: () => "2026-08-03T08:00:00.000Z",
+			now: () => new Date("2026-08-03T09:00:00.000Z"),
 		});
 
 		await client.runOnce();
 
-		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(sentBatches.map((batch) => batch.purpose)).toContain("bookmarks");
 		expect(
-			JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)),
-		).toMatchObject({ purpose: "bookmarks" });
+			sentBatches.every((batch) => batch.homeTimelineSyncedAt === null),
+		).toBe(true);
+		const liveBatch = sentBatches.find((batch) => batch.purpose === "live");
+		expect(liveBatch).toMatchObject({
+			homeTimelineSyncedAt: null,
+		});
+		expect(liveBatch?.edges).toHaveLength(1);
 		expect(client.getStatus().lastError).toContain("not fresh");
 	});
 
@@ -1098,15 +1131,19 @@ describe("local cloud bridge", () => {
 			"2026-07-31T08:01:00.000Z",
 		);
 		const sentBatches: Array<{
-			purpose: "live" | "history";
+			purpose: "live" | "history" | "bookmarks";
+			homeTimelineSyncedAt: string | null;
 			caughtUp: boolean;
 			edges: unknown[];
 		}> = [];
+		const homeTimelineSyncedAt = "2026-07-31T08:59:00.000Z";
 		const client = new LocalCloudBridgeClient({
 			url: "http://127.0.0.1:3000",
 			token: "bridge-secret",
 			batchSize: 1,
 			now: () => new Date("2026-07-31T09:00:00.000Z"),
+			isReady: () => true,
+			getHomeTimelineSyncedAt: () => homeTimelineSyncedAt,
 			fetchImpl: vi.fn(async (_url, init) => {
 				sentBatches.push(JSON.parse(String(init?.body)));
 				return Response.json({ ok: true });
@@ -1115,6 +1152,12 @@ describe("local cloud bridge", () => {
 
 		await client.runOnce();
 
+		expect(sentBatches).not.toHaveLength(0);
+		expect(
+			sentBatches.every(
+				(batch) => batch.homeTimelineSyncedAt === homeTimelineSyncedAt,
+			),
+		).toBe(true);
 		const liveBatches = sentBatches.filter((batch) => batch.purpose === "live");
 		expect(liveBatches.map((batch) => batch.caughtUp)).toEqual([
 			false,

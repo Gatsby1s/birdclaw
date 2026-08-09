@@ -4,6 +4,7 @@ import type { Database } from "./sqlite";
 import { enqueueDatabaseWrite } from "./database-writer";
 import { getNativeDb } from "./db";
 import {
+	getLocalTwitterCollectorStatus,
 	isLocalTwitterCollectorFresh,
 	resolveLocalTwitterCollectorAccountId,
 } from "./local-twitter-collector";
@@ -188,6 +189,7 @@ export const localCloudBridgeBatchSchema = z
 		version: z.literal(1),
 		purpose: bridgePurposeSchema.optional().default("live"),
 		sentAt: z.string().max(64),
+		homeTimelineSyncedAt: z.iso.datetime().nullable().optional().default(null),
 		caughtUp: z.boolean(),
 		cursor: bridgeCursorSchema,
 		accounts: z.array(bridgeAccountSchema).max(MAX_BATCH_SIZE),
@@ -423,6 +425,7 @@ interface LocalCloudBridgeClientOptions {
 	fetchImpl?: typeof fetch;
 	now?: () => Date;
 	isReady?: () => boolean;
+	getHomeTimelineSyncedAt?: () => string | null;
 }
 
 function positiveNumber(value: string | undefined, fallback: number) {
@@ -657,6 +660,7 @@ export function buildLocalCloudBridgeBatch({
 	lookbackHours = DEFAULT_LOOKBACK_HOURS,
 	limit = DEFAULT_BATCH_SIZE,
 	accountId,
+	homeTimelineSyncedAt = null,
 	now = new Date(),
 	db = getNativeDb({ seedDemoData: false }),
 }: {
@@ -665,6 +669,7 @@ export function buildLocalCloudBridgeBatch({
 	lookbackHours?: number;
 	limit?: number;
 	accountId?: string;
+	homeTimelineSyncedAt?: string | null;
 	now?: Date;
 	db?: Database;
 } = {}): LocalCloudBridgeBatch {
@@ -903,6 +908,7 @@ export function buildLocalCloudBridgeBatch({
 		version: 1,
 		purpose,
 		sentAt: now.toISOString(),
+		homeTimelineSyncedAt,
 		caughtUp,
 		cursor: nextCursor,
 		savedPageSize: safeLimit,
@@ -1441,6 +1447,7 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 				};
 		return {
 			purpose: batch.purpose,
+			homeTimelineSyncedAt: batch.homeTimelineSyncedAt,
 			caughtUp: batch.caughtUp,
 			accounts: batch.accounts.length,
 			profiles: batch.profiles.length,
@@ -1521,6 +1528,7 @@ export class LocalCloudBridgeClient {
 	private readonly accountId: string | undefined;
 	private readonly fetchImpl: typeof fetch;
 	private readonly now: () => Date;
+	private readonly getHomeTimelineSyncedAt: () => string | null;
 
 	constructor(private readonly options: LocalCloudBridgeClientOptions) {
 		if (!options.token.trim()) {
@@ -1542,6 +1550,9 @@ export class LocalCloudBridgeClient {
 		this.accountId = options.accountId?.trim() || undefined;
 		this.fetchImpl = options.fetchImpl ?? fetch;
 		this.now = options.now ?? (() => new Date());
+		this.getHomeTimelineSyncedAt =
+			options.getHomeTimelineSyncedAt ??
+			(() => getLocalTwitterCollectorStatus().lastTimelineSuccessAt);
 	}
 
 	start() {
@@ -1569,12 +1580,16 @@ export class LocalCloudBridgeClient {
 		purpose: z.infer<typeof bridgePurposeSchema>,
 	) {
 		let requestBatchSize = this.batchSize;
+		const homeTimelineSyncedAt = this.options.isReady?.()
+			? this.getHomeTimelineSyncedAt()
+			: null;
 		let batch = buildLocalCloudBridgeBatch({
 			cursor,
 			purpose,
 			lookbackHours: this.lookbackHours,
 			limit: requestBatchSize,
 			accountId: this.accountId,
+			homeTimelineSyncedAt,
 			now: this.now(),
 			db,
 		});
@@ -1590,6 +1605,7 @@ export class LocalCloudBridgeClient {
 				lookbackHours: this.lookbackHours,
 				limit: requestBatchSize,
 				accountId: this.accountId,
+				homeTimelineSyncedAt,
 				now: this.now(),
 				db,
 			});
@@ -1797,16 +1813,6 @@ export class LocalCloudBridgeClient {
 			} catch (error) {
 				bookmarkSyncError = errorMessage(error);
 			}
-			if (this.options.isReady && !this.options.isReady()) {
-				this.status = {
-					...this.status,
-					lastError:
-						bookmarkSyncError === null
-							? "Local Twitter collection is not fresh; bookmark sync succeeded but cloud failover remains active"
-							: `Local Twitter collection is not fresh; bookmark sync is pending (${bookmarkSyncError})`,
-				};
-				return this.getStatus();
-			}
 			const liveCaughtUp = await this.uploadLivePages();
 			if (liveCaughtUp && !this.stopped) {
 				try {
@@ -1818,7 +1824,15 @@ export class LocalCloudBridgeClient {
 					};
 				}
 			}
-			if (bookmarkSyncError !== null) {
+			if (this.options.isReady && !this.options.isReady()) {
+				this.status = {
+					...this.status,
+					lastError:
+						bookmarkSyncError === null
+							? "Local Twitter collection is not fresh; data upload succeeded without a heartbeat and cloud failover remains active"
+							: `Local Twitter collection is not fresh; data upload succeeded without a heartbeat and bookmark sync is pending (${bookmarkSyncError})`,
+				};
+			} else if (bookmarkSyncError !== null) {
 				this.status = {
 					...this.status,
 					lastError: `Bookmark sync is pending (${bookmarkSyncError})`,

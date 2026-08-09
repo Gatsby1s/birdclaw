@@ -5,6 +5,7 @@ import {
 } from "./bird";
 import { enqueueDatabaseWrite } from "./database-writer";
 import { getNativeDb } from "./db";
+import { syncHomeTimeline } from "./timeline-live";
 import { ingestTweetPayload } from "./tweet-repository";
 import type { XurlMentionsResponse } from "./types";
 
@@ -17,6 +18,8 @@ export interface LocalTwitterCollectorStatus {
 	enabled: boolean;
 	running: boolean;
 	lastSuccessAt: string | null;
+	timelineEnabled: boolean;
+	lastTimelineSuccessAt: string | null;
 	lastError: string | null;
 	ingestedCount: number;
 	intervalSeconds: number;
@@ -45,6 +48,8 @@ function errorMessage(error: unknown) {
 function localCollectorConfig() {
 	return {
 		enabled: process.env.BIRDCLAW_LOCAL_COLLECTOR_ENABLED === "1",
+		timelineEnabled:
+			process.env.BIRDCLAW_LOCAL_COLLECTOR_HOME_TIMELINE_ENABLED === "1",
 		watchUsers: listEnv(
 			process.env.BIRDCLAW_LOCAL_COLLECTOR_WATCH_USERS ??
 				process.env.BIRDCLAW_6551_WATCH_USERS,
@@ -116,6 +121,8 @@ export class LocalTwitterCollector {
 		enabled: this.config.enabled,
 		running: false,
 		lastSuccessAt: null,
+		timelineEnabled: this.config.timelineEnabled,
+		lastTimelineSuccessAt: null,
 		lastError: null,
 		ingestedCount: 0,
 		intervalSeconds: this.config.intervalSeconds,
@@ -128,6 +135,7 @@ export class LocalTwitterCollector {
 			() => void this.runOnce(),
 			this.config.intervalSeconds * 1000,
 		);
+		this.timer.unref?.();
 	}
 
 	stop() {
@@ -141,10 +149,18 @@ export class LocalTwitterCollector {
 	}
 
 	isFresh(now = new Date()) {
-		if (!this.config.enabled || !this.status.lastSuccessAt) return false;
-		return (
-			now.getTime() - new Date(this.status.lastSuccessAt).getTime() <=
-			this.config.intervalSeconds * FRESHNESS_MULTIPLIER * 1000
+		if (!this.config.enabled) return false;
+		const requiredSuccessTimes = [
+			this.status.lastSuccessAt,
+			...(this.config.timelineEnabled
+				? [this.status.lastTimelineSuccessAt]
+				: []),
+		];
+		return requiredSuccessTimes.every(
+			(timestamp) =>
+				Boolean(timestamp) &&
+				now.getTime() - new Date(timestamp as string).getTime() <=
+					this.config.intervalSeconds * FRESHNESS_MULTIPLIER * 1000,
 		);
 	}
 
@@ -156,45 +172,90 @@ export class LocalTwitterCollector {
 		this.status = { ...this.status, running: true };
 		try {
 			const accountId = resolveCollectorAccountId(this.config.accountId);
+			const errors: string[] = [];
+			let ingested = 0;
+			if (this.config.timelineEnabled) {
+				try {
+					const result = await syncHomeTimeline({
+						account: accountId,
+						mode: "bird",
+						limit: this.config.maxResults,
+						following: true,
+						refresh: true,
+					});
+					ingested += result.count;
+					this.status = {
+						...this.status,
+						lastTimelineSuccessAt: new Date().toISOString(),
+					};
+				} catch (error) {
+					errors.push(`Home timeline sync failed: ${errorMessage(error)}`);
+				}
+			}
 			const payloads: XurlMentionsResponse[] = [];
 			for (const username of this.config.watchUsers) {
-				payloads.push(
-					await listUserTweetsViaBird({
-						username,
-						maxResults: this.config.maxResults,
-						maxPages: this.config.maxPages,
-					}),
-				);
+				try {
+					payloads.push(
+						await listUserTweetsViaBird({
+							username,
+							maxResults: this.config.maxResults,
+							maxPages: this.config.maxPages,
+						}),
+					);
+				} catch (error) {
+					errors.push(
+						`Watched user @${username} sync failed: ${errorMessage(error)}`,
+					);
+				}
 			}
 			for (const tweetId of this.config.targetTweetIds) {
-				payloads.push(
-					await listThreadViaBird({
-						tweetId,
-						all: true,
-						maxPages: this.config.maxPages,
-						timeoutMs: 60_000,
-					}),
-				);
-				payloads.push(
-					await searchTweetsViaBird(`quoted_tweet_id:${tweetId}`, {
-						maxResults: this.config.maxResults,
-						all: true,
-						maxPages: this.config.maxPages,
-					}),
-				);
+				try {
+					payloads.push(
+						await listThreadViaBird({
+							tweetId,
+							all: true,
+							maxPages: this.config.maxPages,
+							timeoutMs: 60_000,
+						}),
+					);
+					payloads.push(
+						await searchTweetsViaBird(`quoted_tweet_id:${tweetId}`, {
+							maxResults: this.config.maxResults,
+							all: true,
+							maxPages: this.config.maxPages,
+						}),
+					);
+				} catch (error) {
+					errors.push(
+						`Target tweet ${tweetId} sync failed: ${errorMessage(error)}`,
+					);
+				}
 			}
-			if (payloads.length === 0) {
+			if (
+				!this.config.timelineEnabled &&
+				this.config.watchUsers.length === 0 &&
+				this.config.targetTweetIds.length === 0
+			) {
 				throw new Error("Local Twitter collector has no configured targets");
 			}
-			let ingested = 0;
 			for (const payload of payloads) {
-				ingested += (await ingestCollectorPayload(accountId, payload)).length;
+				try {
+					ingested += (await ingestCollectorPayload(accountId, payload)).length;
+				} catch (error) {
+					errors.push(`Collector ingest failed: ${errorMessage(error)}`);
+				}
+			}
+			this.status = {
+				...this.status,
+				ingestedCount: this.status.ingestedCount + ingested,
+			};
+			if (errors.length > 0) {
+				throw new Error(errors.join("; "));
 			}
 			this.status = {
 				...this.status,
 				lastSuccessAt: new Date().toISOString(),
 				lastError: null,
-				ingestedCount: this.status.ingestedCount + ingested,
 			};
 		} catch (error) {
 			this.status = { ...this.status, lastError: errorMessage(error) };
@@ -214,6 +275,8 @@ export function getLocalTwitterCollectorStatus() {
 			enabled: false,
 			running: false,
 			lastSuccessAt: null,
+			timelineEnabled: false,
+			lastTimelineSuccessAt: null,
 			lastError: null,
 			ingestedCount: 0,
 			intervalSeconds: DEFAULT_INTERVAL_SECONDS,

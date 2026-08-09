@@ -45,6 +45,7 @@ import {
 } from "./weekly-digest-scheduler";
 import { handleRagMcpHttpRequest } from "./rag-mcp-server";
 import {
+	getTwitter6551RuntimeConfig,
 	getTwitter6551RuntimeStatus,
 	recordTwitter6551LocalHeartbeat,
 	startTwitter6551WorkerManager,
@@ -86,6 +87,7 @@ const LOGIN_WINDOW_MS = 15 * 60_000;
 const LOGIN_MAX_ATTEMPTS = 8;
 const MAX_LOGIN_RATE_KEYS = 10_000;
 const MAX_LOCAL_BRIDGE_BYTES = 8 * 1024 * 1024;
+const MAX_LOCAL_BRIDGE_CLOCK_SKEW_MS = 30_000;
 
 function isLoopbackAddress(address: string | undefined) {
 	if (!address) return false;
@@ -351,8 +353,24 @@ async function handleLocalCloudBridge(
 		const result = await importLocalCloudBridgeBatch(
 			await readLocalBridgeJson(request),
 		);
-		if (result.purpose === "live" && result.caughtUp) {
-			await recordTwitter6551LocalHeartbeat(result.edges);
+		const homeTimelineSyncedAtMs = result.homeTimelineSyncedAt
+			? Date.parse(result.homeTimelineSyncedAt)
+			: Number.NaN;
+		const heartbeatReceivedAtMs = Date.now();
+		const homeTimelineSyncAgeMs =
+			heartbeatReceivedAtMs - homeTimelineSyncedAtMs;
+		if (
+			result.purpose === "live" &&
+			result.caughtUp &&
+			Number.isFinite(homeTimelineSyncedAtMs) &&
+			homeTimelineSyncAgeMs >= -MAX_LOCAL_BRIDGE_CLOCK_SKEW_MS &&
+			homeTimelineSyncAgeMs <=
+				getTwitter6551RuntimeConfig().localStaleSeconds * 1000
+		) {
+			await recordTwitter6551LocalHeartbeat(
+				result.edges,
+				new Date(Math.min(heartbeatReceivedAtMs, homeTimelineSyncedAtMs)),
+			);
 		}
 		sendText(
 			response,
