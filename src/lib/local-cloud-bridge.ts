@@ -23,7 +23,10 @@ const MAX_BATCH_SIZE = 250;
 const REQUEST_TIMEOUT_MS = 30_000;
 const CURSOR_CACHE_PREFIX = "cloud-bridge:cursor:";
 const HISTORY_CACHE_PREFIX = "cloud-bridge:history:";
+const BOOKMARK_HYDRATION_CACHE_PREFIX = "cloud-bridge:bookmark-hydration:";
+const BOOKMARK_HYDRATION_VERSION = 1;
 const MAX_CLIENT_BODY_BYTES = 7 * 1024 * 1024;
+const MAX_BOOKMARK_HYDRATION_RESPONSE_BYTES = 6 * 1024 * 1024;
 const MAX_PAGES_PER_RUN = 20;
 
 const bridgePurposeSchema = z.enum(["live", "history", "bookmarks"]);
@@ -53,6 +56,14 @@ const bridgeHistoryStateSchema = z.object({
 	version: z.literal(1),
 	cursor: bridgeCursorSchema,
 	completedAt: z.string().max(64).nullable(),
+});
+
+const bridgeBookmarkHydrationStateSchema = z.object({
+	version: z.literal(BOOKMARK_HYDRATION_VERSION),
+	accountId: z.string().min(1).max(256),
+	status: z.enum(["replaying", "completed"]),
+	startedAt: z.iso.datetime(),
+	completedAt: z.iso.datetime().nullable(),
 });
 
 const bridgeAccountSchema = z.object({
@@ -276,6 +287,20 @@ export const localCloudBridgeBatchSchema = z
 export type LocalCloudBridgeCursor = z.input<typeof bridgeCursorSchema>;
 export type LocalCloudBridgeBatch = z.infer<typeof localCloudBridgeBatchSchema>;
 
+function resolveBridgeSavedAccountId(db: Database, accountId?: string) {
+	return (
+		accountId ??
+		(
+			db
+				.prepare(
+					"select id from accounts order by is_default desc, created_at, id limit 1",
+				)
+				.get() as { id?: string } | undefined
+		)?.id ??
+		null
+	);
+}
+
 function listLocalBookmarkRows(
 	db: Database,
 	{
@@ -446,6 +471,203 @@ function queryByIds<T>(
 	return db.prepare(`${sqlPrefix} (${placeholders(ids)})`).all(...ids) as T[];
 }
 
+function listBridgeTweetHydration(
+	db: Database,
+	primaryTweetIds: readonly string[],
+) {
+	const uniquePrimaryTweetIds = [...new Set(primaryTweetIds)];
+	const tweetSql = `
+		select
+			id,
+			author_profile_id as authorProfileId,
+			text,
+			created_at as createdAt,
+			is_replied as isReplied,
+			reply_to_id as replyToId,
+			like_count as likeCount,
+			media_count as mediaCount,
+			entities_json as entitiesJson,
+			media_json as mediaJson,
+			quoted_tweet_id as quotedTweetId
+		from tweets
+		where id in
+	`;
+	const primaryTweets = queryByIds<LocalCloudBridgeBatch["tweets"][number]>(
+		db,
+		tweetSql,
+		uniquePrimaryTweetIds,
+	);
+	const quotedIds = [
+		...new Set(
+			primaryTweets
+				.map((tweet) => tweet.quotedTweetId)
+				.filter((id): id is string => Boolean(id)),
+		),
+	].filter((id) => !uniquePrimaryTweetIds.includes(id));
+	const quotedTweets = queryByIds<LocalCloudBridgeBatch["tweets"][number]>(
+		db,
+		tweetSql,
+		quotedIds,
+	);
+	const tweets = [...primaryTweets, ...quotedTweets];
+	const profileIds = [...new Set(tweets.map((tweet) => tweet.authorProfileId))];
+	const profiles = queryByIds<LocalCloudBridgeBatch["profiles"][number]>(
+		db,
+		`
+		select
+			id,
+			handle,
+			display_name as displayName,
+			bio,
+			followers_count as followersCount,
+			following_count as followingCount,
+			public_metrics_json as publicMetricsJson,
+			avatar_hue as avatarHue,
+			avatar_url as avatarUrl,
+			location,
+			url,
+			verified_type as verifiedType,
+			entities_json as entitiesJson,
+			raw_json as rawJson,
+			created_at as createdAt
+		from profiles
+		where id in
+		`,
+		profileIds,
+	);
+	return { profiles, tweets };
+}
+
+function mergeBridgeTweetHydration(
+	db: Database,
+	profiles: readonly z.infer<typeof bridgeProfileSchema>[],
+	tweets: readonly z.infer<typeof bridgeTweetSchema>[],
+) {
+	const upsertProfile = db.prepare(`
+		insert into profiles (
+			id, handle, display_name, bio, followers_count, following_count,
+			public_metrics_json, avatar_hue, avatar_url, location, url,
+			verified_type, entities_json, raw_json, created_at
+		) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		on conflict(id) do update set
+			handle = coalesce(nullif(excluded.handle, ''), profiles.handle),
+			display_name = coalesce(
+				nullif(excluded.display_name, ''),
+				profiles.display_name
+			),
+			bio = coalesce(nullif(excluded.bio, ''), profiles.bio),
+			followers_count = max(
+				profiles.followers_count,
+				excluded.followers_count
+			),
+			following_count = max(
+				profiles.following_count,
+				excluded.following_count
+			),
+			public_metrics_json = case
+				when excluded.public_metrics_json not in ('', '{}', 'null')
+					then excluded.public_metrics_json
+				else profiles.public_metrics_json
+			end,
+			avatar_hue = case
+				when profiles.avatar_hue = 0 then excluded.avatar_hue
+				else profiles.avatar_hue
+			end,
+			avatar_url = coalesce(excluded.avatar_url, profiles.avatar_url),
+			location = coalesce(excluded.location, profiles.location),
+			url = coalesce(excluded.url, profiles.url),
+			verified_type = coalesce(
+				excluded.verified_type,
+				profiles.verified_type
+			),
+			entities_json = case
+				when excluded.entities_json not in ('', '{}', 'null')
+					then excluded.entities_json
+				else profiles.entities_json
+			end,
+			raw_json = case
+				when excluded.raw_json not in ('', '{}', 'null')
+					then excluded.raw_json
+				else profiles.raw_json
+			end,
+			created_at = min(profiles.created_at, excluded.created_at)
+	`);
+	const upsertTweet = db.prepare(`
+		insert into tweets (
+			id, author_profile_id, text, created_at, is_replied, reply_to_id,
+			like_count, media_count, entities_json, media_json, quoted_tweet_id
+		) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		on conflict(id) do update set
+			author_profile_id = excluded.author_profile_id,
+			text = excluded.text,
+			created_at = excluded.created_at,
+			is_replied = max(tweets.is_replied, excluded.is_replied),
+			reply_to_id = coalesce(tweets.reply_to_id, excluded.reply_to_id),
+			like_count = excluded.like_count,
+			media_count = max(tweets.media_count, excluded.media_count),
+			entities_json = excluded.entities_json,
+			media_json = case
+				when excluded.media_json not in ('', '[]', 'null')
+					then excluded.media_json
+				else tweets.media_json
+			end,
+			quoted_tweet_id = coalesce(
+				tweets.quoted_tweet_id,
+				excluded.quoted_tweet_id
+			)
+	`);
+	const profileIdMap = new Map<string, string>();
+	for (const row of profiles) {
+		const existing = db
+			.prepare(
+				`select id
+				 from profiles
+				 where id = ? or lower(handle) = lower(?)
+				 order by
+				   case when id = ? then 0 else 1 end,
+				   created_at desc,
+				   id
+				 limit 1`,
+			)
+			.get(row.id, row.handle, row.id) as { id?: string } | undefined;
+		const targetProfileId = existing?.id ?? row.id;
+		profileIdMap.set(row.id, targetProfileId);
+		upsertProfile.run(
+			targetProfileId,
+			row.handle,
+			row.displayName,
+			row.bio,
+			row.followersCount,
+			row.followingCount,
+			row.publicMetricsJson,
+			row.avatarHue,
+			row.avatarUrl,
+			row.location,
+			row.url,
+			row.verifiedType,
+			row.entitiesJson,
+			row.rawJson,
+			row.createdAt,
+		);
+	}
+	for (const row of tweets) {
+		upsertTweet.run(
+			row.id,
+			profileIdMap.get(row.authorProfileId) ?? row.authorProfileId,
+			row.text,
+			row.createdAt,
+			row.isReplied,
+			row.replyToId,
+			row.likeCount,
+			row.mediaCount,
+			row.entitiesJson,
+			row.mediaJson,
+			row.quotedTweetId,
+		);
+		replaceTweetFts(db, row.id, row.text);
+	}
+}
+
 function initialCursor(lookbackHours: number, now = new Date()) {
 	return {
 		updatedAt: new Date(
@@ -476,6 +698,13 @@ function bridgeCacheKey(url: string) {
 
 function bridgeHistoryCacheKey(url: string) {
 	return `${HISTORY_CACHE_PREFIX}${createHash("sha256")
+		.update(url)
+		.digest("hex")
+		.slice(0, 16)}`;
+}
+
+function bridgeBookmarkHydrationCacheKey(url: string) {
+	return `${BOOKMARK_HYDRATION_CACHE_PREFIX}${createHash("sha256")
 		.update(url)
 		.digest("hex")
 		.slice(0, 16)}`;
@@ -569,6 +798,41 @@ function writeBridgeHistoryState(
 			updated_at = excluded.updated_at
 		`,
 	).run(bridgeHistoryCacheKey(url), JSON.stringify(state), now.toISOString());
+}
+
+function readBridgeBookmarkHydrationState(db: Database, url: string) {
+	const row = db
+		.prepare("select value_json from sync_cache where cache_key = ?")
+		.get(bridgeBookmarkHydrationCacheKey(url)) as
+		| { value_json?: string }
+		| undefined;
+	if (!row?.value_json) return null;
+	try {
+		return bridgeBookmarkHydrationStateSchema.parse(JSON.parse(row.value_json));
+	} catch {
+		return null;
+	}
+}
+
+function writeBridgeBookmarkHydrationState(
+	db: Database,
+	url: string,
+	state: z.infer<typeof bridgeBookmarkHydrationStateSchema>,
+	now: Date,
+) {
+	db.prepare(
+		`
+		insert into sync_cache (cache_key, value_json, updated_at)
+		values (?, ?, ?)
+		on conflict(cache_key) do update set
+			value_json = excluded.value_json,
+			updated_at = excluded.updated_at
+		`,
+	).run(
+		bridgeBookmarkHydrationCacheKey(url),
+		JSON.stringify(state),
+		now.toISOString(),
+	);
 }
 
 function scalarCount(db: Database, sql: string) {
@@ -735,15 +999,7 @@ export function buildLocalCloudBridgeBatch({
 		: start;
 	const includeSavedRows = purpose === "bookmarks";
 	const savedAccountId = includeSavedRows
-		? (accountId ??
-			(
-				db
-					.prepare(
-						"select id from accounts order by is_default desc, created_at, id limit 1",
-					)
-					.get() as { id?: string } | undefined
-			)?.id ??
-			null)
+		? resolveBridgeSavedAccountId(db, accountId)
 		: null;
 	const savedCursorStart =
 		includeSavedRows && start.bookmarkSourceAccountId !== (savedAccountId ?? "")
@@ -820,65 +1076,7 @@ export function buildLocalCloudBridgeBatch({
 			...nativeBookmarks.map((row) => row.tweetId),
 		]),
 	];
-	const tweetSql = `
-		select
-			id,
-			author_profile_id as authorProfileId,
-			text,
-			created_at as createdAt,
-			is_replied as isReplied,
-			reply_to_id as replyToId,
-			like_count as likeCount,
-			media_count as mediaCount,
-			entities_json as entitiesJson,
-			media_json as mediaJson,
-			quoted_tweet_id as quotedTweetId
-		from tweets
-		where id in
-	`;
-	const primaryTweets = queryByIds<LocalCloudBridgeBatch["tweets"][number]>(
-		db,
-		tweetSql,
-		primaryTweetIds,
-	);
-	const quotedIds = [
-		...new Set(
-			primaryTweets
-				.map((tweet) => tweet.quotedTweetId)
-				.filter((id): id is string => Boolean(id)),
-		),
-	].filter((id) => !primaryTweetIds.includes(id));
-	const quotedTweets = queryByIds<LocalCloudBridgeBatch["tweets"][number]>(
-		db,
-		tweetSql,
-		quotedIds,
-	);
-	const tweets = [...primaryTweets, ...quotedTweets];
-	const profileIds = [...new Set(tweets.map((tweet) => tweet.authorProfileId))];
-	const profiles = queryByIds<LocalCloudBridgeBatch["profiles"][number]>(
-		db,
-		`
-		select
-			id,
-			handle,
-			display_name as displayName,
-			bio,
-			followers_count as followersCount,
-			following_count as followingCount,
-			public_metrics_json as publicMetricsJson,
-			avatar_hue as avatarHue,
-			avatar_url as avatarUrl,
-			location,
-			url,
-			verified_type as verifiedType,
-			entities_json as entitiesJson,
-			raw_json as rawJson,
-			created_at as createdAt
-		from profiles
-		where id in
-		`,
-		profileIds,
-	);
+	const { profiles, tweets } = listBridgeTweetHydration(db, primaryTweetIds);
 	const savedSnapshotAccountIds = savedAccountId ? [savedAccountId] : [];
 	const accountIds = [
 		...new Set([
@@ -962,79 +1160,6 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 				transport = coalesce(nullif(excluded.transport, ''), accounts.transport),
 				is_default = max(accounts.is_default, excluded.is_default),
 				created_at = min(accounts.created_at, excluded.created_at)
-		`);
-		const upsertProfile = db.prepare(`
-			insert into profiles (
-				id, handle, display_name, bio, followers_count, following_count,
-				public_metrics_json, avatar_hue, avatar_url, location, url,
-				verified_type, entities_json, raw_json, created_at
-			) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			on conflict(id) do update set
-				handle = coalesce(nullif(excluded.handle, ''), profiles.handle),
-				display_name = coalesce(
-					nullif(excluded.display_name, ''),
-					profiles.display_name
-				),
-				bio = coalesce(nullif(excluded.bio, ''), profiles.bio),
-				followers_count = max(
-					profiles.followers_count,
-					excluded.followers_count
-				),
-				following_count = max(
-					profiles.following_count,
-					excluded.following_count
-				),
-				public_metrics_json = case
-					when excluded.public_metrics_json not in ('', '{}', 'null')
-						then excluded.public_metrics_json
-					else profiles.public_metrics_json
-				end,
-				avatar_hue = case
-					when profiles.avatar_hue = 0 then excluded.avatar_hue
-					else profiles.avatar_hue
-				end,
-				avatar_url = coalesce(excluded.avatar_url, profiles.avatar_url),
-				location = coalesce(excluded.location, profiles.location),
-				url = coalesce(excluded.url, profiles.url),
-				verified_type = coalesce(
-					excluded.verified_type,
-					profiles.verified_type
-				),
-				entities_json = case
-					when excluded.entities_json not in ('', '{}', 'null')
-						then excluded.entities_json
-					else profiles.entities_json
-				end,
-				raw_json = case
-					when excluded.raw_json not in ('', '{}', 'null')
-						then excluded.raw_json
-					else profiles.raw_json
-				end,
-				created_at = min(profiles.created_at, excluded.created_at)
-		`);
-		const upsertTweet = db.prepare(`
-			insert into tweets (
-				id, author_profile_id, text, created_at, is_replied, reply_to_id,
-				like_count, media_count, entities_json, media_json, quoted_tweet_id
-			) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			on conflict(id) do update set
-				author_profile_id = excluded.author_profile_id,
-				text = excluded.text,
-				created_at = excluded.created_at,
-				is_replied = max(tweets.is_replied, excluded.is_replied),
-				reply_to_id = coalesce(tweets.reply_to_id, excluded.reply_to_id),
-				like_count = excluded.like_count,
-				media_count = max(tweets.media_count, excluded.media_count),
-				entities_json = excluded.entities_json,
-				media_json = case
-					when excluded.media_json not in ('', '[]', 'null')
-						then excluded.media_json
-					else tweets.media_json
-				end,
-				quoted_tweet_id = coalesce(
-					tweets.quoted_tweet_id,
-					excluded.quoted_tweet_id
-				)
 		`);
 		const upsertEdge = db.prepare(`
 			insert into tweet_account_edges (
@@ -1311,56 +1436,7 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 				).run(accountId);
 			}
 		}
-		const profileIdMap = new Map<string, string>();
-		for (const row of batch.profiles) {
-			const existing = db
-				.prepare(
-					`select id
-					 from profiles
-					 where id = ? or lower(handle) = lower(?)
-					 order by
-					   case when id = ? then 0 else 1 end,
-					   created_at desc,
-					   id
-					 limit 1`,
-				)
-				.get(row.id, row.handle, row.id) as { id?: string } | undefined;
-			const targetProfileId = existing?.id ?? row.id;
-			profileIdMap.set(row.id, targetProfileId);
-			upsertProfile.run(
-				targetProfileId,
-				row.handle,
-				row.displayName,
-				row.bio,
-				row.followersCount,
-				row.followingCount,
-				row.publicMetricsJson,
-				row.avatarHue,
-				row.avatarUrl,
-				row.location,
-				row.url,
-				row.verifiedType,
-				row.entitiesJson,
-				row.rawJson,
-				row.createdAt,
-			);
-		}
-		for (const row of batch.tweets) {
-			upsertTweet.run(
-				row.id,
-				profileIdMap.get(row.authorProfileId) ?? row.authorProfileId,
-				row.text,
-				row.createdAt,
-				row.isReplied,
-				row.replyToId,
-				row.likeCount,
-				row.mediaCount,
-				row.entitiesJson,
-				row.mediaJson,
-				row.quotedTweetId,
-			);
-			replaceTweetFts(db, row.id, row.text);
-		}
+		mergeBridgeTweetHydration(db, batch.profiles, batch.tweets);
 		for (const row of batch.edges) {
 			upsertEdge.run(
 				mappedAccountId(row.accountId),
@@ -1423,16 +1499,59 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 				db,
 			);
 		}
-		const returnedLocalBookmarks =
+		let returnedBookmarkPageSize = batch.savedPageSize;
+		const listReturnedLocalBookmarks = () =>
 			batch.purpose === "bookmarks" && savedSourceAccount
 				? listLocalBookmarkRows(db, {
 						accountId: mappedAccountId(savedSourceAccount.id),
 						updatedAt: batch.cursor.cloudBookmarkUpdatedAt,
 						cursorAccountId: batch.cursor.cloudBookmarkAccountId,
 						tweetId: batch.cursor.cloudBookmarkTweetId,
-						limit: batch.savedPageSize,
+						limit: returnedBookmarkPageSize,
 					}).map((row) => ({ ...row, accountId: savedSourceAccount.id }))
 				: [];
+		let returnedLocalBookmarks = listReturnedLocalBookmarks();
+		let returnedBookmarkHydration = listBridgeTweetHydration(
+			db,
+			returnedLocalBookmarks
+				.filter((row) => row.isBookmarked === 1)
+				.map((row) => row.tweetId),
+		);
+		let returnedBookmarkPayloadBytes = Buffer.byteLength(
+			JSON.stringify({
+				localBookmarks: returnedLocalBookmarks,
+				bookmarkProfiles: returnedBookmarkHydration.profiles,
+				bookmarkTweets: returnedBookmarkHydration.tweets,
+			}),
+		);
+		while (
+			returnedBookmarkPayloadBytes > MAX_BOOKMARK_HYDRATION_RESPONSE_BYTES &&
+			returnedBookmarkPageSize > 1
+		) {
+			returnedBookmarkPageSize = Math.max(
+				1,
+				Math.floor(returnedBookmarkPageSize / 2),
+			);
+			returnedLocalBookmarks = listReturnedLocalBookmarks();
+			returnedBookmarkHydration = listBridgeTweetHydration(
+				db,
+				returnedLocalBookmarks
+					.filter((row) => row.isBookmarked === 1)
+					.map((row) => row.tweetId),
+			);
+			returnedBookmarkPayloadBytes = Buffer.byteLength(
+				JSON.stringify({
+					localBookmarks: returnedLocalBookmarks,
+					bookmarkProfiles: returnedBookmarkHydration.profiles,
+					bookmarkTweets: returnedBookmarkHydration.tweets,
+				}),
+			);
+		}
+		if (returnedBookmarkPayloadBytes > MAX_BOOKMARK_HYDRATION_RESPONSE_BYTES) {
+			throw new Error(
+				"One cloud bookmark hydration record exceeds the safe response size",
+			);
+		}
 		const lastReturnedLocalBookmark = returnedLocalBookmarks.at(-1);
 		const returnedLocalBookmarkCursor = lastReturnedLocalBookmark
 			? {
@@ -1458,10 +1577,13 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 			...(batch.purpose === "bookmarks"
 				? {
 						bookmarkSyncVersion: 1 as const,
+						bookmarkHydrationVersion: BOOKMARK_HYDRATION_VERSION,
 						localBookmarks: returnedLocalBookmarks,
+						bookmarkProfiles: returnedBookmarkHydration.profiles,
+						bookmarkTweets: returnedBookmarkHydration.tweets,
 						localBookmarkCursor: returnedLocalBookmarkCursor,
 						localBookmarksCaughtUp:
-							returnedLocalBookmarks.length < batch.savedPageSize,
+							returnedLocalBookmarks.length < returnedBookmarkPageSize,
 					}
 				: {}),
 			xRemarkAnnotations: batch.xRemarkSnapshot?.annotations.length ?? 0,
@@ -1578,6 +1700,7 @@ export class LocalCloudBridgeClient {
 		db: Database,
 		cursor: LocalCloudBridgeCursor,
 		purpose: z.infer<typeof bridgePurposeSchema>,
+		{ requireBookmarkHydration = false } = {},
 	) {
 		let requestBatchSize = this.batchSize;
 		const homeTimelineSyncedAt = this.options.isReady?.()
@@ -1635,10 +1758,23 @@ export class LocalCloudBridgeClient {
 				ok: z.boolean(),
 				message: z.string().optional(),
 				bookmarkSyncVersion: z.literal(1).optional(),
+				bookmarkHydrationVersion: z
+					.literal(BOOKMARK_HYDRATION_VERSION)
+					.optional(),
 				localBookmarks: z
 					.array(bridgeLocalBookmarkSchema)
 					.max(MAX_BATCH_SIZE)
 					.optional(),
+				bookmarkProfiles: z
+					.array(bridgeProfileSchema)
+					.max(MAX_BATCH_SIZE * 6)
+					.optional()
+					.default([]),
+				bookmarkTweets: z
+					.array(bridgeTweetSchema)
+					.max(MAX_BATCH_SIZE * 6)
+					.optional()
+					.default([]),
 				localBookmarkCursor: z
 					.object({
 						updatedAt: bridgeOptionalIsoCursorSchema,
@@ -1671,14 +1807,25 @@ export class LocalCloudBridgeClient {
 				),
 			);
 		}
+		const bookmarkHydrationVersion =
+			payload.data.bookmarkSyncVersion === 1
+				? (payload.data.bookmarkHydrationVersion ?? 0)
+				: 0;
+		if (requireBookmarkHydration && bookmarkHydrationVersion !== 1) {
+			throw new Error(
+				"BirdClaw cloud bridge bookmark hydration capability disappeared after migration began",
+			);
+		}
 		if (payload.data.bookmarkSyncVersion !== 1) {
-			return purpose === "bookmarks"
-				? {
-						...batch,
-						caughtUp: true,
-						cursor: bridgeCursorSchema.parse(cursor),
-					}
-				: batch;
+			const result =
+				purpose === "bookmarks"
+					? {
+							...batch,
+							caughtUp: true,
+							cursor: bridgeCursorSchema.parse(cursor),
+						}
+					: batch;
+			return { ...result, bookmarkHydrationVersion };
 		}
 		if (
 			!payload.data.localBookmarks ||
@@ -1699,13 +1846,43 @@ export class LocalCloudBridgeClient {
 				"BirdClaw cloud bridge returned bookmarks for another account",
 			);
 		}
-		if (payload.data.localBookmarks.length > 0) {
-			await enqueueDatabaseWrite((writeDb) =>
-				mergeLocalBookmarkRows(payload.data.localBookmarks ?? [], writeDb),
+		if (bookmarkHydrationVersion === BOOKMARK_HYDRATION_VERSION) {
+			const hydratedTweetIds = new Set(
+				payload.data.bookmarkTweets.map((tweet) => tweet.id),
 			);
+			const hydratedProfileIds = new Set(
+				payload.data.bookmarkProfiles.map((profile) => profile.id),
+			);
+			if (
+				payload.data.localBookmarks.some(
+					(row) => row.isBookmarked === 1 && !hydratedTweetIds.has(row.tweetId),
+				) ||
+				payload.data.bookmarkTweets.some(
+					(tweet) => !hydratedProfileIds.has(tweet.authorProfileId),
+				)
+			) {
+				throw new Error(
+					"BirdClaw cloud bridge returned incomplete bookmark hydration data",
+				);
+			}
+		}
+		if (
+			payload.data.localBookmarks.length > 0 ||
+			payload.data.bookmarkProfiles.length > 0 ||
+			payload.data.bookmarkTweets.length > 0
+		) {
+			await enqueueDatabaseWrite((writeDb) => {
+				mergeBridgeTweetHydration(
+					writeDb,
+					payload.data.bookmarkProfiles,
+					payload.data.bookmarkTweets,
+				);
+				mergeLocalBookmarkRows(payload.data.localBookmarks ?? [], writeDb);
+			});
 		}
 		return {
 			...batch,
+			bookmarkHydrationVersion,
 			caughtUp: batch.caughtUp && payload.data.localBookmarksCaughtUp,
 			cursor: {
 				...batch.cursor,
@@ -1745,19 +1922,71 @@ export class LocalCloudBridgeClient {
 	private async exchangeBookmarkPages() {
 		for (let page = 0; page < MAX_PAGES_PER_RUN && !this.stopped; page += 1) {
 			const db = getNativeDb({ seedDemoData: false });
-			const cursor = readBridgeCursor(
+			const now = this.now();
+			const cursor = readBridgeCursor(db, this.url, this.lookbackHours, now);
+			const savedAccountId = resolveBridgeSavedAccountId(db, this.accountId);
+			const storedHydrationState = readBridgeBookmarkHydrationState(
 				db,
 				this.url,
-				this.lookbackHours,
-				this.now(),
 			);
-			const batch = await this.sendBatch(db, cursor, "bookmarks");
-			await enqueueDatabaseWrite((writeDb) =>
-				writeBridgeCursor(writeDb, this.url, batch.cursor, this.now()),
-			);
+			const hydrationState =
+				savedAccountId && storedHydrationState?.accountId === savedAccountId
+					? storedHydrationState
+					: null;
+			const batch = await this.sendBatch(db, cursor, "bookmarks", {
+				requireBookmarkHydration: hydrationState !== null,
+			});
+			if (
+				savedAccountId &&
+				!hydrationState &&
+				batch.bookmarkHydrationVersion === BOOKMARK_HYDRATION_VERSION
+			) {
+				const replayCursor = {
+					...batch.cursor,
+					cloudBookmarkUpdatedAt: "",
+					cloudBookmarkAccountId: "",
+					cloudBookmarkTweetId: "",
+				};
+				await enqueueDatabaseWrite((writeDb) => {
+					writeBridgeCursor(writeDb, this.url, replayCursor, now);
+					writeBridgeBookmarkHydrationState(
+						writeDb,
+						this.url,
+						{
+							version: BOOKMARK_HYDRATION_VERSION,
+							accountId: savedAccountId,
+							status: "replaying",
+							startedAt: now.toISOString(),
+							completedAt: null,
+						},
+						now,
+					);
+				});
+				this.status = {
+					...this.status,
+					lastSuccessAt: now.toISOString(),
+					lastError: null,
+				};
+				continue;
+			}
+			await enqueueDatabaseWrite((writeDb) => {
+				writeBridgeCursor(writeDb, this.url, batch.cursor, now);
+				if (savedAccountId && hydrationState?.status === "replaying") {
+					writeBridgeBookmarkHydrationState(
+						writeDb,
+						this.url,
+						{
+							...hydrationState,
+							status: batch.caughtUp ? "completed" : "replaying",
+							completedAt: batch.caughtUp ? now.toISOString() : null,
+						},
+						now,
+					);
+				}
+			});
 			this.status = {
 				...this.status,
-				lastSuccessAt: this.now().toISOString(),
+				lastSuccessAt: now.toISOString(),
 				lastError: null,
 			};
 			if (batch.caughtUp) return true;

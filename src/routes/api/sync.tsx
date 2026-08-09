@@ -14,6 +14,7 @@ import {
 	type WebSyncDmInbox,
 	type WebSyncOptions,
 } from "#/lib/web-sync";
+import { isLocalCloudBridgeTokenConfigured } from "#/lib/local-cloud-bridge";
 
 function parseAccountId(value: unknown) {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -90,6 +91,16 @@ export const Route = createFileRoute("/api/sync")({
 							return jsonResponse(
 								{ ok: false, message: "Unknown sync kind" },
 								{ status: 400 },
+							);
+						}
+						if (kind === "bookmarks" && isLocalCloudBridgeTokenConfigured()) {
+							return jsonResponse(
+								{
+									ok: false,
+									message:
+										"Bookmarks sync automatically with the paired Mac; manual X sync is unavailable on the cloud service.",
+								},
+								{ status: 409 },
 							);
 						}
 

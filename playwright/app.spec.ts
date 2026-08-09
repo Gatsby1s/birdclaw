@@ -72,8 +72,14 @@ test("navigates across the primary surfaces", async ({ page }) => {
 	await page.getByRole("link", { name: "Bookmarks" }).click();
 	await expect(page.getByRole("heading", { name: "Bookmarks" })).toBeVisible();
 	await expect(
+		page.getByRole("status", { name: "Bookmarks sync automatically" }),
+	).toContainText("Auto sync");
+	await expect(
 		page.getByRole("button", { name: "Sync bookmarks" }),
-	).toBeVisible();
+	).toHaveCount(0);
+	await expect(page.getByRole("button", { name: "Sync from X" })).toHaveCount(
+		0,
+	);
 
 	await page.getByRole("link", { name: "Links" }).click();
 	await expect(page.getByRole("heading", { name: "Links" })).toBeVisible();

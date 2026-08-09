@@ -28,6 +28,7 @@ export default defineConfig({
 		env: {
 			BIRDCLAW_PLAYWRIGHT_PORT: port,
 			BIRDCLAW_HOME: testHome,
+			BIRDCLAW_LOCAL_BRIDGE_TOKEN: "birdclaw-playwright-bridge-token",
 			BIRDCLAW_DISABLE_LIVE_PROFILE_LOOKUP: "1",
 			BIRDCLAW_DISABLE_LIVE_WRITES: "1",
 		},

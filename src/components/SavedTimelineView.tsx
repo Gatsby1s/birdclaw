@@ -1,3 +1,4 @@
+import { Cloud } from "lucide-react";
 import { useMemo, useState } from "react";
 import { SyncNowButton } from "#/components/SyncNowButton";
 import { TimelineCard } from "#/components/TimelineCard";
@@ -21,6 +22,8 @@ const TITLES: Record<SavedTimelineViewProps["filter"], string> = {
 	liked: "Likes",
 	bookmarked: "Bookmarks",
 };
+
+const BOOKMARK_AUTO_REFRESH_MS = 30_000;
 
 export function SavedTimelineView({
 	filter,
@@ -46,6 +49,8 @@ export function SavedTimelineView({
 		errorFallback: `${TITLES[filter]} unavailable`,
 		likedOnly: filter === "liked",
 		bookmarkedOnly: filter === "bookmarked",
+		refreshIntervalMs:
+			filter === "bookmarked" ? BOOKMARK_AUTO_REFRESH_MS : undefined,
 	});
 
 	const subtitle = useMemo(() => {
@@ -56,7 +61,32 @@ export function SavedTimelineView({
 		}
 		return `${String(items.length)} visible · ${meta.transport.statusText}`;
 	}, [items.length, loadingLabel, meta]);
-	const syncKind = filter === "liked" ? "likes" : "bookmarks";
+	const automaticBookmarkSync = meta?.bookmarkSyncMode === "automatic";
+	const headerAction =
+		filter === "liked" ? (
+			<SyncNowButton
+				accounts={meta?.accounts}
+				kind="likes"
+				label="Sync likes"
+				onSynced={refreshLocalView}
+			/>
+		) : !meta ? null : automaticBookmarkSync ? (
+			<div
+				aria-label="Bookmarks sync automatically"
+				className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[color:color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[var(--accent-soft)] px-3 text-[13px] font-semibold text-[var(--accent)]"
+				role="status"
+			>
+				<Cloud className="size-4" strokeWidth={2} />
+				<span>Auto sync</span>
+			</div>
+		) : (
+			<SyncNowButton
+				accounts={meta.accounts}
+				kind="bookmarks"
+				label="Sync from X"
+				onSynced={refreshLocalView}
+			/>
+		);
 
 	return (
 		<TimelineFeedShell
@@ -69,14 +99,7 @@ export function SavedTimelineView({
 							<TimelineHeaderSubtitle>{subtitle}</TimelineHeaderSubtitle>
 						</>
 					}
-					action={
-						<SyncNowButton
-							accounts={meta?.accounts}
-							kind={syncKind}
-							label={filter === "liked" ? "Sync likes" : "Sync bookmarks"}
-							onSynced={refreshLocalView}
-						/>
-					}
+					action={headerAction}
 					controls={
 						<TimelineSearchField
 							onChange={setSearch}
@@ -94,7 +117,13 @@ export function SavedTimelineView({
 			onRetry={retry}
 			empty={items.length === 0}
 			emptyLabel="Nothing saved here yet"
-			emptyDetail="Sync this collection or broaden the search."
+			emptyDetail={
+				filter === "bookmarked"
+					? automaticBookmarkSync
+						? "Bookmarks appear here automatically as they sync."
+						: "Use Sync from X to collect bookmarks into this local view."
+					: "Sync this collection or broaden the search."
+			}
 			hasMore={hasMore}
 			loadingMore={loadingMore}
 			onLoadMore={loadMore}

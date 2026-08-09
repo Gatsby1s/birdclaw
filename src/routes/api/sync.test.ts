@@ -153,6 +153,32 @@ describe("api sync route", () => {
 		expect(startWebSyncMock).not.toHaveBeenCalled();
 	});
 
+	it("refuses manual bookmark collection on the cloud bridge receiver", async () => {
+		const originalBridgeToken = process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN;
+		process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN = "bridge-test-token";
+		try {
+			const response = await POST({
+				request: new Request("https://birdclaw.example/api/sync", {
+					method: "POST",
+					body: JSON.stringify({ kind: "bookmarks" }),
+				}),
+			});
+
+			expect(response.status).toBe(409);
+			expect(await response.json()).toMatchObject({
+				ok: false,
+				message: expect.stringContaining("sync automatically"),
+			});
+			expect(startWebSyncMock).not.toHaveBeenCalled();
+		} finally {
+			if (originalBridgeToken === undefined) {
+				delete process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN;
+			} else {
+				process.env.BIRDCLAW_LOCAL_BRIDGE_TOKEN = originalBridgeToken;
+			}
+		}
+	});
+
 	it("returns 404 for unknown sync job ids", async () => {
 		getWebSyncJobMock.mockReturnValue(null);
 
