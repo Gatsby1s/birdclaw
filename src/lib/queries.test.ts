@@ -327,7 +327,6 @@ describe("birdclaw queries", () => {
 		db.prepare(
 			"insert into sync_cache (cache_key, value_json, updated_at) values ('dms:bird:acct_primary:20:requests:max-pages:0', '{}', '2026-05-01T00:00:00.000Z')",
 		).run();
-
 		await expect(
 			applyDmRequestMutationToLocalStore("dm_003", "reject"),
 		).resolves.toBeGreaterThan(0);
@@ -565,6 +564,102 @@ describe("birdclaw queries", () => {
 		expect(items.map((item) => item.id)).toEqual(["tweet_006"]);
 		expect(items[0]?.accountId).toBe("acct_studio");
 		expect(items[0]?.searchSnippet).toContain("<mark>Agents</mark>");
+	});
+
+	it("finds timeline posts by author name, handle, and stable user ID", () => {
+		setupTempHome();
+		const db = getNativeDb();
+		db.prepare(
+			`
+      insert into profiles (
+        id, handle, display_name, bio, followers_count, avatar_hue, created_at
+      ) values (
+        'profile_user_4242424242', 'Ada_Codes', 'Ada Lovelace',
+        'Computing pioneer', 100, 42, '2026-03-08T00:00:00.000Z'
+      )
+      `,
+		).run();
+		db.prepare(
+			`
+      insert into profiles (
+        id, handle, display_name, bio, followers_count, avatar_hue, created_at
+      ) values (
+        'profile_user_9999', 'ada_codes_fan',
+        'Fan of 4242424242 profile_user_4242424242', 'Similar identity',
+        10, 99, '2026-03-08T00:00:00.000Z'
+      )
+      `,
+		).run();
+		insertTestTweet(db, {
+			id: "tweet_author_search",
+			text: "Ada_Codes says the analytical engine has no pretensions whatever to originate anything.",
+			createdAt: "2026-03-09T12:00:00.000Z",
+			authorProfileId: "profile_user_4242424242",
+		});
+		db.prepare("insert into tweets_fts (tweet_id, text) values (?, ?)").run(
+			"tweet_author_search",
+			"Ada_Codes says the analytical engine has no pretensions whatever to originate anything.",
+		);
+		insertTestEdge(db, "tweet_author_search", "2026-03-09T12:00:00.000Z");
+		insertTestTweet(db, {
+			id: "tweet_similar_author",
+			text: "A different account with a similar identity.",
+			createdAt: "2026-03-09T13:00:00.000Z",
+			authorProfileId: "profile_user_9999",
+		});
+		insertTestEdge(db, "tweet_similar_author", "2026-03-09T13:00:00.000Z");
+
+		for (const search of [
+			"Ada Lovelace",
+			"@ada_codes",
+			"ADA_COD",
+			"4242424242",
+			"profile_user_4242424242",
+		]) {
+			const items = listTimelineItems({
+				resource: "home",
+				search,
+				limit: 20,
+			});
+			expect({
+				search,
+				ids: items.map((item) => item.id),
+			}).toMatchObject({
+				search,
+				ids: expect.arrayContaining(["tweet_author_search"]),
+			});
+		}
+
+		for (const search of [
+			"@ada_codes",
+			"4242424242",
+			"profile_user_4242424242",
+		]) {
+			const ids = listTimelineItems({
+				resource: "home",
+				search,
+				limit: 20,
+			}).map((item) => item.id);
+			expect(ids).toContain("tweet_author_search");
+			expect(ids).not.toContain("tweet_similar_author");
+		}
+
+		const [profileOnlyMatch] = listTimelineItems({
+			resource: "home",
+			search: "Ada Lovelace",
+			limit: 20,
+		});
+		expect(profileOnlyMatch).not.toHaveProperty("searchSnippet");
+
+		const textAndProfileMatches = listTimelineItems({
+			resource: "home",
+			search: "Ada_Codes",
+			limit: 20,
+		}).filter((item) => item.id === "tweet_author_search");
+		expect(textAndProfileMatches).toHaveLength(1);
+		expect(textAndProfileMatches[0]?.searchSnippet).toContain(
+			"<mark>Ada_Codes</mark>",
+		);
 	});
 
 	it("hides replies to others while keeping self-thread replies", () => {
