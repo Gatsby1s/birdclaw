@@ -512,6 +512,7 @@ export function listTimelineItems({
 	const db = getReadDb();
 	const kind = resource === "mentions" ? "mention" : resource;
 	const params: Array<string | number> = [];
+	let timelineCteParamCount = 0;
 	const normalizedLowQualityThreshold =
 		normalizeLowQualityThreshold(lowQualityThreshold);
 	const shouldDedupeAcrossAccounts = !account || account === "all";
@@ -524,9 +525,7 @@ export function listTimelineItems({
 	    `;
 	const unwindowedTimelineEdgesCte = timelineEdgesCte;
 	let usedRecentEdgeWindow = false;
-	let join = "";
 	let where = "where e.kind = ?";
-	let searchSnippetSelect = "";
 
 	const canUseRecentEdgeWindow =
 		!likedOnly &&
@@ -595,6 +594,7 @@ export function listTimelineItems({
           )
         `;
 				params.push(collectionKind);
+				timelineCteParamCount = 1;
 			}
 		}
 		where = "where 1 = 1";
@@ -702,6 +702,7 @@ export function listTimelineItems({
       )
     `;
 		params.push(author.trim().replace(/^@/, ""), stateAccount?.trim() ?? "");
+		timelineCteParamCount = 2;
 		where = "where 1 = 1";
 	} else if (canUseRecentEdgeWindow && !hasPriorityAuthors) {
 		usedRecentEdgeWindow = true;
@@ -723,10 +724,12 @@ export function listTimelineItems({
 			limit * 50,
 		);
 		params.push(kind, candidateLimit);
+		timelineCteParamCount = 2;
 		where = "where e.kind = ?";
 		params.push(kind);
 	} else {
 		params.push(kind);
+		timelineCteParamCount = 1;
 		where = "where e.kind = ?";
 		params.push(kind);
 	}
@@ -798,13 +801,67 @@ export function listTimelineItems({
 		}
 	}
 
-	const ftsSearch = search?.trim() ? toFtsSearchQuery(search) : "";
+	const trimmedSearch = search?.trim() ?? "";
+	const ftsSearch = trimmedSearch ? toFtsSearchQuery(trimmedSearch) : "";
+	let searchMatchesCte = "";
+	let searchJoin = "";
+	let includeTextMatches = false;
 	if (ftsSearch) {
-		join += " join tweets_fts on tweets_fts.tweet_id = t.id ";
-		where += " and tweets_fts.text match ?";
-		searchSnippetSelect =
-			", snippet(tweets_fts, 1, '<mark>', '</mark>', '...', 16) as search_snippet";
-		params.push(ftsSearch);
+		const profileSearch = trimmedSearch.replace(/^@+/, "").trim().toLowerCase();
+		// Explicit handles and stable IDs are person filters. Do not mix in posts
+		// that merely mention the same token and crowd the person's own posts out.
+		const isHandleSearch = trimmedSearch.startsWith("@");
+		const isNumericIdSearch = /^\d+$/.test(profileSearch);
+		const isProfileIdSearch = profileSearch.startsWith("profile_");
+		const identityOnlySearch =
+			isHandleSearch || isNumericIdSearch || isProfileIdSearch;
+		includeTextMatches = !identityOnlySearch;
+		const textMatchesSql = includeTextMatches
+			? `
+        select tweet_id
+        from tweets_fts
+        where tweets_fts.text match ?
+        union
+      `
+			: "";
+		const profileMatchSql = isHandleSearch
+			? "lower(matched_profile.handle) = ?"
+			: isNumericIdSearch
+				? "(lower(matched_profile.id) = ? or lower(matched_profile.id) = 'profile_user_' || ?)"
+				: isProfileIdSearch
+					? "lower(matched_profile.id) = ?"
+					: `
+            instr(lower(matched_profile.handle), ?) > 0
+            or instr(lower(matched_profile.display_name), ?) > 0
+            or lower(matched_profile.id) = ?
+            or lower(matched_profile.id) = 'profile_user_' || ?
+          `;
+		searchMatchesCte = `,
+      search_matches as (
+        ${textMatchesSql}
+        select matched_tweet.id as tweet_id
+        from profiles matched_profile
+        join tweets matched_tweet
+          on matched_tweet.author_profile_id = matched_profile.id
+        where ${profileMatchSql}
+      )
+    `;
+		searchJoin =
+			"join search_matches search_match on search_match.tweet_id = t.id";
+		const profileMatchParams = isHandleSearch
+			? [profileSearch]
+			: isNumericIdSearch
+				? [profileSearch, profileSearch]
+				: isProfileIdSearch
+					? [profileSearch]
+					: [profileSearch, profileSearch, profileSearch, profileSearch];
+		const searchParams = [
+			...(includeTextMatches ? [ftsSearch] : []),
+			...profileMatchParams,
+		];
+		// search_matches is textually after timeline_edges but before the main
+		// select, so its bindings must sit between CTE and filter parameters.
+		params.splice(timelineCteParamCount, 0, ...searchParams);
 	}
 
 	const priorityOrderClauses: string[] = [];
@@ -826,6 +883,7 @@ export function listTimelineItems({
 
 	const buildTimelineSelectSql = (timelineEdgesSql: string) => `
       ${timelineEdgesSql}
+      ${searchMatchesCte}
       select
         t.id,
         e.account_id,
@@ -911,7 +969,6 @@ export function listTimelineItems({
         qp.avatar_hue as quoted_avatar_hue,
         qp.avatar_url as quoted_avatar_url,
         qp.created_at as quoted_profile_created_at
-        ${searchSnippetSelect}
       from timeline_edges e
       join tweets t on t.id = e.tweet_id
       join accounts a on a.id = e.account_id
@@ -920,7 +977,7 @@ export function listTimelineItems({
       left join profiles rp on rp.id = rt.author_profile_id
       left join tweets qt on qt.id = t.quoted_tweet_id
       left join profiles qp on qp.id = qt.author_profile_id
-      ${join}
+      ${searchJoin}
       ${where}
 	      order by ${priorityOrder} t.created_at desc, t.id desc
       limit ?
@@ -934,6 +991,28 @@ export function listTimelineItems({
 		rows = db
 			.prepare(buildTimelineSelectSql(unwindowedTimelineEdgesCte))
 			.all(kind, kind, limit) as Array<Record<string, unknown>>;
+	}
+
+	const searchSnippets = new Map<string, string>();
+	if (includeTextMatches && rows.length > 0) {
+		const snippetRows = db
+			.prepare(
+				`
+        select
+          tweet_id,
+          snippet(tweets_fts, 1, '<mark>', '</mark>', '...', 16) as search_snippet
+        from tweets_fts
+        where tweets_fts.text match ?
+          and tweet_id in (select value from json_each(?))
+        `,
+			)
+			.all(
+				ftsSearch,
+				JSON.stringify(rows.map((row) => String(row.id))),
+			) as Array<{ tweet_id: string; search_snippet: string }>;
+		for (const row of snippetRows) {
+			searchSnippets.set(row.tweet_id, row.search_snippet);
+		}
 	}
 
 	const urlExpansionCache: UrlExpansionCache = new Map();
@@ -987,6 +1066,7 @@ export function listTimelineItems({
 		const resolveProfileByHandle = (handle: string) =>
 			getProfileByHandle(db, profileByHandleCache, handle, rowProfiles);
 		const text = String(row.text);
+		const searchSnippet = searchSnippets.get(String(row.id));
 		const entities = enrichTimelineEntities(
 			db,
 			urlExpansionCache,
@@ -1001,9 +1081,7 @@ export function listTimelineItems({
 			accountHandle: String(row.account_handle),
 			kind: row.kind as TimelineItem["kind"],
 			text,
-			...(typeof row.search_snippet === "string"
-				? { searchSnippet: row.search_snippet }
-				: {}),
+			...(searchSnippet ? { searchSnippet } : {}),
 			createdAt: String(row.created_at),
 			replyToId:
 				typeof row.reply_to_id === "string" ? String(row.reply_to_id) : null,

@@ -199,9 +199,12 @@ describe("home route", () => {
 		render(<HomeRoute />);
 
 		expect(await screen.findByText("Find me")).toBeInTheDocument();
-		fireEvent.change(screen.getByPlaceholderText("Search local timeline"), {
-			target: { value: "  signal  " },
-		});
+		fireEvent.change(
+			screen.getByPlaceholderText("Search posts, people, @handles, or IDs"),
+			{
+				target: { value: "  signal  " },
+			},
+		);
 		fireEvent.click(screen.getByRole("button", { name: "Replied" }));
 
 		await waitFor(() => {

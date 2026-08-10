@@ -23,7 +23,7 @@ function HomeRoute() {
 			loadingDetail="Reading the local timeline store"
 			loadingLabel="Loading posts"
 			resource="home"
-			searchPlaceholder="Search local timeline"
+			searchPlaceholder="Search posts, people, @handles, or IDs"
 			subtitle={homeSubtitle}
 			syncKind="timeline"
 			syncLabel="Sync timeline"
