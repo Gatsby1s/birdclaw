@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.77 - 2026-08-10
+
+### Fixed
+
+- Search Home timeline posts by author display name, exact `@handle`, stable numeric user ID, or full profile ID while preserving full-text post search and snippets.
+- Keep exact handle and ID searches isolated from similarly named accounts, deduplicate author/text matches, and advertise the expanded search scope in the Home search field.
+
 ## 0.8.76 - 2026-08-10
 
 ### Added
