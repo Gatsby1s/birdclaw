@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.85 - 2026-08-13
+
+### Fixed
+
+- Wait for the fresh cloud reading window whenever 特别关注 is reopened, keeping cached posts hidden through refresh failures and restoring the other device's anchor after Retry instead of consuming stale state.
+
 ## 0.8.84 - 2026-08-13
 
 ### Added
