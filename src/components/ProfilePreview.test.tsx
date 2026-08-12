@@ -100,4 +100,71 @@ describe("ProfilePreview", () => {
 		act(() => frames.shift()?.(16));
 		expect(preview).toHaveStyle({ top: "270px" });
 	});
+
+	it("renders the floating card outside containing-block ancestors", () => {
+		const { container } = render(
+			<article className="[content-visibility:auto]">
+				<ProfilePreview
+					profile={{
+						id: "profile_amelia",
+						handle: "amelia",
+						displayName: "Amelia",
+						bio: "Design systems",
+						followersCount: 4200,
+						followingCount: 42,
+						avatarHue: 320,
+						createdAt: "2026-03-08T12:00:00.000Z",
+					}}
+				>
+					@amelia
+				</ProfilePreview>
+			</article>,
+		);
+
+		act(() => screen.getByRole("link", { name: "@amelia" }).focus());
+		const preview = screen.getByRole("group", {
+			name: "Amelia profile preview",
+		});
+		expect(container).not.toContainElement(preview);
+		expect(preview.parentElement).toBe(document.body);
+		expect(preview).toHaveTextContent("42 following");
+		expect(preview).toHaveTextContent("4.2K followers");
+	});
+
+	it("keeps profile bio URLs informational inside the portaled preview", () => {
+		render(
+			<ProfilePreview
+				profile={{
+					id: "profile_amelia",
+					handle: "amelia",
+					displayName: "Amelia",
+					bio: "Read https://t.co/design",
+					followersCount: 4200,
+					avatarHue: 320,
+					entities: {
+						description: {
+							urls: [
+								{
+									url: "https://t.co/design",
+									expanded_url: "https://example.com/design",
+									start: 5,
+									end: 24,
+								},
+							],
+						},
+					},
+					createdAt: "2026-03-08T12:00:00.000Z",
+				}}
+			>
+				@amelia
+			</ProfilePreview>,
+		);
+
+		act(() => screen.getByRole("link", { name: "@amelia" }).focus());
+		const preview = screen.getByRole("group", {
+			name: "Amelia profile preview",
+		});
+		expect(preview).toHaveTextContent("https://example.com/design");
+		expect(preview.querySelector("a,button,input,textarea,select")).toBeNull();
+	});
 });

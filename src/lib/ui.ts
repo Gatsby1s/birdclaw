@@ -90,8 +90,7 @@ export const feedRowBodyClass = "flex min-w-0 flex-1 flex-col gap-1";
 export const feedRowHeaderClass =
 	"flex min-w-0 items-center gap-1.5 text-[15px]";
 
-export const feedRowNameClass =
-	"truncate font-bold text-[var(--ink)] hover:underline";
+export const feedRowNameClass = "truncate font-bold text-[var(--ink)]";
 
 export const feedRowHandleClass = "truncate text-[var(--ink-soft)]";
 
@@ -279,24 +278,24 @@ export const dmComposerShellClass =
 export const profilePreviewClass = "relative inline-flex";
 
 export const profilePreviewTriggerClass =
-	"profile-preview-trigger inline-flex text-inherit";
+	"profile-preview-trigger inline-flex text-inherit no-underline hover:no-underline";
 
 export const profilePreviewCardClass =
-	"fixed z-40 w-[280px] overflow-y-auto rounded-2xl border border-[var(--line)] bg-[var(--bg-elevated)] p-3 shadow-[0_8px_28px_var(--shadow-strong)]";
+	"fixed z-50 w-[300px] overflow-y-auto rounded-2xl border border-[var(--line)] bg-[var(--bg-elevated)] p-4 shadow-[0_8px_28px_var(--shadow-strong)]";
 
 export const profilePreviewHeaderClass = "flex items-center gap-3";
 
 export const profilePreviewNameClass =
-	"block text-[15px] font-bold text-[var(--ink)]";
+	"block truncate text-[16px] font-bold text-[var(--ink)]";
 
 export const profilePreviewHandleClass =
 	"block text-[14px] text-[var(--ink-soft)]";
 
 export const profilePreviewBioClass =
-	"block text-[14px] leading-[1.4] text-[var(--ink)]";
+	"block whitespace-pre-wrap break-words text-[14px] leading-[1.45] text-[var(--ink)] [overflow-wrap:anywhere]";
 
 export const profilePreviewMetaClass =
-	"block text-[13px] text-[var(--ink-soft)]";
+	"flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-[var(--ink-soft)] [&_strong]:font-bold [&_strong]:text-[var(--ink)]";
 
 /* Rich tweet text. */
 export const tweetLinkClass = "text-[var(--accent)] hover:underline";

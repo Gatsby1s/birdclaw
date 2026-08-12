@@ -213,6 +213,51 @@ test.describe("mobile shell", () => {
 				.getByRole("button", { name: "Bookmark locally" }),
 		).toHaveAttribute("aria-pressed", "false");
 	});
+
+	test("keeps the author preview inside the viewport from avatar and name", async ({
+		page,
+	}) => {
+		await page.goto("/");
+		const surveyCard = page.locator('[data-perf="timeline-card"]').filter({
+			hasText: "New developer-platform pricing survey",
+		});
+		await expect(surveyCard).toBeVisible({ timeout: 15_000 });
+		const preview = page.getByRole("group", {
+			name: "Ava Wires profile preview",
+		});
+
+		for (const width of [390, 320]) {
+			await page.setViewportSize({ width, height: 844 });
+			for (const trigger of [
+				surveyCard.getByRole("link", { name: "Ava Wires @avawires" }),
+				surveyCard.getByRole("link", {
+					name: "View @avawires local posts",
+				}),
+			]) {
+				await trigger.hover();
+				await expect(preview).toBeVisible();
+				const box = await preview.boundingBox();
+				expect(box).not.toBeNull();
+				if (!box) continue;
+				expect(box.x).toBeGreaterThanOrEqual(11.5);
+				expect(box.x + box.width).toBeLessThanOrEqual(width - 11.5);
+				expect(box.y).toBeGreaterThanOrEqual(11.5);
+				expect(box.y + box.height).toBeLessThanOrEqual(832.5);
+				expect(
+					await preview.evaluate((element) => {
+						const rect = element.getBoundingClientRect();
+						return (
+							document
+								.elementFromPoint(rect.right - 2, rect.top + 16)
+								?.closest('[role="group"]') === element
+						);
+					}),
+				).toBe(true);
+				await page.mouse.move(0, 0);
+				await expect(preview).toBeHidden();
+			}
+		}
+	});
 });
 
 test.describe("mobile landscape shell", () => {

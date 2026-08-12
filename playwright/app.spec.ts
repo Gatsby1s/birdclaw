@@ -170,16 +170,66 @@ test("expands timeline cards with media, quote context, and profile hover", asyn
 	const surveyCard = page.locator('[data-perf="timeline-card"]').filter({
 		hasText: "New developer-platform pricing survey",
 	});
+	await expect(surveyCard).toBeVisible({ timeout: 15_000 });
 	await expect(surveyCard.getByAltText("Pricing survey chart")).toBeVisible();
 	await expect(
 		surveyCard.getByRole("link", { name: "Developer platform pricing" }),
 	).toBeVisible();
-	await surveyCard.getByRole("link", { name: "Ava Wires @avawires" }).hover();
+	const authorName = surveyCard.getByRole("link", {
+		name: "Ava Wires @avawires",
+	});
+	await authorName.hover();
+	const profilePreview = page.getByRole("group", {
+		name: "Ava Wires profile preview",
+	});
+	await expect(profilePreview).toBeVisible();
 	await expect(
-		surveyCard.getByText(
+		profilePreview.getByText(
 			"Reports on infrastructure, AI policy, and the business of software.",
 		),
 	).toBeVisible();
+	await expect
+		.poll(() =>
+			authorName.evaluate(
+				(element) => getComputedStyle(element).textDecorationLine,
+			),
+		)
+		.toBe("none");
+
+	const assertPreviewInViewport = async () => {
+		const previewBox = await profilePreview.boundingBox();
+		const viewport = page.viewportSize();
+		expect(previewBox).not.toBeNull();
+		expect(viewport).not.toBeNull();
+		if (!previewBox || !viewport) return;
+		expect(previewBox.x).toBeGreaterThanOrEqual(11.5);
+		expect(previewBox.y).toBeGreaterThanOrEqual(11.5);
+		expect(previewBox.x + previewBox.width).toBeLessThanOrEqual(
+			viewport.width - 11.5,
+		);
+		expect(previewBox.y + previewBox.height).toBeLessThanOrEqual(
+			viewport.height - 11.5,
+		);
+		expect(
+			await profilePreview.evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return (
+					document
+						.elementFromPoint(rect.right - 2, rect.top + 16)
+						?.closest('[role="group"]') === element
+				);
+			}),
+		).toBe(true);
+	};
+	await assertPreviewInViewport();
+
+	await page.mouse.move(0, 0);
+	await expect(profilePreview).toBeHidden();
+	await surveyCard
+		.getByRole("link", { name: "View @avawires local posts" })
+		.hover();
+	await expect(profilePreview).toBeVisible();
+	await assertPreviewInViewport();
 
 	await selectAccount(page, "@birdclaw_lab");
 	const quoteCard = page.locator('[data-perf="timeline-card"]').filter({
