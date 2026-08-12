@@ -197,7 +197,13 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 	}, [selectedAccountId, feedMode]);
 
 	useLayoutEffect(() => {
-		if (!feedQuery.data || restoredRef.current) return;
+		if (
+			!feedQuery.data ||
+			restoredRef.current ||
+			positionQuery.isFetching ||
+			feedQuery.isFetching
+		)
+			return;
 		const restore = firstPage?.page.restore;
 		let cleanupAlignment: (() => void) | undefined;
 		if (restore?.resolvedTweetId) {
@@ -249,7 +255,13 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		restoredRef.current = true;
 		setRestored(true);
 		return cleanupAlignment;
-	}, [feedMode, feedQuery.data, firstPage]);
+	}, [
+		feedMode,
+		feedQuery.data,
+		feedQuery.isFetching,
+		firstPage,
+		positionQuery.isFetching,
+	]);
 
 	const persist = useCallback(
 		(candidate: { id: string; pixelOffset: number }, keepalive = false) => {
@@ -530,7 +542,12 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 				loadingMore={feedQuery.isFetchingNextPage}
 				onLoadMore={() => void feedQuery.fetchNextPage()}
 			>
-				<div ref={feedRef}>
+				<div
+					aria-hidden={!restored}
+					data-special-follow-feed-state={restored ? "restored" : "restoring"}
+					ref={feedRef}
+					style={{ visibility: restored ? "visible" : "hidden" }}
+				>
 					{items.map((item) => (
 						<div data-special-follow-anchor={item.id} key={item.id}>
 							<TimelineCard item={item} onReply={replyToTweet} />
