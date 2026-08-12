@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.80 - 2026-08-12
+
+### Fixed
+
+- Keep timeline Print and Open actions fully inside cards when production posts have unusually long author names or handles, while preserving compact desktop layout and mobile touch targets.
+- Cover the long-author production case at landscape width and allow the mobile end-to-end fixture enough time to finish its initial local timeline load.
+
 ## 0.8.79 - 2026-08-12
 
 ### Fixed
