@@ -163,6 +163,177 @@ describe("SpecialFollowTimeline", () => {
 		expect(patches).toHaveLength(0);
 	});
 
+	it("loads newer posts while scrolling up without moving the visible card", async () => {
+		const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {});
+		const feedModes: Array<string | null> = [];
+		const patchBodies: Array<Record<string, unknown>> = [];
+		let userScroll = 0;
+		let resolveNewer!: (response: Response) => void;
+		const newerResponse = new Promise<Response>((resolve) => {
+			resolveNewer = resolve;
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/status") return status();
+				if (url.pathname === "/api/special-follow-position") {
+					if (init?.method === "PATCH") {
+						const body = JSON.parse(String(init.body)) as Record<
+							string,
+							unknown
+						>;
+						patchBodies.push(body);
+						return Response.json({
+							ok: true,
+							applied: true,
+							accountId: "acct_primary",
+							viewKey: "special-follow",
+							position: {
+								anchorTweetId: body.anchorTweetId,
+								anchorCreatedAt: "2026-08-13T01:00:00.000Z",
+								pixelOffset: body.pixelOffset,
+								clientSessionId: body.clientSessionId,
+								clientSequence: body.clientSequence,
+								revision: 5,
+								updatedAt: "2026-08-13T02:00:00.000Z",
+							},
+						});
+					}
+					return Response.json({
+						accountId: "acct_primary",
+						viewKey: "special-follow",
+						position: {
+							anchorTweetId: "anchor",
+							anchorCreatedAt: "2026-08-12T00:00:00.000Z",
+							pixelOffset: 300,
+							clientSessionId: "device-a",
+							clientSequence: 2,
+							revision: 4,
+							updatedAt: "2026-08-13T00:00:00.000Z",
+						},
+					});
+				}
+				if (url.pathname === "/api/special-follow-feed") {
+					const mode = url.searchParams.get("mode");
+					feedModes.push(mode);
+					if (mode === "newer") {
+						return newerResponse;
+					}
+					return Response.json({
+						items: [
+							item("near-newer", "nearer post", "2026-08-13T01:00:00.000Z"),
+							item("anchor", "saved post", "2026-08-12T00:00:00.000Z"),
+						],
+						specialFollowProfileCount: 1,
+						page: {
+							mode: "resume",
+							hasNewer: true,
+							hasOlder: false,
+							newerCursor: {
+								createdAt: "2026-08-13T01:00:00.000Z",
+								tweetId: "near-newer",
+							},
+							olderCursor: {
+								createdAt: "2026-08-12T00:00:00.000Z",
+								tweetId: "anchor",
+							},
+							restore: {
+								requestedTweetId: "anchor",
+								resolvedTweetId: "anchor",
+								createdAt: "2026-08-12T00:00:00.000Z",
+								pixelOffset: 300,
+								exact: true,
+							},
+						},
+					});
+				}
+				throw new Error(`Unexpected fetch ${url.pathname}`);
+			}),
+		);
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+			function (this: HTMLElement) {
+				const id = this.dataset.specialFollowAnchor;
+				const baseTop =
+					id === "latest"
+						? -100
+						: id === "near-newer"
+							? 100
+							: id === "anchor"
+								? 300
+								: 100;
+				const top = this.tagName === "HEADER" ? 0 : baseTop - userScroll;
+				const bottom = this.tagName === "HEADER" ? 0 : top + 200;
+				return {
+					x: 0,
+					y: top,
+					top,
+					left: 0,
+					right: 680,
+					bottom,
+					width: 680,
+					height: bottom - top,
+					toJSON: () => ({}),
+				};
+			},
+		);
+
+		render(<SpecialFollowTimeline viewTabs={<div>views</div>} />);
+		expect(await screen.findByText("saved post")).toBeInTheDocument();
+		await waitFor(() =>
+			expect(
+				screen
+					.getByText("saved post")
+					.closest("[data-special-follow-feed-state]"),
+			).toHaveAttribute("data-special-follow-feed-state", "restored"),
+		);
+		scrollBy.mockClear();
+		fireEvent.wheel(window);
+		fireEvent.scroll(window);
+		await waitFor(() => expect(feedModes).toEqual(["resume", "newer"]));
+
+		userScroll = 120;
+		fireEvent.scroll(window);
+		await act(async () => {
+			resolveNewer(
+				Response.json({
+					items: [item("latest", "latest post", "2026-08-13T02:00:00.000Z")],
+					specialFollowProfileCount: 1,
+					page: {
+						mode: "newer",
+						hasNewer: false,
+						hasOlder: true,
+						newerCursor: {
+							createdAt: "2026-08-13T02:00:00.000Z",
+							tweetId: "latest",
+						},
+						olderCursor: {
+							createdAt: "2026-08-13T02:00:00.000Z",
+							tweetId: "latest",
+						},
+						restore: null,
+					},
+				}),
+			);
+		});
+		expect(await screen.findByText("latest post")).toBeInTheDocument();
+		expect(scrollBy).not.toHaveBeenCalled();
+		expect(feedModes).toEqual(["resume", "newer"]);
+		await waitFor(
+			() =>
+				expect(
+					patchBodies.some(
+						(body) =>
+							body.anchorTweetId === "near-newer" && body.pixelOffset === -20,
+					),
+				).toBe(true),
+			{ timeout: 4_000 },
+		);
+		expect(
+			screen.queryByRole("button", { name: "上方还有新动态 · 查看最新" }),
+		).not.toBeInTheDocument();
+	});
+
 	it("distinguishes an unconfigured feed and links to real author selection", async () => {
 		vi.stubGlobal(
 			"fetch",
@@ -198,7 +369,7 @@ describe("SpecialFollowTimeline", () => {
 
 		expect(await screen.findByText("还没有特别关注")).toBeInTheDocument();
 		expect(
-			screen.getByRole("link", { name: "去 Home 选择作者" }),
+			screen.getByRole("link", { name: "去首页选择作者" }),
 		).toHaveAttribute("href", "/");
 		expect(
 			screen.queryByRole("button", { name: "同步 Home" }),
@@ -300,6 +471,7 @@ describe("SpecialFollowTimeline", () => {
 
 	it("waits for the fresh cloud window before restoring a remounted cached feed", async () => {
 		const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {});
+		const feedModes: string[] = [];
 		let cloudGeneration = 1;
 		let secondPositionRequested = false;
 		let secondFeedRequested = false;
@@ -339,9 +511,15 @@ describe("SpecialFollowTimeline", () => {
 				specialFollowProfileCount: 1,
 				page: {
 					mode: "resume",
-					hasNewer: false,
+					hasNewer: anchorTweetId === "old-anchor",
 					hasOlder: false,
-					newerCursor: null,
+					newerCursor:
+						anchorTweetId === "old-anchor"
+							? {
+									createdAt: "2026-08-12T00:00:00.000Z",
+									tweetId: "old-anchor",
+								}
+							: null,
 					olderCursor: null,
 					restore: {
 						requestedTweetId: anchorTweetId,
@@ -354,15 +532,58 @@ describe("SpecialFollowTimeline", () => {
 			});
 		vi.stubGlobal(
 			"fetch",
-			vi.fn(async (input: RequestInfo | URL) => {
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 				const url = new URL(String(input), "http://localhost");
 				if (url.pathname === "/api/status") return status();
 				if (url.pathname === "/api/special-follow-position") {
+					if (init?.method === "PATCH") {
+						const body = JSON.parse(String(init.body)) as Record<
+							string,
+							unknown
+						>;
+						return Response.json({
+							ok: true,
+							applied: true,
+							accountId: "acct_primary",
+							viewKey: "special-follow",
+							position: {
+								anchorTweetId: body.anchorTweetId,
+								anchorCreatedAt: "2026-08-12T00:00:00.000Z",
+								pixelOffset: body.pixelOffset,
+								clientSessionId: body.clientSessionId,
+								clientSequence: body.clientSequence,
+								revision: 2,
+								updatedAt: "2026-08-13T00:00:00.000Z",
+							},
+						});
+					}
 					if (cloudGeneration === 1) return positionResponse("old-anchor", 1);
 					secondPositionRequested = true;
 					return secondPosition;
 				}
 				if (url.pathname === "/api/special-follow-feed") {
+					const mode = url.searchParams.get("mode") ?? "missing";
+					feedModes.push(`${String(cloudGeneration)}:${mode}`);
+					if (cloudGeneration === 1 && mode === "newer") {
+						return Response.json({
+							items: [
+								item(
+									"cached-newer",
+									"cached newer post",
+									"2026-08-13T00:00:00.000Z",
+								),
+							],
+							specialFollowProfileCount: 1,
+							page: {
+								mode: "newer",
+								hasNewer: false,
+								hasOlder: true,
+								newerCursor: null,
+								olderCursor: null,
+								restore: null,
+							},
+						});
+					}
 					if (cloudGeneration === 1) return feedResponse("old-anchor");
 					secondFeedRequested = true;
 					return secondFeed;
@@ -396,9 +617,13 @@ describe("SpecialFollowTimeline", () => {
 		const first = render(<SpecialFollowTimeline viewTabs={<div>views</div>} />);
 		expect(await screen.findByText("old device post")).toBeInTheDocument();
 		await waitFor(() => expect(scrollBy).toHaveBeenCalledTimes(1));
+		fireEvent.wheel(window);
+		fireEvent.scroll(window);
+		expect(await screen.findByText("cached newer post")).toBeInTheDocument();
 		first.unmount();
 		cloudGeneration = 2;
 		scrollBy.mockClear();
+		const remountFeedStart = feedModes.length;
 
 		render(<SpecialFollowTimeline viewTabs={<div>views</div>} />, {
 			queryClient: first.queryClient,
@@ -407,6 +632,7 @@ describe("SpecialFollowTimeline", () => {
 			expect(secondPositionRequested).toBe(true);
 			expect(secondFeedRequested).toBe(true);
 		});
+		expect(feedModes[remountFeedStart]).toBe("2:resume");
 		const cachedFeed = screen
 			.getByText("old device post")
 			.closest("[data-special-follow-feed-state]");
