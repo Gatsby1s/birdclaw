@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.84 - 2026-08-13
+
+### Added
+
+- Add a distinct 特别关注 tab inside Mentions that shows chronological Home posts from specially followed authors while leaving the original Mentions and Home feeds unchanged.
+- Restore the 特别关注 reading anchor and offset from cloud SQLite across desktop and mobile, with deterministic pagination, deleted-anchor fallback, explicit newer-post navigation, and conflict-safe throttled saves.
+
+### Changed
+
+- Reuse the existing profile-level 特别关注 selection for both Today and the new feed, with clearer Chinese labels and polished configured, empty, loading, and error states.
+
 ## 0.8.83 - 2026-08-12
 
 ### Fixed
