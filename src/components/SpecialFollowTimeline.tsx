@@ -492,9 +492,6 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 			const pending = pendingPrependRef.current;
 			if (pending) {
 				await waitForRenderedItem(feedRef.current, pending.expectedNewId);
-				await new Promise<void>((resolve) =>
-					requestAnimationFrame(() => resolve()),
-				);
 				pendingPrependRef.current = null;
 				const anchor = [
 					...(feedRef.current?.querySelectorAll<HTMLElement>(
