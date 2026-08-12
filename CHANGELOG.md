@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.82 - 2026-08-12
+
+### Fixed
+
+- Return a conservative temporary numeric score when a scoring provider responds with malformed JSON, instead of failing the timeline and complete-PDF score request.
+
 ## 0.8.81 - 2026-08-12
 
 ### Added
