@@ -68,6 +68,41 @@ function visibleFeedTop(container: HTMLElement | null) {
 	return desktop ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
 }
 
+async function waitForRenderedItem(
+	container: HTMLElement | null,
+	tweetId: string | null,
+) {
+	if (!container || !tweetId) return;
+	const isRendered = () =>
+		[
+			...container.querySelectorAll<HTMLElement>(
+				"[data-special-follow-anchor]",
+			),
+		].some((node) => node.dataset.specialFollowAnchor === tweetId);
+	if (isRendered()) return;
+	if (typeof MutationObserver === "undefined") {
+		await new Promise<void>((resolve) =>
+			requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+		);
+		return;
+	}
+	await new Promise<void>((resolve) => {
+		let settled = false;
+		const finish = () => {
+			if (settled) return;
+			settled = true;
+			observer.disconnect();
+			clearTimeout(timer);
+			resolve();
+		};
+		const observer = new MutationObserver(() => {
+			if (isRendered()) finish();
+		});
+		const timer = setTimeout(finish, 1_500);
+		observer.observe(container, { childList: true });
+	});
+}
+
 async function savePosition(input: SpecialFollowPositionWriteRequest) {
 	const response = await fetch("/api/special-follow-position", {
 		method: "PATCH",
@@ -99,7 +134,11 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 	const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const saveChainRef = useRef(Promise.resolve());
 	const loadingNewerRef = useRef(false);
-	const pendingPrependRef = useRef<{ id: string; top: number } | null>(null);
+	const pendingPrependRef = useRef<{
+		id: string;
+		top: number;
+		expectedNewId: string | null;
+	} | null>(null);
 	const [restored, setRestored] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -227,7 +266,11 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 					visibleFeedTop(headerRef.current),
 				);
 				pendingPrependRef.current = anchor
-					? { id: anchor.id, top: anchor.top }
+					? {
+							id: anchor.id,
+							top: anchor.top,
+							expectedNewId: response.items[0]?.id ?? null,
+						}
 					: null;
 			}
 			return response;
@@ -446,12 +489,13 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		loadingNewerRef.current = true;
 		try {
 			await newerQuery.fetchNextPage();
-			await new Promise<void>((resolve) =>
-				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-			);
 			const pending = pendingPrependRef.current;
-			pendingPrependRef.current = null;
 			if (pending) {
+				await waitForRenderedItem(feedRef.current, pending.expectedNewId);
+				await new Promise<void>((resolve) =>
+					requestAnimationFrame(() => resolve()),
+				);
+				pendingPrependRef.current = null;
 				const anchor = [
 					...(feedRef.current?.querySelectorAll<HTMLElement>(
 						"[data-special-follow-anchor]",
