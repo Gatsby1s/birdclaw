@@ -433,24 +433,6 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		}, SAVE_DELAY_MS);
 	}, [persist]);
 
-	useLayoutEffect(() => {
-		const pending = pendingPrependRef.current;
-		if (!pending) return;
-		const anchor = [
-			...(feedRef.current?.querySelectorAll<HTMLElement>(
-				"[data-special-follow-anchor]",
-			) ?? []),
-		].find((node) => node.dataset.specialFollowAnchor === pending.id);
-		pendingPrependRef.current = null;
-		if (!anchor) return;
-		const delta = anchor.getBoundingClientRect().top - pending.top;
-		if (Math.abs(delta) >= 1) {
-			window.scrollBy({ top: delta, behavior: "auto" });
-		}
-		const frame = requestAnimationFrame(capturePosition);
-		return () => cancelAnimationFrame(frame);
-	}, [capturePosition, newerQuery.data]);
-
 	const loadNewerWithoutDisplacement = useCallback(async () => {
 		if (
 			!restoredRef.current ||
@@ -464,10 +446,30 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		loadingNewerRef.current = true;
 		try {
 			await newerQuery.fetchNextPage();
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+			);
+			const pending = pendingPrependRef.current;
+			pendingPrependRef.current = null;
+			if (pending) {
+				const anchor = [
+					...(feedRef.current?.querySelectorAll<HTMLElement>(
+						"[data-special-follow-anchor]",
+					) ?? []),
+				].find((node) => node.dataset.specialFollowAnchor === pending.id);
+				if (anchor) {
+					const delta = anchor.getBoundingClientRect().top - pending.top;
+					if (Math.abs(delta) >= 1) {
+						window.scrollBy({ top: delta, behavior: "auto" });
+					}
+				}
+			}
+			capturePosition();
 		} finally {
+			pendingPrependRef.current = null;
 			loadingNewerRef.current = false;
 		}
-	}, [newerQuery, newerStartCursor]);
+	}, [capturePosition, newerQuery, newerStartCursor]);
 
 	useEffect(() => {
 		if (!restored) return;

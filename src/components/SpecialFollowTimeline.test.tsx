@@ -329,7 +329,9 @@ describe("SpecialFollowTimeline", () => {
 			);
 		});
 		expect(await screen.findByText("latest post")).toBeInTheDocument();
-		expect(scrollBy).toHaveBeenCalledWith({ behavior: "auto", top: 200 });
+		await waitFor(() =>
+			expect(scrollBy).toHaveBeenCalledWith({ behavior: "auto", top: 200 }),
+		);
 		expect(userScroll).toBe(320);
 		expect(feedModes).toEqual(["resume", "newer"]);
 		await waitFor(
