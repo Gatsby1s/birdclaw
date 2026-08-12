@@ -13,7 +13,15 @@ import {
 
 export const Route = createFileRoute("/mentions")({
 	component: MentionsRoute,
+	validateSearch: (search: Record<string, unknown>) => ({
+		view:
+			search.view === "special-follow"
+				? ("special-follow" as const)
+				: undefined,
+	}),
 });
+
+type MentionsView = "mentions" | "special-follow";
 
 function mentionsSubtitle(meta: QueryEnvelope | null) {
 	if (!meta) return "Loading mentions...";
@@ -21,7 +29,31 @@ function mentionsSubtitle(meta: QueryEnvelope | null) {
 }
 
 function MentionsRoute() {
-	const [view, setView] = useState<"mentions" | "special-follow">("mentions");
+	const search = Route.useSearch();
+	const navigate = Route.useNavigate();
+	return (
+		<MentionsRouteView
+			viewState={search.view ?? "mentions"}
+			onViewChange={(view) =>
+				void navigate({
+					replace: true,
+					search: { view: view === "special-follow" ? view : undefined },
+				})
+			}
+		/>
+	);
+}
+
+export function MentionsRouteView({
+	viewState,
+	onViewChange,
+}: {
+	viewState?: MentionsView;
+	onViewChange?: (view: MentionsView) => void;
+} = {}) {
+	const [localView, setLocalView] = useState<MentionsView>("mentions");
+	const view = viewState ?? localView;
+	const setView = onViewChange ?? setLocalView;
 	const viewTabs = (
 		<nav aria-label="Mentions views" className={tabStripClass}>
 			{(

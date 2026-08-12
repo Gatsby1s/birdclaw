@@ -26,9 +26,9 @@ vi.mock("#/components/SpecialFollowTimeline", () => ({
 	),
 }));
 
-import { Route } from "./mentions";
+import { MentionsRouteView } from "./mentions";
 
-const MentionsRoute = Route.options.component as ComponentType;
+const MentionsRoute = MentionsRouteView as ComponentType;
 
 describe("mentions route", () => {
 	beforeEach(() => {
@@ -129,6 +129,19 @@ describe("mentions route", () => {
 			"aria-pressed",
 			"true",
 		);
+	});
+
+	it("can restore the special-follow tab from route state after a reload", () => {
+		render(<MentionsRouteView viewState="special-follow" />);
+
+		expect(screen.getByText("special-follow-view")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "特别关注" })).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
+		expect(
+			screen.queryByPlaceholderText("Search mentions"),
+		).not.toBeInTheDocument();
 	});
 
 	it("trims search terms, changes reply filters, and ignores blank replies", async () => {

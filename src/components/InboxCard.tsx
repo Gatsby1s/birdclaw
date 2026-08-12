@@ -111,13 +111,33 @@ export function InboxCard({
 							<MessageCircle className="size-4" strokeWidth={2} />
 							{isReplying ? "Close reply" : "Reply"}
 						</button>
-						<Link
-							className={cx(secondaryButtonClass, "gap-1.5")}
-							to={item.entityKind === "dm" ? "/dms" : "/mentions"}
-						>
-							<ExternalLink className="size-4" strokeWidth={2} />
-							Open
-						</Link>
+						{item.entityKind === "dm" ? (
+							<Link
+								className={cx(secondaryButtonClass, "gap-1.5")}
+								search={{
+									inbox: "all",
+									reply: "unreplied",
+									minFollowers: "",
+									minInfluence: "",
+									sort: "recent",
+									q: "",
+									conversation: "",
+								}}
+								to="/dms"
+							>
+								<ExternalLink className="size-4" strokeWidth={2} />
+								Open
+							</Link>
+						) : (
+							<Link
+								className={cx(secondaryButtonClass, "gap-1.5")}
+								search={{ view: undefined }}
+								to="/mentions"
+							>
+								<ExternalLink className="size-4" strokeWidth={2} />
+								Open
+							</Link>
+						)}
 					</div>
 				</div>
 				{isReplying ? (

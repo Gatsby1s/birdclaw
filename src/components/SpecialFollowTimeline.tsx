@@ -98,6 +98,7 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 	const pendingRef = useRef<{ id: string; pixelOffset: number } | null>(null);
 	const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const saveChainRef = useRef(Promise.resolve());
+	const loadingNewerRef = useRef(false);
 	const [restored, setRestored] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -169,9 +170,63 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		refetchOnMount: "always",
 	});
 
+	const firstPage = feedQuery.data?.pages[0];
+	const newerStartCursor =
+		firstPage?.page.hasNewer && firstPage.page.newerCursor
+			? firstPage.page.newerCursor
+			: null;
+	const newerQuery = useInfiniteQuery<
+		SpecialFollowFeedResponse,
+		Error,
+		InfiniteData<SpecialFollowFeedResponse, FeedPageParam>,
+		readonly unknown[],
+		FeedPageParam
+	>({
+		queryKey: [
+			...queryKeys.specialFollowFeed,
+			selectedAccountId ?? "none",
+			"newer",
+			sessionIdRef.current,
+			newerStartCursor?.createdAt ?? "none",
+			newerStartCursor?.tweetId ?? "none",
+		],
+		initialPageParam: {
+			mode: "newer",
+			cursor: newerStartCursor ?? undefined,
+		} as FeedPageParam,
+		queryFn: ({ pageParam, signal }) => {
+			if (!pageParam.cursor) throw new Error("没有可加载的新动态");
+			const url = new URL("/api/special-follow-feed", window.location.origin);
+			url.searchParams.set("account", selectedAccountId as string);
+			url.searchParams.set("mode", "newer");
+			url.searchParams.set("limit", String(PAGE_SIZE));
+			url.searchParams.set("cursorCreatedAt", pageParam.cursor.createdAt);
+			url.searchParams.set("cursorTweetId", pageParam.cursor.tweetId);
+			return fetchJson(
+				url,
+				{ signal },
+				specialFollowFeedResponseSchema,
+				"特别关注动态暂时不可用",
+			);
+		},
+		getNextPageParam: (lastPage): FeedPageParam | undefined =>
+			lastPage.page.hasNewer && lastPage.page.newerCursor
+				? { mode: "newer", cursor: lastPage.page.newerCursor }
+				: undefined,
+		enabled: false,
+		staleTime: Infinity,
+	});
+
 	const items = useMemo(() => {
 		const seen = new Set<string>();
 		const merged: TimelineItem[] = [];
+		for (const page of [...(newerQuery.data?.pages ?? [])].reverse()) {
+			for (const item of page.items) {
+				if (seen.has(item.id)) continue;
+				seen.add(item.id);
+				merged.push(item);
+			}
+		}
 		for (const page of feedQuery.data?.pages ?? []) {
 			for (const item of page.items) {
 				if (seen.has(item.id)) continue;
@@ -180,8 +235,7 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 			}
 		}
 		return merged;
-	}, [feedQuery.data]);
-	const firstPage = feedQuery.data?.pages[0];
+	}, [feedQuery.data, newerQuery.data]);
 	const specialFollowProfileCount = firstPage?.specialFollowProfileCount ?? 0;
 
 	useLayoutEffect(() => {
@@ -356,6 +410,28 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		}, SAVE_DELAY_MS);
 	}, [persist]);
 
+	const loadNewerWithoutDisplacement = useCallback(async () => {
+		if (
+			!restoredRef.current ||
+			!userInteractedRef.current ||
+			(!newerQuery.data && !newerStartCursor) ||
+			(newerQuery.data && !newerQuery.hasNextPage) ||
+			newerQuery.isFetchingNextPage ||
+			loadingNewerRef.current
+		)
+			return;
+		loadingNewerRef.current = true;
+		try {
+			await newerQuery.fetchNextPage();
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+			);
+			capturePosition();
+		} finally {
+			loadingNewerRef.current = false;
+		}
+	}, [capturePosition, newerQuery, newerStartCursor]);
+
 	useEffect(() => {
 		if (!restored) return;
 		let frame = 0;
@@ -381,6 +457,9 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 			if (!userInteractedRef.current || frame) return;
 			frame = requestAnimationFrame(() => {
 				frame = 0;
+				if (window.scrollY <= 240) {
+					void loadNewerWithoutDisplacement();
+				}
 				capturePosition();
 			});
 		};
@@ -409,7 +488,7 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 			if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 			if (pendingRef.current) persist(pendingRef.current);
 		};
-	}, [capturePosition, persist, restored]);
+	}, [capturePosition, loadNewerWithoutDisplacement, persist, restored]);
 
 	const replyMutation = useMutation({
 		mutationFn: ({ tweetId, text }: { tweetId: string; text: string }) =>
@@ -452,7 +531,7 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 						subtitles={
 							<TimelineHeaderSubtitle>
 								{specialFollowProfileCount > 0
-									? `${String(specialFollowProfileCount)} 个特别关注账号的 Home 动态`
+									? `${String(specialFollowProfileCount)} 个特别关注账号的动态`
 									: "像朋友圈一样，只看最重要的人"}
 							</TimelineHeaderSubtitle>
 						}
@@ -474,7 +553,7 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 									className="font-semibold text-[var(--accent)] hover:underline"
 									href="/"
 								>
-									去 Home 选择作者
+									去首页选择作者
 								</a>
 								：点作者头像进入资料页，再点“特别关注”。
 							</p>
@@ -504,14 +583,15 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 				}
 				emptyDetail={
 					specialFollowProfileCount === 0
-						? "选择重要账号后，他们已有的 Home 动态会出现在这里。"
-						: "这些账号还没有已归档的 Home 动态，新内容归档后会自动出现在这里。"
+						? "选择重要账号后，他们已有的动态会出现在这里。"
+						: "这些账号还没有已归档的动态，新内容归档后会自动出现在这里。"
 				}
 				hasMore={feedQuery.hasNextPage}
 				loadingMore={feedQuery.isFetchingNextPage}
 				onLoadMore={() => void feedQuery.fetchNextPage()}
 			>
 				<div
+					aria-busy={newerQuery.isFetchingNextPage}
 					aria-hidden={!restored}
 					data-special-follow-feed-state={restored ? "restored" : "restoring"}
 					ref={feedRef}
