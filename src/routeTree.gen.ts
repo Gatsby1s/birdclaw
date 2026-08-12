@@ -36,6 +36,8 @@ import { Route as ApiTweetScoresRouteImport } from './routes/api/tweet-scores'
 import { Route as ApiTweetExpandRouteImport } from './routes/api/tweet-expand'
 import { Route as ApiSyncRouteImport } from './routes/api/sync'
 import { Route as ApiStatusRouteImport } from './routes/api/status'
+import { Route as ApiSpecialFollowPositionRouteImport } from './routes/api/special-follow-position'
+import { Route as ApiSpecialFollowFeedRouteImport } from './routes/api/special-follow-feed'
 import { Route as ApiSettingsRouteImport } from './routes/api/settings'
 import { Route as ApiSearchDiscussionRouteImport } from './routes/api/search-discussion'
 import { Route as ApiQueryRouteImport } from './routes/api/query'
@@ -195,6 +197,17 @@ const ApiStatusRoute = ApiStatusRouteImport.update({
   path: '/api/status',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSpecialFollowPositionRoute =
+  ApiSpecialFollowPositionRouteImport.update({
+    id: '/api/special-follow-position',
+    path: '/api/special-follow-position',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiSpecialFollowFeedRoute = ApiSpecialFollowFeedRouteImport.update({
+  id: '/api/special-follow-feed',
+  path: '/api/special-follow-feed',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSettingsRoute = ApiSettingsRouteImport.update({
   id: '/api/settings',
   path: '/api/settings',
@@ -349,6 +362,8 @@ export interface FileRoutesByFullPath {
   '/api/query': typeof ApiQueryRoute
   '/api/search-discussion': typeof ApiSearchDiscussionRoute
   '/api/settings': typeof ApiSettingsRoute
+  '/api/special-follow-feed': typeof ApiSpecialFollowFeedRoute
+  '/api/special-follow-position': typeof ApiSpecialFollowPositionRoute
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/tweet-expand': typeof ApiTweetExpandRoute
@@ -401,6 +416,8 @@ export interface FileRoutesByTo {
   '/api/query': typeof ApiQueryRoute
   '/api/search-discussion': typeof ApiSearchDiscussionRoute
   '/api/settings': typeof ApiSettingsRoute
+  '/api/special-follow-feed': typeof ApiSpecialFollowFeedRoute
+  '/api/special-follow-position': typeof ApiSpecialFollowPositionRoute
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/tweet-expand': typeof ApiTweetExpandRoute
@@ -454,6 +471,8 @@ export interface FileRoutesById {
   '/api/query': typeof ApiQueryRoute
   '/api/search-discussion': typeof ApiSearchDiscussionRoute
   '/api/settings': typeof ApiSettingsRoute
+  '/api/special-follow-feed': typeof ApiSpecialFollowFeedRoute
+  '/api/special-follow-position': typeof ApiSpecialFollowPositionRoute
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/tweet-expand': typeof ApiTweetExpandRoute
@@ -508,6 +527,8 @@ export interface FileRouteTypes {
     | '/api/query'
     | '/api/search-discussion'
     | '/api/settings'
+    | '/api/special-follow-feed'
+    | '/api/special-follow-position'
     | '/api/status'
     | '/api/sync'
     | '/api/tweet-expand'
@@ -560,6 +581,8 @@ export interface FileRouteTypes {
     | '/api/query'
     | '/api/search-discussion'
     | '/api/settings'
+    | '/api/special-follow-feed'
+    | '/api/special-follow-position'
     | '/api/status'
     | '/api/sync'
     | '/api/tweet-expand'
@@ -612,6 +635,8 @@ export interface FileRouteTypes {
     | '/api/query'
     | '/api/search-discussion'
     | '/api/settings'
+    | '/api/special-follow-feed'
+    | '/api/special-follow-position'
     | '/api/status'
     | '/api/sync'
     | '/api/tweet-expand'
@@ -665,6 +690,8 @@ export interface RootRouteChildren {
   ApiQueryRoute: typeof ApiQueryRoute
   ApiSearchDiscussionRoute: typeof ApiSearchDiscussionRoute
   ApiSettingsRoute: typeof ApiSettingsRoute
+  ApiSpecialFollowFeedRoute: typeof ApiSpecialFollowFeedRoute
+  ApiSpecialFollowPositionRoute: typeof ApiSpecialFollowPositionRoute
   ApiStatusRoute: typeof ApiStatusRoute
   ApiSyncRoute: typeof ApiSyncRoute
   ApiTweetExpandRoute: typeof ApiTweetExpandRoute
@@ -871,6 +898,20 @@ declare module '@tanstack/react-router' {
       path: '/api/status'
       fullPath: '/api/status'
       preLoaderRoute: typeof ApiStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/special-follow-position': {
+      id: '/api/special-follow-position'
+      path: '/api/special-follow-position'
+      fullPath: '/api/special-follow-position'
+      preLoaderRoute: typeof ApiSpecialFollowPositionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/special-follow-feed': {
+      id: '/api/special-follow-feed'
+      path: '/api/special-follow-feed'
+      fullPath: '/api/special-follow-feed'
+      preLoaderRoute: typeof ApiSpecialFollowFeedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/settings': {
@@ -1086,6 +1127,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiQueryRoute: ApiQueryRoute,
   ApiSearchDiscussionRoute: ApiSearchDiscussionRoute,
   ApiSettingsRoute: ApiSettingsRoute,
+  ApiSpecialFollowFeedRoute: ApiSpecialFollowFeedRoute,
+  ApiSpecialFollowPositionRoute: ApiSpecialFollowPositionRoute,
   ApiStatusRoute: ApiStatusRoute,
   ApiSyncRoute: ApiSyncRoute,
   ApiTweetExpandRoute: ApiTweetExpandRoute,

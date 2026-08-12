@@ -17,6 +17,8 @@ export const queryKeys = {
 	settings: ["settings"] as const,
 	xRemark: ["xremark"] as const,
 	profilePriority: ["profile-priority"] as const,
+	specialFollowFeed: ["special-follow-feed"] as const,
+	specialFollowPosition: ["special-follow-position"] as const,
 	xRemarkLive: ["xremark-live"] as const,
 	twillotHistory: ["twillot-history"] as const,
 	rateLimits: ["rate-limits"] as const,

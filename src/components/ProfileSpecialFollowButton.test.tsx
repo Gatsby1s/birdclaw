@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe("ProfileSpecialFollowButton", () => {
-	it("toggles the independent Today priority with accessible state", async () => {
+	it("toggles the special-follow feed and Today priority with accessible state", async () => {
 		let specialFollow = false;
 		let patchBody: Record<string, unknown> | null = null;
 		const fetchMock = vi.fn(
@@ -33,11 +33,11 @@ describe("ProfileSpecialFollowButton", () => {
 			<ProfileSpecialFollowButton handle="Ada" identifier="profile_user_42" />,
 		);
 		const button = await screen.findByRole("button", {
-			name: "Special follow",
+			name: "特别关注",
 		});
 		expect(button).toHaveAttribute("aria-pressed", "false");
 		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-		fireEvent.click(screen.getByRole("button", { name: "Special follow" }));
+		fireEvent.click(screen.getByRole("button", { name: "特别关注" }));
 
 		await waitFor(() => expect(patchBody).not.toBeNull());
 		expect(patchBody).toEqual({
@@ -46,7 +46,7 @@ describe("ProfileSpecialFollowButton", () => {
 			specialFollow: true,
 		});
 		expect(
-			await screen.findByRole("button", { name: "Special following" }),
+			await screen.findByRole("button", { name: "已特别关注" }),
 		).toHaveAttribute("aria-pressed", "true");
 	});
 });

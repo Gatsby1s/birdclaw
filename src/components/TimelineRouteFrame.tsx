@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { SyncNowButton } from "#/components/SyncNowButton";
 import { TimelineCard } from "#/components/TimelineCard";
 import {
@@ -43,6 +43,7 @@ interface TimelineRouteFrameProps {
 	showAutoRefreshControl?: boolean;
 	showRepliesToOthersControl?: boolean;
 	initialIncludeRepliesToOthers?: boolean;
+	viewTabs?: ReactNode;
 }
 
 export function TimelineRouteFrame({
@@ -62,6 +63,7 @@ export function TimelineRouteFrame({
 	showAutoRefreshControl = false,
 	showRepliesToOthersControl = false,
 	initialIncludeRepliesToOthers = true,
+	viewTabs,
 }: TimelineRouteFrameProps) {
 	const [replyFilter, setReplyFilter] =
 		useState<ReplyFilter>(initialReplyFilter);
@@ -126,6 +128,7 @@ export function TimelineRouteFrame({
 					}
 					controls={
 						<>
+							{viewTabs}
 							{toolbarControls}
 							<TimelineSearchField
 								onChange={setSearch}

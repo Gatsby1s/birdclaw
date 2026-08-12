@@ -77,6 +77,29 @@ afterEach(() => {
 });
 
 describe("database init", () => {
+	it("migrates durable timeline reading positions at schema v17", () => {
+		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-"));
+		tempDirs.push(tempDir);
+		process.env.BIRDCLAW_HOME = tempDir;
+
+		const db = getNativeDb({ seedDemoData: false });
+		const columns = db
+			.prepare("pragma table_info(timeline_read_positions)")
+			.all() as Array<{ name: string }>;
+		expect(columns.map((column) => column.name)).toEqual([
+			"account_id",
+			"view_key",
+			"anchor_tweet_id",
+			"anchor_created_at",
+			"pixel_offset",
+			"client_session_id",
+			"client_sequence",
+			"revision",
+			"updated_at",
+		]);
+		expect(db.pragma("user_version", { simple: true })).toBe(17);
+	});
+
 	it("migrates the independent profile-priority table with a false default", () => {
 		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-"));
 		tempDirs.push(tempDir);
@@ -463,7 +486,7 @@ describe("database init", () => {
 				.all()
 				.map((column) => (column as { name: string }).name),
 		).toContain("format_version");
-		expect(db.pragma("user_version", { simple: true })).toBe(16);
+		expect(db.pragma("user_version", { simple: true })).toBe(17);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -492,7 +515,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(16);
+		expect(db.pragma("user_version", { simple: true })).toBe(17);
 	});
 
 	it("migrates v12 profile notes without overriding imported descriptions", () => {
@@ -529,7 +552,7 @@ describe("database init", () => {
 				)
 				.get(),
 		).toEqual({ remark: "Legacy local remark", description: null });
-		expect(db.pragma("user_version", { simple: true })).toBe(16);
+		expect(db.pragma("user_version", { simple: true })).toBe(17);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

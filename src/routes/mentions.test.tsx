@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient as render } from "#/test/render";
 
@@ -14,6 +14,15 @@ vi.mock("#/components/TimelineCard", () => ({
 		<button onClick={() => onReply(item.id)} type="button">
 			{item.text}
 		</button>
+	),
+}));
+
+vi.mock("#/components/SpecialFollowTimeline", () => ({
+	SpecialFollowTimeline: ({ viewTabs }: { viewTabs: ReactNode }) => (
+		<div>
+			{viewTabs}
+			<p>special-follow-view</p>
+		</div>
 	),
 }));
 
@@ -68,6 +77,14 @@ describe("mentions route", () => {
 
 		render(<MentionsRoute />);
 
+		expect(screen.getByRole("button", { name: "提及" })).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
+		expect(screen.getByRole("button", { name: "特别关注" })).toHaveAttribute(
+			"aria-pressed",
+			"false",
+		);
 		expect(await screen.findByText("@steipete curious...")).toBeInTheDocument();
 		fireEvent.click(
 			screen.getByRole("button", { name: "@steipete curious..." }),
@@ -79,6 +96,39 @@ describe("mentions route", () => {
 				expect.objectContaining({ method: "POST" }),
 			);
 		});
+	});
+
+	it("opens a separate special-follow view without renaming Mentions", async () => {
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.endsWith("/api/status")) {
+				return Response.json({
+					stats: { home: 3, mentions: 1, dms: 0, needsReply: 1, inbox: 1 },
+					transport: { statusText: "local" },
+					accounts: [],
+					archives: [],
+				});
+			}
+			if (url.includes("/api/query")) {
+				return Response.json({
+					resource: "mentions",
+					items: [{ id: "mention_original", text: "original mention" }],
+				});
+			}
+			throw new Error(`Unexpected fetch ${url}`);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<MentionsRoute />);
+		expect(await screen.findByText("original mention")).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "特别关注" }));
+
+		expect(screen.getByText("special-follow-view")).toBeInTheDocument();
+		expect(screen.queryByText("original mention")).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "特别关注" })).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
 	});
 
 	it("trims search terms, changes reply filters, and ignores blank replies", async () => {
