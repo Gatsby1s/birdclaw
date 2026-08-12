@@ -53,6 +53,29 @@ async function expectCoreActionsInsideCard({
 	expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
 }
 
+async function expectHeaderActionsInsideCard({ card }: { card: Locator }) {
+	const printAction = card.getByRole("button", { name: "Print tweet" });
+	const openAction = card.getByRole("link", { name: "Reply open" });
+	await expect(printAction).toBeVisible();
+	await expect(openAction).toBeVisible();
+	const cardBox = await card.boundingBox();
+	const printBox = await printAction.boundingBox();
+	const openBox = await openAction.boundingBox();
+	expect(cardBox).not.toBeNull();
+	expect(printBox).not.toBeNull();
+	expect(openBox).not.toBeNull();
+	if (!cardBox || !printBox || !openBox) return;
+	for (const box of [printBox, openBox]) {
+		expect(box.x).toBeGreaterThanOrEqual(cardBox.x - 0.5);
+		expect(box.x + box.width).toBeLessThanOrEqual(
+			cardBox.x + cardBox.width + 0.5,
+		);
+	}
+	expect(printBox.x + printBox.width).toBeLessThanOrEqual(openBox.x + 0.5);
+	expect(printBox.width).toBeGreaterThanOrEqual(44);
+	expect(printBox.height).toBeGreaterThanOrEqual(44);
+}
+
 test.describe("mobile shell", () => {
 	test.use({ viewport: { width: 390, height: 844 } });
 
@@ -137,9 +160,11 @@ test.describe("mobile shell", () => {
 		});
 		await expect(surveyCard).toBeVisible();
 		await expectCoreActionsInsideCard({ card: surveyCard, page });
+		await expectHeaderActionsInsideCard({ card: surveyCard });
 
 		await page.setViewportSize({ width: 320, height: 800 });
 		await expectCoreActionsInsideCard({ card: surveyCard, page });
+		await expectHeaderActionsInsideCard({ card: surveyCard });
 		const bookmarkButton = surveyCard.getByRole("button", {
 			name: "Bookmark locally",
 		});

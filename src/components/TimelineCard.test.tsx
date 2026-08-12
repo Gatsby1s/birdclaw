@@ -11,6 +11,14 @@ import { ConversationSurfaceScope } from "#/lib/conversation-surface";
 import { renderWithQueryClient } from "#/test/render";
 import { TimelineCard } from "./TimelineCard";
 
+const { exportReferenceCollectionPdfMock } = vi.hoisted(() => ({
+	exportReferenceCollectionPdfMock: vi.fn(),
+}));
+
+vi.mock("#/lib/pdf-export-client", () => ({
+	exportReferenceCollectionPdf: exportReferenceCollectionPdfMock,
+}));
+
 function render(ui: ReactNode) {
 	const result = renderWithQueryClient(
 		<ConversationSurfaceScope>{ui}</ConversationSurfaceScope>,
@@ -121,6 +129,7 @@ const item = {
 describe("TimelineCard", () => {
 	afterEach(() => {
 		cleanup();
+		exportReferenceCollectionPdfMock.mockReset();
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
 	});
@@ -154,6 +163,101 @@ describe("TimelineCard", () => {
 		expect(container.querySelectorAll("header p")).toHaveLength(0);
 		fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 		expect(onReply).toHaveBeenCalledWith("tweet_1");
+	});
+
+	it("prints one tweet through the existing reference PDF layout", () => {
+		exportReferenceCollectionPdfMock.mockImplementation(
+			({
+				onCleanup,
+				sourceSelector,
+			}: {
+				onCleanup: () => void;
+				sourceSelector: string;
+			}) => {
+				const source = document.querySelector(sourceSelector);
+				expect(source).toHaveAttribute("aria-label", "可打印推文");
+				expect(source).toHaveTextContent("Sam Altman (@sam)");
+				expect(source).toHaveTextContent("Ship with @sam");
+				expect(source).toHaveTextContent("回复上下文：@destraynor");
+				expect(source).toHaveTextContent("引用推文：Ava (@ava)");
+				onCleanup();
+				return Promise.resolve();
+			},
+		);
+
+		render(<TimelineCard item={item} onReply={vi.fn()} />);
+
+		const printButton = screen.getByRole("button", { name: "Print tweet" });
+		const openLink = screen.getByRole("link", { name: "Reply open" });
+		expect(
+			printButton.compareDocumentPosition(openLink) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		fireEvent.click(printButton);
+
+		expect(exportReferenceCollectionPdfMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				title: "BirdClaw @sam tweet",
+				onCleanup: expect.any(Function),
+				sourceSelector: expect.stringMatching(/^#timeline-tweet-print-/),
+			}),
+		);
+		expect(
+			screen.getByRole("button", { name: "Show conversation" }),
+		).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByLabelText("可打印推文")).toBeNull();
+	});
+
+	it("shows print only beside an actionable Open link", () => {
+		render(
+			<TimelineCard item={item} onReply={vi.fn()} showReplyControls={false} />,
+		);
+
+		expect(screen.queryByRole("button", { name: "Print tweet" })).toBeNull();
+		expect(screen.queryByRole("link", { name: "Reply open" })).toBeNull();
+	});
+
+	it("prints the displayed original tweet from a native repost", () => {
+		exportReferenceCollectionPdfMock.mockImplementation(
+			({
+				onCleanup,
+				sourceSelector,
+			}: {
+				onCleanup: () => void;
+				sourceSelector: string;
+			}) => {
+				const source = document.querySelector(sourceSelector);
+				expect(source).toHaveTextContent("Ava (@ava)");
+				expect(source).toHaveTextContent("Original app idea");
+				expect(source).not.toHaveTextContent("Ship with @sam");
+				onCleanup();
+				return Promise.resolve();
+			},
+		);
+		render(
+			<TimelineCard
+				item={{
+					...item,
+					id: "tweet_rt",
+					text: "RT @ava: Original app idea",
+					retweetedTweet: {
+						id: "tweet_original",
+						text: "Original app idea",
+						createdAt: "2026-03-08T11:55:00.000Z",
+						author: item.quotedTweet.author,
+						entities: {},
+						media: [],
+					},
+				}}
+				onReply={vi.fn()}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Print tweet" }));
+
+		expect(exportReferenceCollectionPdfMock).toHaveBeenCalledWith(
+			expect.objectContaining({ title: "BirdClaw @ava tweet" }),
+		);
 	});
 
 	it("automatically shows a Chinese translation and toggles back to the original", async () => {

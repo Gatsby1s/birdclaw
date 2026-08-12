@@ -20,6 +20,13 @@ export interface ReferenceCollectionTweet {
 		createdAt?: string;
 		text: string;
 	};
+	quotedTweet?: {
+		author: string;
+		name?: string;
+		createdAt?: string;
+		text: string;
+		media?: TweetMediaItem[];
+	};
 }
 
 export interface ReferenceCollectionDm {
@@ -86,7 +93,9 @@ function tweetFor(
 	return null;
 }
 
-function formatAuthor(tweet: ReferenceCollectionTweet) {
+function formatAuthor(
+	tweet: Pick<ReferenceCollectionTweet, "author" | "name">,
+) {
 	const handle = tweet.author.startsWith("@")
 		? tweet.author
 		: `@${tweet.author}`;
@@ -114,11 +123,13 @@ function formatTimestamp(value: string | undefined) {
 function ReferenceTweetCard({
 	anchorId,
 	includeMedia,
+	includeQuotedTweet = false,
 	label,
 	tweet,
 }: {
 	anchorId?: string;
 	includeMedia: boolean;
+	includeQuotedTweet?: boolean;
 	label: string;
 	tweet: ReferenceCollectionTweet | null;
 }) {
@@ -163,7 +174,42 @@ function ReferenceTweetCard({
 					<span>{tweet.replyToTweet.text}</span>
 				</blockquote>
 			) : null}
+			{includeQuotedTweet && tweet.quotedTweet ? (
+				<blockquote>
+					<strong>
+						引用推文：{formatAuthor(tweet.quotedTweet)}
+						{tweet.quotedTweet.createdAt
+							? ` · ${formatTimestamp(tweet.quotedTweet.createdAt)}`
+							: ""}
+					</strong>
+					<span>{tweet.quotedTweet.text}</span>
+					<ReferencePrintMedia items={tweet.quotedTweet.media ?? []} />
+				</blockquote>
+			) : null}
 		</section>
+	);
+}
+
+export function ReferenceTweetPrint({
+	sourceId,
+	tweet,
+}: {
+	sourceId: string;
+	tweet: ReferenceCollectionTweet;
+}) {
+	return (
+		<article
+			aria-label="可打印推文"
+			className="today-reference-pdf"
+			id={sourceId}
+		>
+			<ReferenceTweetCard
+				includeMedia
+				includeQuotedTweet
+				label="S01"
+				tweet={tweet}
+			/>
+		</article>
 	);
 }
 

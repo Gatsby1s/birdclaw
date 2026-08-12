@@ -6,18 +6,22 @@ import {
 	ExternalLink,
 	Heart,
 	Image,
+	Loader2,
 	MessageCircle,
+	Printer,
 	Repeat2,
 	UserSearch,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { fetchJson, setLocalBookmark } from "#/lib/api-client";
 import {
 	expandedTweetTextResponseSchema,
 	tweetTranslationResponseSchema,
 } from "#/lib/api-contracts";
 import { formatCompactNumber } from "#/lib/present";
+import { exportReferenceCollectionPdf } from "#/lib/pdf-export-client";
 import { queryKeys } from "#/lib/query-client";
 import { shouldAutoTranslateTweetText } from "#/lib/tweet-language";
 import {
@@ -57,11 +61,17 @@ import { ConversationThread } from "./ConversationThread";
 import { EmbeddedTweetCard } from "./EmbeddedTweetCard";
 import { LinkPreviewCard } from "./LinkPreviewCard";
 import { ProfilePreview } from "./ProfilePreview";
+import {
+	ReferenceTweetPrint,
+	type ReferenceCollectionTweet,
+} from "./ReferenceCollectionPrint";
 import { SmartTimestamp } from "./SmartTimestamp";
 import { TweetArticleCard } from "./TweetArticleCard";
 import { TweetMediaGrid } from "./TweetMediaGrid";
 import { TweetRichText } from "./TweetRichText";
 import { XRemarkAnnotationCard } from "./XRemarkAnnotation";
+
+let activeTimelinePrintSourceId: string | null = null;
 
 function comparableUrl(value: string | null | undefined) {
 	if (!value) return null;
@@ -402,6 +412,11 @@ export function TimelineCard({
 }) {
 	const [showFullRepost, setShowFullRepost] = useState(false);
 	const [showTranslation, setShowTranslation] = useState(true);
+	const [tweetPrintActive, setTweetPrintActive] = useState(false);
+	const tweetPrintSourceId = `timeline-tweet-print-${useId().replace(
+		/[^a-zA-Z0-9_-]/g,
+		"",
+	)}`;
 	const translationViewport = useNearViewport();
 	const canReply =
 		showReplyControls && item.kind !== "like" && item.kind !== "bookmark";
@@ -547,6 +562,50 @@ export function TimelineCard({
 			? displayTweet.replyToId
 			: item.replyToTweet || item.replyToId,
 	);
+	const showPrintAction =
+		canReply && !displayIsReplied && Boolean(openTweetUrl);
+	const printableTweet: ReferenceCollectionTweet = {
+		id: presentedTweet.id,
+		author: displayAuthor.handle,
+		name: displayAuthor.displayName,
+		createdAt: presentedTweet.createdAt,
+		text: presentedTweet.text,
+		media: presentedTweet.media,
+		replyToTweet:
+			!item.retweetedTweet && item.replyToTweet
+				? {
+						author: item.replyToTweet.author.handle,
+						createdAt: item.replyToTweet.createdAt,
+						text: item.replyToTweet.text,
+					}
+				: undefined,
+		quotedTweet:
+			!item.retweetedTweet && item.quotedTweet
+				? {
+						author: item.quotedTweet.author.handle,
+						name: item.quotedTweet.author.displayName,
+						createdAt: item.quotedTweet.createdAt,
+						text: item.quotedTweet.text,
+						media: item.quotedTweet.media,
+					}
+				: undefined,
+	};
+	const handlePrintTweet = () => {
+		if (tweetPrintActive || activeTimelinePrintSourceId) return;
+		activeTimelinePrintSourceId = tweetPrintSourceId;
+		const finishPrinting = () => {
+			if (activeTimelinePrintSourceId === tweetPrintSourceId) {
+				activeTimelinePrintSourceId = null;
+			}
+			setTweetPrintActive(false);
+		};
+		flushSync(() => setTweetPrintActive(true));
+		void exportReferenceCollectionPdf({
+			title: `BirdClaw @${displayAuthor.handle} tweet`,
+			sourceSelector: `#${tweetPrintSourceId}`,
+			onCleanup: finishPrinting,
+		}).catch(finishPrinting);
+	};
 
 	return (
 		<article
@@ -585,7 +644,7 @@ export function TimelineCard({
 						</ProfilePreview>
 					</div>
 				) : null}
-				<header className={feedRowHeaderClass}>
+				<header className={cx(feedRowHeaderClass, "max-[520px]:flex-wrap")}>
 					<ProfilePreview profile={displayAuthor}>
 						<span className="flex min-w-0 items-center gap-1.5">
 							<span className={feedRowNameClass}>
@@ -602,7 +661,7 @@ export function TimelineCard({
 						value={displayTweet.createdAt}
 					/>
 					{canReply || hasConversation ? (
-						<span className="ml-auto inline-flex items-center gap-1">
+						<span className="ml-auto inline-flex items-center gap-1 max-[520px]:basis-full max-[520px]:justify-end">
 							{hasConversation ? (
 								<span
 									aria-label="Part of a conversation"
@@ -615,6 +674,34 @@ export function TimelineCard({
 									<MessageCircle className="size-3.5" strokeWidth={2} />
 									thread
 								</span>
+							) : null}
+							{showPrintAction ? (
+								<button
+									aria-busy={tweetPrintActive}
+									aria-label="Print tweet"
+									className={cx(
+										feedRowStatePillClass,
+										feedRowStatePillOpenClass,
+										"cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] max-[420px]:min-h-11 max-[420px]:min-w-11 max-[420px]:justify-center max-[420px]:px-1.5",
+									)}
+									disabled={tweetPrintActive}
+									onClick={(event) => {
+										event.stopPropagation();
+										handlePrintTweet();
+									}}
+									title="Print formatted tweet"
+									type="button"
+								>
+									{tweetPrintActive ? (
+										<Loader2
+											className="size-3.5 animate-spin"
+											strokeWidth={2}
+										/>
+									) : (
+										<Printer className="size-3.5" strokeWidth={2} />
+									)}
+									<span className="max-[420px]:sr-only">print</span>
+								</button>
 							) : null}
 							{canReply ? (
 								displayIsReplied || !openTweetUrl ? (
@@ -907,6 +994,12 @@ export function TimelineCard({
 						error={conversation.error}
 						items={conversation.items}
 						loading={conversation.loading}
+					/>
+				) : null}
+				{tweetPrintActive ? (
+					<ReferenceTweetPrint
+						sourceId={tweetPrintSourceId}
+						tweet={printableTweet}
 					/>
 				) : null}
 			</div>
