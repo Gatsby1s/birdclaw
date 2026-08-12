@@ -1123,6 +1123,27 @@ function ensureBirdclawProfilePrioritiesTable(db: Database) {
   `);
 }
 
+function ensureTimelineReadPositionsTable(db: Database) {
+	db.exec(`
+    create table if not exists timeline_read_positions (
+      account_id text not null,
+      view_key text not null,
+      anchor_tweet_id text not null,
+      anchor_created_at text not null,
+      pixel_offset integer not null default 0 check (pixel_offset between -4096 and 4096),
+      client_session_id text not null,
+      client_sequence integer not null check (client_sequence >= 0),
+      revision integer not null check (revision >= 1),
+      updated_at text not null,
+      primary key (account_id, view_key),
+      foreign key (account_id) references accounts(id) on delete cascade
+    );
+
+    create index if not exists idx_timeline_read_positions_updated
+      on timeline_read_positions(updated_at desc);
+  `);
+}
+
 function ensureTwitter6551EventTable(db: Database) {
 	db.exec(`
     create table if not exists twitter6551_events (
@@ -1410,6 +1431,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add durable tweet quality scores",
 		up: (db) => {
 			ensureTweetQualityScoresTable(db);
+		},
+	},
+	{
+		version: 17,
+		name: "add durable timeline reading positions",
+		up: (db) => {
+			ensureTimelineReadPositionsTable(db);
 		},
 	},
 ];

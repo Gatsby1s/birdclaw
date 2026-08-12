@@ -498,6 +498,9 @@ export function listTimelineItems({
 	since,
 	until,
 	untilId,
+	after,
+	afterId,
+	tweetId,
 	includeReplies = true,
 	includeRepliesToOthers = true,
 	qualityFilter = "all",
@@ -507,6 +510,8 @@ export function listTimelineItems({
 	bookmarkedOnly = false,
 	priorityProfileIds = [],
 	priorityHandleOnlyHandles = [],
+	priorityOnly = false,
+	order = "newest",
 	limit = 18,
 }: TimelineQuery): TimelineItem[] {
 	const db = getReadDb();
@@ -536,8 +541,11 @@ export function listTimelineItems({
 		replyFilter === "all" &&
 		!since?.trim() &&
 		!until?.trim() &&
+		!after?.trim() &&
+		!tweetId?.trim() &&
 		includeReplies &&
-		qualityFilter === "all";
+		qualityFilter === "all" &&
+		order === "newest";
 	const hasPriorityAuthors =
 		priorityProfileIds.length > 0 || priorityHandleOnlyHandles.length > 0;
 
@@ -801,6 +809,21 @@ export function listTimelineItems({
 		}
 	}
 
+	if (after?.trim()) {
+		if (afterId?.trim()) {
+			where += " and (t.created_at > ? or (t.created_at = ? and t.id > ?))";
+			params.push(after.trim(), after.trim(), afterId.trim());
+		} else {
+			where += " and t.created_at > ?";
+			params.push(after.trim());
+		}
+	}
+
+	if (tweetId?.trim()) {
+		where += " and t.id = ?";
+		params.push(tweetId.trim());
+	}
+
 	const trimmedSearch = search?.trim() ?? "";
 	const ftsSearch = trimmedSearch ? toFtsSearchQuery(trimmedSearch) : "";
 	let searchMatchesCte = "";
@@ -864,12 +887,32 @@ export function listTimelineItems({
 		params.splice(timelineCteParamCount, 0, ...searchParams);
 	}
 
-	const priorityOrderClauses: string[] = [];
+	const priorityFilterClauses: string[] = [];
+	const priorityFilterParams: string[] = [];
 	if (priorityProfileIds.length > 0) {
+		priorityFilterClauses.push("p.id in (select value from json_each(?))");
+		priorityFilterParams.push(JSON.stringify(priorityProfileIds));
+	}
+	if (priorityHandleOnlyHandles.length > 0) {
+		priorityFilterClauses.push(
+			"(p.id like 'profile_handle_%' and lower(p.handle) in (select value from json_each(?)))",
+		);
+		priorityFilterParams.push(JSON.stringify(priorityHandleOnlyHandles));
+	}
+	if (priorityOnly) {
+		where +=
+			priorityFilterClauses.length > 0
+				? ` and (${priorityFilterClauses.join(" or ")})`
+				: " and 0 = 1";
+		params.push(...priorityFilterParams);
+	}
+
+	const priorityOrderClauses: string[] = [];
+	if (!priorityOnly && priorityProfileIds.length > 0) {
 		priorityOrderClauses.push("p.id in (select value from json_each(?))");
 		params.push(JSON.stringify(priorityProfileIds));
 	}
-	if (priorityHandleOnlyHandles.length > 0) {
+	if (!priorityOnly && priorityHandleOnlyHandles.length > 0) {
 		priorityOrderClauses.push(
 			"(p.id like 'profile_handle_%' and lower(p.handle) in (select value from json_each(?)))",
 		);
@@ -879,6 +922,7 @@ export function listTimelineItems({
 		priorityOrderClauses.length > 0
 			? `case when ${priorityOrderClauses.join(" or ")} then 0 else 1 end,`
 			: "";
+	const timelineOrder = order === "oldest" ? "asc" : "desc";
 	params.push(limit);
 
 	const buildTimelineSelectSql = (timelineEdgesSql: string) => `
@@ -979,7 +1023,7 @@ export function listTimelineItems({
       left join profiles qp on qp.id = qt.author_profile_id
       ${searchJoin}
       ${where}
-	      order by ${priorityOrder} t.created_at desc, t.id desc
+	      order by ${priorityOrder} t.created_at ${timelineOrder}, t.id ${timelineOrder}
       limit ?
       `;
 

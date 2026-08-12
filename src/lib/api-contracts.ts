@@ -10,6 +10,10 @@ import type {
 	ProfileAffiliation,
 	ProfilePriorityStatus,
 	ProfileRecord,
+	SpecialFollowFeedResponse,
+	SpecialFollowPositionResponse,
+	SpecialFollowPositionWriteRequest,
+	SpecialFollowPositionWriteResponse,
 	TimelineItem,
 	TransportStatus,
 	TweetQualityScore,
@@ -86,6 +90,47 @@ export const profilePriorityStatusSchema: z.ZodType<ProfilePriorityStatus> =
 		identifier: z.string().optional(),
 		specialFollow: z.boolean(),
 		updatedAt: z.string().optional(),
+	});
+
+export const specialFollowCursorSchema = z.object({
+	createdAt: z.string(),
+	tweetId: z.string(),
+});
+
+export const specialFollowReadPositionSchema = z.object({
+	anchorTweetId: z.string(),
+	anchorCreatedAt: z.string(),
+	pixelOffset: z.number().int(),
+	clientSessionId: z.string(),
+	clientSequence: z.number().int().nonnegative(),
+	revision: z.number().int().positive(),
+	updatedAt: z.string(),
+});
+
+export const specialFollowPositionWriteRequestSchema: z.ZodType<SpecialFollowPositionWriteRequest> =
+	z.object({
+		accountId: z.string().trim().min(1).max(128),
+		anchorTweetId: z.string().trim().min(1).max(128),
+		pixelOffset: z.number().finite(),
+		clientSessionId: z.string().trim().min(1).max(128),
+		clientSequence: z.number().int().nonnegative(),
+		expectedRevision: z.number().int().nonnegative(),
+	});
+
+const specialFollowPositionResponseObjectSchema = z.object({
+	accountId: z.string(),
+	viewKey: z.literal("special-follow"),
+	position: specialFollowReadPositionSchema.nullable(),
+});
+
+export const specialFollowPositionResponseSchema: z.ZodType<SpecialFollowPositionResponse> =
+	specialFollowPositionResponseObjectSchema;
+
+export const specialFollowPositionWriteResponseSchema: z.ZodType<SpecialFollowPositionWriteResponse> =
+	specialFollowPositionResponseObjectSchema.extend({
+		ok: z.boolean(),
+		applied: z.boolean(),
+		conflict: z.boolean().optional(),
 	});
 
 export const xRemarkLiveSyncStatusSchema = z.object({
@@ -233,6 +278,28 @@ export const timelineItemSchema: z.ZodType<TimelineItem> = z.object({
 	retweetedTweet: embeddedTweetSchema.nullable().optional(),
 	qualityReason: z.string().nullable().optional(),
 });
+
+export const specialFollowFeedResponseSchema: z.ZodType<SpecialFollowFeedResponse> =
+	z.object({
+		items: z.array(timelineItemSchema),
+		specialFollowProfileCount: z.number().int().nonnegative(),
+		page: z.object({
+			mode: z.enum(["newest", "resume", "newer", "older"]),
+			hasNewer: z.boolean(),
+			hasOlder: z.boolean(),
+			newerCursor: specialFollowCursorSchema.nullable(),
+			olderCursor: specialFollowCursorSchema.nullable(),
+			restore: z
+				.object({
+					requestedTweetId: z.string(),
+					resolvedTweetId: z.string().nullable(),
+					createdAt: z.string(),
+					pixelOffset: z.number().int(),
+					exact: z.boolean(),
+				})
+				.nullable(),
+		}),
+	});
 
 export const localBookmarkRequestSchema = z.object({
 	accountId: z.string().trim().min(1).max(128),

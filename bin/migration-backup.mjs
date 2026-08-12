@@ -12,7 +12,10 @@ import os from "node:os";
 import path from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 
-export const TWILLOT_SCHEMA_VERSION = 15;
+// This is the latest schema version that must have a verified pre-migration
+// backup before the server opens the writable database. Keep it aligned with
+// src/lib/db.ts even when the migration is unrelated to Twillot.
+export const REQUIRED_BACKUP_SCHEMA_VERSION = 17;
 const BACKUP_SPACE_MARGIN_BYTES = 32 * 1024 * 1024;
 
 export function resolveBirdclawRoot(
@@ -96,7 +99,7 @@ function recoverPartialBackup(backupDir, backupPath, expectedVersion) {
 
 export async function ensurePreMigrationBackup({
 	rootDir,
-	targetVersion = TWILLOT_SCHEMA_VERSION,
+	targetVersion = REQUIRED_BACKUP_SCHEMA_VERSION,
 	log = console.error,
 } = {}) {
 	const resolvedRoot = resolveBirdclawRoot(rootDir);

@@ -80,6 +80,9 @@ export function ProfileSpecialFollowButton({
 			await queryClient.invalidateQueries({
 				queryKey: queryKeys.profilePriority,
 			});
+			await queryClient.invalidateQueries({
+				queryKey: queryKeys.specialFollowFeed,
+			});
 		} catch (error) {
 			setSaveError(
 				error instanceof Error
@@ -102,7 +105,11 @@ export function ProfileSpecialFollowButton({
 				)}
 				disabled={statusQuery.isPending || saving}
 				onClick={() => void toggleSpecialFollow()}
-				title="Prioritize this author's posts in Today AI"
+				title={
+					specialFollow
+						? "从特别关注中移除；Today AI 也将停止优先展示"
+						: "加入特别关注动态，并在 Today AI 中优先展示"
+				}
 				type="button"
 			>
 				{statusQuery.isPending || saving ? (
@@ -115,7 +122,7 @@ export function ProfileSpecialFollowButton({
 						strokeWidth={1.9}
 					/>
 				)}
-				{specialFollow ? "Special following" : "Special follow"}
+				{specialFollow ? "已特别关注" : "特别关注"}
 			</button>
 			{saveError || statusQuery.isError ? (
 				<p aria-live="polite" className="m-0 text-[12px] text-[var(--alert)]">

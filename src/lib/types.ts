@@ -65,6 +65,67 @@ export interface ProfilePriorityStatus {
 	updatedAt?: string;
 }
 
+export type SpecialFollowFeedMode = "newest" | "resume" | "newer" | "older";
+
+export interface SpecialFollowCursor {
+	createdAt: string;
+	tweetId: string;
+}
+
+export interface SpecialFollowReadPosition {
+	anchorTweetId: string;
+	anchorCreatedAt: string;
+	pixelOffset: number;
+	clientSessionId: string;
+	clientSequence: number;
+	revision: number;
+	updatedAt: string;
+}
+
+export interface SpecialFollowRestoreAnchor {
+	requestedTweetId: string;
+	resolvedTweetId: string | null;
+	createdAt: string;
+	pixelOffset: number;
+	exact: boolean;
+}
+
+export interface SpecialFollowFeedPage {
+	mode: SpecialFollowFeedMode;
+	hasNewer: boolean;
+	hasOlder: boolean;
+	newerCursor: SpecialFollowCursor | null;
+	olderCursor: SpecialFollowCursor | null;
+	restore: SpecialFollowRestoreAnchor | null;
+}
+
+export interface SpecialFollowFeedResponse {
+	items: TimelineItem[];
+	specialFollowProfileCount: number;
+	page: SpecialFollowFeedPage;
+}
+
+export interface SpecialFollowPositionResponse {
+	accountId: string;
+	viewKey: "special-follow";
+	position: SpecialFollowReadPosition | null;
+}
+
+export interface SpecialFollowPositionWriteRequest {
+	accountId: string;
+	anchorTweetId: string;
+	pixelOffset: number;
+	clientSessionId: string;
+	clientSequence: number;
+	expectedRevision: number;
+}
+
+export interface SpecialFollowPositionWriteResponse extends SpecialFollowPositionResponse {
+	ok: boolean;
+	applied: boolean;
+	conflict?: boolean;
+}
+
 export interface XRemarkLiveSyncStatus {
 	paired: boolean;
 	connected: boolean;
@@ -419,6 +480,9 @@ export interface TimelineQuery {
 	since?: string;
 	until?: string;
 	untilId?: string;
+	after?: string;
+	afterId?: string;
+	tweetId?: string;
 	includeReplies?: boolean;
 	includeRepliesToOthers?: boolean;
 	qualityFilter?: TimelineQualityFilter;
@@ -428,6 +492,8 @@ export interface TimelineQuery {
 	bookmarkedOnly?: boolean;
 	priorityProfileIds?: string[];
 	priorityHandleOnlyHandles?: string[];
+	priorityOnly?: boolean;
+	order?: "newest" | "oldest";
 	limit?: number;
 }
 
