@@ -645,7 +645,7 @@ export function TimelineCard({
 					</div>
 				) : null}
 				<header className={cx(feedRowHeaderClass, "max-[520px]:flex-wrap")}>
-					<ProfilePreview profile={displayAuthor}>
+					<ProfilePreview className="min-w-0" profile={displayAuthor}>
 						<span className="flex min-w-0 items-center gap-1.5">
 							<span className={feedRowNameClass}>
 								{displayAuthor.displayName}
@@ -661,7 +661,7 @@ export function TimelineCard({
 						value={displayTweet.createdAt}
 					/>
 					{canReply || hasConversation ? (
-						<span className="ml-auto inline-flex items-center gap-1 max-[520px]:basis-full max-[520px]:justify-end">
+						<span className="ml-auto inline-flex shrink-0 items-center gap-1 max-[520px]:basis-full max-[520px]:justify-end">
 							{hasConversation ? (
 								<span
 									aria-label="Part of a conversation"

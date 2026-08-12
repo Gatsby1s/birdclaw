@@ -53,7 +53,13 @@ async function expectCoreActionsInsideCard({
 	expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
 }
 
-async function expectHeaderActionsInsideCard({ card }: { card: Locator }) {
+async function expectHeaderActionsInsideCard({
+	card,
+	requireTouchTarget = true,
+}: {
+	card: Locator;
+	requireTouchTarget?: boolean;
+}) {
 	const printAction = card.getByRole("button", { name: "Print tweet" });
 	const openAction = card.getByRole("link", { name: "Reply open" });
 	await expect(printAction).toBeVisible();
@@ -72,8 +78,10 @@ async function expectHeaderActionsInsideCard({ card }: { card: Locator }) {
 		);
 	}
 	expect(printBox.x + printBox.width).toBeLessThanOrEqual(openBox.x + 0.5);
-	expect(printBox.width).toBeGreaterThanOrEqual(44);
-	expect(printBox.height).toBeGreaterThanOrEqual(44);
+	if (requireTouchTarget) {
+		expect(printBox.width).toBeGreaterThanOrEqual(44);
+		expect(printBox.height).toBeGreaterThanOrEqual(44);
+	}
 }
 
 test.describe("mobile shell", () => {
@@ -262,6 +270,29 @@ test.describe("mobile shell", () => {
 
 test.describe("mobile landscape shell", () => {
 	test.use({ viewport: { width: 844, height: 390 } });
+
+	test("keeps print and open inside cards with long author names", async ({
+		page,
+	}) => {
+		await page.goto("/");
+		const card = page
+			.locator(
+				'[data-perf="timeline-card"]:has(button[aria-label="Print tweet"]):has(a[aria-label="Reply open"])',
+			)
+			.first();
+		await expect(card).toBeVisible({ timeout: 15_000 });
+		const authorLink = card.locator('header a[href^="/authors/"]').first();
+		await authorLink.evaluate((element) => {
+			const labels = element.querySelectorAll("span");
+			if (labels.length < 3) throw new Error("Author labels are unavailable");
+			labels[labels.length - 2].textContent =
+				"An Exceptionally Long Display Name From the Production Timeline";
+			labels[labels.length - 1].textContent =
+				"@an_exceptionally_long_production_handle";
+		});
+
+		await expectHeaderActionsInsideCard({ card, requireTouchTarget: false });
+	});
 
 	test("keeps the header scrollable and fixed navigation in view", async ({
 		page,
