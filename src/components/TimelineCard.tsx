@@ -622,11 +622,11 @@ export function TimelineCard({
 				conversation.toggle();
 			}}
 		>
-			<a
-				aria-label={`View @${displayAuthor.handle} local posts`}
-				className="h-fit rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-				href={`/authors/${encodeURIComponent(displayAuthor.handle)}`}
-				onClick={(event) => event.stopPropagation()}
+			<ProfilePreview
+				className="h-fit"
+				profile={displayAuthor}
+				triggerAriaLabel={`View @${displayAuthor.handle} local posts`}
+				triggerClassName="rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
 			>
 				<AvatarChip
 					avatarUrl={displayAuthor.avatarUrl}
@@ -634,7 +634,7 @@ export function TimelineCard({
 					name={displayAuthor.displayName}
 					profileId={displayAuthor.id}
 				/>
-			</a>
+			</ProfilePreview>
 			<div className={feedRowBodyClass}>
 				{item.retweetedTweet ? (
 					<div className="inline-flex items-center gap-2 text-[13px] font-medium text-[var(--ink-soft)]">

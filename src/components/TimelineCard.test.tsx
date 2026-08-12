@@ -454,6 +454,11 @@ describe("TimelineCard", () => {
 		});
 		fireEvent.click(avatarLink);
 		expect(fetchMock).not.toHaveBeenCalled();
+
+		fireEvent.pointerEnter(avatarLink.parentElement as HTMLElement);
+		expect(
+			screen.getByRole("group", { name: "Sam Altman profile preview" }),
+		).toBeInTheDocument();
 	});
 
 	it("uses the author homepage for identity links and keeps explicit analysis links direct", () => {
