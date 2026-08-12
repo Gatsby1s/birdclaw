@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.87 - 2026-08-13
+
+### Changed
+
+- Keep the 特别关注 view in the URL so a browser reload returns directly to the same cloud-restored reading position instead of reopening the normal Mentions tab.
+- Load any remaining newer special-follow posts automatically as the reader scrolls upward, without a sync, refresh, or jump-to-latest control and without moving the visible post.
+
+### Fixed
+
+- Isolate automatic newer-post pagination from the cloud resume query so cached pages never replace another device's fresh reading anchor, even after slow-network scrolling and a same-browser remount.
+
 ## 0.8.86 - 2026-08-13
 
 ### Changed
