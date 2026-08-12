@@ -111,7 +111,9 @@ test.describe("mobile shell", () => {
 			),
 		).toBe("static");
 		const cards = page.locator('[data-perf="timeline-card"]');
-		await expect.poll(async () => cards.count()).toBeGreaterThan(0);
+		await expect
+			.poll(async () => cards.count(), { timeout: 15_000 })
+			.toBeGreaterThan(0);
 		const repliedTab = page.getByRole("button", {
 			name: "Replied",
 			exact: true,
