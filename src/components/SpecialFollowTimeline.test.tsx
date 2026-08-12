@@ -14,14 +14,6 @@ vi.mock("#/components/TimelineCard", () => ({
 	),
 }));
 
-vi.mock("#/components/SyncNowButton", () => ({
-	SyncNowButton: ({ onSynced }: { onSynced?: () => void }) => (
-		<button onClick={onSynced} type="button">
-			同步 Home
-		</button>
-	),
-}));
-
 import { SpecialFollowTimeline } from "./SpecialFollowTimeline";
 
 function status() {
@@ -161,8 +153,8 @@ describe("SpecialFollowTimeline", () => {
 		expect(screen.getByText("newer post")).toBeInTheDocument();
 		expect(feedModes).toEqual(["resume"]);
 		expect(
-			screen.getByRole("button", { name: "上方还有新动态 · 查看最新" }),
-		).toBeInTheDocument();
+			screen.queryByRole("button", { name: "上方还有新动态 · 查看最新" }),
+		).not.toBeInTheDocument();
 		await waitFor(() => expect(scrollBy).toHaveBeenCalledTimes(1));
 		expect(rect).toHaveBeenCalled();
 		const patches = fetchMock.mock.calls.filter(
@@ -208,7 +200,12 @@ describe("SpecialFollowTimeline", () => {
 		expect(
 			screen.getByRole("link", { name: "去 Home 选择作者" }),
 		).toHaveAttribute("href", "/");
-		fireEvent.click(screen.getByRole("button", { name: "同步 Home" }));
+		expect(
+			screen.queryByRole("button", { name: "同步 Home" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "刷新列表" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("persists only after a real reading interaction, with a bounded cadence", async () => {
@@ -299,107 +296,6 @@ describe("SpecialFollowTimeline", () => {
 			pixelOffset: 36,
 			expectedRevision: 0,
 		});
-	});
-
-	it("restores the saved anchor again after a Home sync refresh", async () => {
-		const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {});
-		const patchBodies: Array<Record<string, unknown>> = [];
-		let feedReads = 0;
-		const fetchMock = vi.fn(
-			async (input: RequestInfo | URL, init?: RequestInit) => {
-				const url = new URL(String(input), "http://localhost");
-				if (url.pathname === "/api/status") return status();
-				if (url.pathname === "/api/special-follow-position") {
-					if (init?.method === "PATCH") {
-						const body = JSON.parse(String(init.body)) as Record<
-							string,
-							unknown
-						>;
-						patchBodies.push(body);
-						return Response.json({
-							ok: true,
-							applied: true,
-							accountId: "acct_primary",
-							viewKey: "special-follow",
-							position: {
-								anchorTweetId: "anchor",
-								anchorCreatedAt: "2026-08-12T00:00:00.000Z",
-								pixelOffset: body.pixelOffset,
-								clientSessionId: body.clientSessionId,
-								clientSequence: body.clientSequence,
-								revision: 2,
-								updatedAt: "2026-08-13T00:00:00.000Z",
-							},
-						});
-					}
-					return Response.json({
-						accountId: "acct_primary",
-						viewKey: "special-follow",
-						position: {
-							anchorTweetId: "anchor",
-							anchorCreatedAt: "2026-08-12T00:00:00.000Z",
-							pixelOffset: 36,
-							clientSessionId: "device-a",
-							clientSequence: 1,
-							revision: 1,
-							updatedAt: "2026-08-13T00:00:00.000Z",
-						},
-					});
-				}
-				if (url.pathname === "/api/special-follow-feed") {
-					feedReads += 1;
-					return Response.json({
-						items: [item("anchor", "saved post", "2026-08-12T00:00:00.000Z")],
-						specialFollowProfileCount: 1,
-						page: {
-							mode: "resume",
-							hasNewer: feedReads > 1,
-							hasOlder: false,
-							newerCursor: null,
-							olderCursor: null,
-							restore: {
-								requestedTweetId: "anchor",
-								resolvedTweetId: "anchor",
-								createdAt: "2026-08-12T00:00:00.000Z",
-								pixelOffset: 36,
-								exact: true,
-							},
-						},
-					});
-				}
-				throw new Error(`Unexpected fetch ${url.pathname}`);
-			},
-		);
-		vi.stubGlobal("fetch", fetchMock);
-		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-			function (this: HTMLElement) {
-				const top = this.dataset.specialFollowAnchor === "anchor" ? 420 : 0;
-				return {
-					x: 0,
-					y: top,
-					top,
-					left: 0,
-					right: 680,
-					bottom: top + 240,
-					width: 680,
-					height: 240,
-					toJSON: () => ({}),
-				};
-			},
-		);
-
-		render(<SpecialFollowTimeline viewTabs={<div>views</div>} />);
-		expect(await screen.findByText("saved post")).toBeInTheDocument();
-		await waitFor(() => expect(scrollBy).toHaveBeenCalledTimes(1));
-		fireEvent.wheel(window);
-		fireEvent.scroll(window);
-		await waitFor(() => expect(patchBodies).toHaveLength(1), {
-			timeout: 4_000,
-		});
-
-		fireEvent.click(screen.getByRole("button", { name: "同步 Home" }));
-		await waitFor(() => expect(feedReads).toBe(2));
-		await waitFor(() => expect(scrollBy).toHaveBeenCalledTimes(2));
 	});
 
 	it("waits for the fresh cloud window before restoring a remounted cached feed", async () => {

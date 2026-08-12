@@ -14,7 +14,6 @@ import {
 	useState,
 	type ReactNode,
 } from "react";
-import { SyncNowButton } from "#/components/SyncNowButton";
 import { TimelineCard } from "#/components/TimelineCard";
 import {
 	TimelineFeedHeader,
@@ -41,7 +40,7 @@ import type {
 	SpecialFollowPositionWriteRequest,
 	TimelineItem,
 } from "#/lib/types";
-import { cx, secondaryButtonClass, timestampClass } from "#/lib/ui";
+import { cx, timestampClass } from "#/lib/ui";
 import { useSelectedAccountId } from "./account-selection";
 
 const PAGE_SIZE = 24;
@@ -99,8 +98,6 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 	const pendingRef = useRef<{ id: string; pixelOffset: number } | null>(null);
 	const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const saveChainRef = useRef(Promise.resolve());
-	const [feedMode, setFeedMode] = useState<"resume" | "newest">("resume");
-	const [refreshGeneration, setRefreshGeneration] = useState(0);
 	const [restored, setRestored] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -144,10 +141,9 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		queryKey: [
 			...queryKeys.specialFollowFeed,
 			selectedAccountId ?? "none",
-			feedMode,
-			refreshGeneration,
+			"resume",
 		],
-		initialPageParam: { mode: feedMode } as FeedPageParam,
+		initialPageParam: { mode: "resume" } as FeedPageParam,
 		queryFn: ({ pageParam, signal }) => {
 			const url = new URL("/api/special-follow-feed", window.location.origin);
 			url.searchParams.set("account", selectedAccountId as string);
@@ -194,7 +190,7 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		lastPersistedRef.current = null;
 		pendingRef.current = null;
 		setRestored(false);
-	}, [selectedAccountId, feedMode]);
+	}, [selectedAccountId]);
 
 	useLayoutEffect(() => {
 		if (
@@ -251,14 +247,11 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 				id: restore.resolvedTweetId,
 				pixelOffset: restore.pixelOffset,
 			};
-		} else if (feedMode === "newest") {
-			window.scrollTo({ top: 0, behavior: "auto" });
 		}
 		restoredRef.current = true;
 		setRestored(true);
 		return cleanupAlignment;
 	}, [
-		feedMode,
 		feedQuery.data,
 		feedQuery.isError,
 		feedQuery.isFetching,
@@ -450,8 +443,6 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		Boolean(
 			selectedAccountId && positionQuery.isSuccess && feedQuery.isPending,
 		);
-	const hasNewer = firstPage?.page.hasNewer ?? false;
-
 	return (
 		<div ref={headerRef} data-special-follow-header>
 			<TimelineFeedShell
@@ -468,34 +459,8 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 						controls={
 							<>
 								{viewTabs}
-								<div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-									{hasNewer ? (
-										<button
-											className={secondaryButtonClass}
-											onClick={() => setFeedMode("newest")}
-											type="button"
-										>
-											上方还有新动态 · 查看最新
-										</button>
-									) : (
-										<span className={timestampClass}>按发布时间倒序</span>
-									)}
-									<SyncNowButton
-										accounts={meta?.accounts}
-										kind="timeline"
-										label="同步 Home"
-										onSynced={() => {
-											const pending = pendingRef.current;
-											if (pending) persist(pending);
-											void saveChainRef.current.then(() => {
-												restoredRef.current = false;
-												userInteractedRef.current = false;
-												setRestored(false);
-												setRefreshGeneration((value) => value + 1);
-											});
-										}}
-										showAccountPicker
-									/>
+								<div className="flex items-center px-4 py-3">
+									<span className={timestampClass}>按发布时间倒序</span>
 								</div>
 							</>
 						}
@@ -540,7 +505,7 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 				emptyDetail={
 					specialFollowProfileCount === 0
 						? "选择重要账号后，他们已有的 Home 动态会出现在这里。"
-						: "这些账号还没有已归档的 Home 动态，可以先同步 Home。"
+						: "这些账号还没有已归档的 Home 动态，新内容归档后会自动出现在这里。"
 				}
 				hasMore={feedQuery.hasNextPage}
 				loadingMore={feedQuery.isFetchingNextPage}
