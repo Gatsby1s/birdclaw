@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 0.8.86 - 2026-08-13
+
+### Changed
+
+- Make 特别关注 a restore-only Moments-style feed: remove manual Home sync, list refresh, and jump-to-latest controls so every entry resumes the cloud reading anchor without displacing it.
+
+### Fixed
+
+- Remove the obsolete manual-sync instruction from the configured empty state; newly archived posts appear automatically.
+
 ## 0.8.85 - 2026-08-13
 
 ### Fixed
