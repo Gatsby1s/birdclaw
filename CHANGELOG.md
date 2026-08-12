@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.83 - 2026-08-12
+
+### Fixed
+
+- Keep avatar, score, citation, and other floating previews mutually exclusive so keyboard focus followed by mouse hover cannot leave overlapping cards open.
+
 ## 0.8.82 - 2026-08-12
 
 ### Fixed
