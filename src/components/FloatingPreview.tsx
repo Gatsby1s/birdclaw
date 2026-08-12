@@ -47,6 +47,8 @@ const DEFAULT_GAP = 10;
 const DEFAULT_GUTTER = 12;
 const DEFAULT_CLOSE_DELAY_MS = 120;
 
+let activePreview: { owner: object; close: () => void } | undefined;
+
 const initialPosition: PreviewPosition = {
 	top: 0,
 	left: 0,
@@ -267,6 +269,7 @@ export function useFloatingPreview(
 	const floatingRef = useRef<HTMLSpanElement | null>(null);
 	const closeTimerRef = useRef<number | null>(null);
 	const pinnedRef = useRef(false);
+	const ownerRef = useRef<object>({});
 
 	const clearCloseTimer = useCallback(() => {
 		if (closeTimerRef.current === null) return;
@@ -274,34 +277,55 @@ export function useFloatingPreview(
 		closeTimerRef.current = null;
 	}, []);
 
+	const releaseActivePreview = useCallback(() => {
+		if (activePreview?.owner === ownerRef.current) activePreview = undefined;
+	}, []);
+
+	const activatePreview = useCallback(() => {
+		if (activePreview?.owner !== ownerRef.current) activePreview?.close();
+		activePreview = {
+			owner: ownerRef.current,
+			close: () => {
+				clearCloseTimer();
+				pinnedRef.current = false;
+				setOpen(false);
+			},
+		};
+	}, [clearCloseTimer]);
+
 	const openPreview = useCallback(() => {
 		clearCloseTimer();
+		activatePreview();
 		if (!open) setPosition(initialPosition);
 		setOpen(true);
-	}, [clearCloseTimer, open]);
+	}, [activatePreview, clearCloseTimer, open]);
 
 	const closePreview = useCallback(() => {
 		clearCloseTimer();
 		pinnedRef.current = false;
+		releaseActivePreview();
 		setOpen(false);
-	}, [clearCloseTimer]);
+	}, [clearCloseTimer, releaseActivePreview]);
 	const pinPreview = useCallback(() => {
 		clearCloseTimer();
+		activatePreview();
 		pinnedRef.current = true;
 		if (!open) setPosition(initialPosition);
 		setOpen(true);
-	}, [clearCloseTimer, open]);
+	}, [activatePreview, clearCloseTimer, open]);
 	const togglePreview = useCallback(() => {
 		clearCloseTimer();
 		if (pinnedRef.current) {
 			pinnedRef.current = false;
+			releaseActivePreview();
 			setOpen(false);
 			return;
 		}
+		activatePreview();
 		pinnedRef.current = true;
 		if (!open) setPosition(initialPosition);
 		setOpen(true);
-	}, [clearCloseTimer, open]);
+	}, [activatePreview, clearCloseTimer, open, releaseActivePreview]);
 
 	const scheduleClose = useCallback(() => {
 		clearCloseTimer();
@@ -319,9 +343,12 @@ export function useFloatingPreview(
 			const pointerInside =
 				Boolean(reference?.matches(":hover")) ||
 				Boolean(floating?.matches(":hover"));
-			if (!focusInside && !pointerInside) setOpen(false);
+			if (!focusInside && !pointerInside) {
+				releaseActivePreview();
+				setOpen(false);
+			}
 		}, closeDelayMs);
-	}, [clearCloseTimer, closeDelayMs]);
+	}, [clearCloseTimer, closeDelayMs, releaseActivePreview]);
 
 	const handleBlur = useCallback(
 		(event: FocusEvent<HTMLElement>) => {
@@ -425,7 +452,13 @@ export function useFloatingPreview(
 		};
 	}, [open, updatePlacement]);
 
-	useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+	useEffect(
+		() => () => {
+			clearCloseTimer();
+			releaseActivePreview();
+		},
+		[clearCloseTimer, releaseActivePreview],
+	);
 	useEffect(() => {
 		if (!open) return;
 		const handlePointerDown = (event: globalThis.PointerEvent) => {

@@ -102,6 +102,28 @@ describe("TweetScoreBadge", () => {
 		expect(screen.getByText("中等信息价值")).toBeInTheDocument();
 	});
 
+	it("keeps only one floating preview open across focus and hover", () => {
+		const otherScore = {
+			...score,
+			tweetId: "tweet_2",
+			score: 6,
+			label: "中等信息价值",
+		};
+		render(
+			<>
+				<TweetScoreBadge score={score} />
+				<TweetScoreBadge score={otherScore} />
+			</>,
+		);
+		const first = screen.getByRole("button", { name: /帖子评分 8 分/ });
+		const second = screen.getByRole("button", { name: /帖子评分 6 分/ });
+		fireEvent.focus(first);
+		expect(screen.getByText("高信息价值")).toBeInTheDocument();
+		fireEvent.pointerEnter(second.parentElement as HTMLElement);
+		expect(screen.queryByText("高信息价值")).not.toBeInTheDocument();
+		expect(screen.getByText("中等信息价值")).toBeInTheDocument();
+	});
+
 	it("does not bubble score clicks into the timeline card", () => {
 		let clicks = 0;
 		render(
