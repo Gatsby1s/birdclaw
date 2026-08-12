@@ -200,6 +200,8 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		if (
 			!feedQuery.data ||
 			restoredRef.current ||
+			positionQuery.isError ||
+			feedQuery.isError ||
 			positionQuery.isFetching ||
 			feedQuery.isFetching
 		)
@@ -258,8 +260,10 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 	}, [
 		feedMode,
 		feedQuery.data,
+		feedQuery.isError,
 		feedQuery.isFetching,
 		firstPage,
+		positionQuery.isError,
 		positionQuery.isFetching,
 	]);
 

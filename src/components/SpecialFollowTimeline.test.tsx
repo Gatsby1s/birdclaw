@@ -535,4 +535,128 @@ describe("SpecialFollowTimeline", () => {
 				.closest("[data-special-follow-feed-state]"),
 		).toHaveAttribute("data-special-follow-feed-state", "restored");
 	});
+
+	it("keeps a failed cached remount hidden until Retry restores the fresh anchor", async () => {
+		const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {});
+		let cloudGeneration = 1;
+		let freshFeedAttempts = 0;
+		const positionResponse = (anchorTweetId: string, revision: number) =>
+			Response.json({
+				accountId: "acct_primary",
+				viewKey: "special-follow",
+				position: {
+					anchorTweetId,
+					anchorCreatedAt: "2026-08-12T00:00:00.000Z",
+					pixelOffset: anchorTweetId === "old-anchor" ? 36 : 20,
+					clientSessionId: `device-${String(revision)}`,
+					clientSequence: revision,
+					revision,
+					updatedAt: "2026-08-13T00:00:00.000Z",
+				},
+			});
+		const feedResponse = (anchorTweetId: string) =>
+			Response.json({
+				items: [
+					item(
+						anchorTweetId,
+						anchorTweetId === "old-anchor"
+							? "old cached post"
+							: "fresh retry post",
+						"2026-08-12T00:00:00.000Z",
+					),
+				],
+				specialFollowProfileCount: 1,
+				page: {
+					mode: "resume",
+					hasNewer: false,
+					hasOlder: false,
+					newerCursor: null,
+					olderCursor: null,
+					restore: {
+						requestedTweetId: anchorTweetId,
+						resolvedTweetId: anchorTweetId,
+						createdAt: "2026-08-12T00:00:00.000Z",
+						pixelOffset: anchorTweetId === "old-anchor" ? 36 : 20,
+						exact: true,
+					},
+				},
+			});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/status") return status();
+				if (url.pathname === "/api/special-follow-position") {
+					return cloudGeneration === 1
+						? positionResponse("old-anchor", 1)
+						: positionResponse("fresh-anchor", 2);
+				}
+				if (url.pathname === "/api/special-follow-feed") {
+					if (cloudGeneration === 1) return feedResponse("old-anchor");
+					freshFeedAttempts += 1;
+					if (freshFeedAttempts === 1) {
+						return Response.json(
+							{ ok: false, message: "temporary cloud failure" },
+							{ status: 503 },
+						);
+					}
+					return feedResponse("fresh-anchor");
+				}
+				throw new Error(`Unexpected fetch ${url.pathname}`);
+			}),
+		);
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+			function (this: HTMLElement) {
+				const top =
+					this.dataset.specialFollowAnchor === "old-anchor"
+						? 420
+						: this.dataset.specialFollowAnchor === "fresh-anchor"
+							? 620
+							: 0;
+				const bottom = this.tagName === "HEADER" ? 64 : top + 240;
+				return {
+					x: 0,
+					y: top,
+					top,
+					left: 0,
+					right: 680,
+					bottom,
+					width: 680,
+					height: bottom - top,
+					toJSON: () => ({}),
+				};
+			},
+		);
+
+		const first = render(<SpecialFollowTimeline viewTabs={<div>views</div>} />);
+		expect(await screen.findByText("old cached post")).toBeInTheDocument();
+		await waitFor(() => expect(scrollBy).toHaveBeenCalledTimes(1));
+		first.unmount();
+		cloudGeneration = 2;
+		scrollBy.mockClear();
+
+		render(<SpecialFollowTimeline viewTabs={<div>views</div>} />, {
+			queryClient: first.queryClient,
+		});
+		expect(await screen.findByText("特别关注动态加载失败")).toBeInTheDocument();
+		const cachedFeed = screen
+			.getByText("old cached post")
+			.closest("[data-special-follow-feed-state]");
+		expect(cachedFeed).toHaveAttribute(
+			"data-special-follow-feed-state",
+			"restoring",
+		);
+		expect(cachedFeed).toHaveStyle({ visibility: "hidden" });
+		expect(scrollBy).not.toHaveBeenCalled();
+
+		fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+		expect(await screen.findByText("fresh retry post")).toBeInTheDocument();
+		await waitFor(() => expect(scrollBy).toHaveBeenCalledTimes(1));
+		expect(scrollBy).toHaveBeenCalledWith({ top: 536, behavior: "auto" });
+		expect(
+			screen
+				.getByText("fresh retry post")
+				.closest("[data-special-follow-feed-state]"),
+		).toHaveAttribute("data-special-follow-feed-state", "restored");
+	});
 });
