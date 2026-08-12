@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.81 - 2026-08-12
+
+### Added
+
+- Show a compact information-value score beneath each timeline avatar, with a Chinese hover, keyboard, and tap card for the five scoring dimensions, post judgment, rationale, and plain-language explanation.
+- Add the numeric score alone to every referenced tweet in complete Today and Discuss PDFs while preserving their existing content, media, pagination, and index.
+
+### Fixed
+
+- Keep score caching durable across backups and content changes, reject malformed cached explanations, fence concurrent generations so older content cannot overwrite newer scores, and fall back to a printable conservative number when a model is unavailable.
+
 ## 0.8.80 - 2026-08-12
 
 ### Fixed
