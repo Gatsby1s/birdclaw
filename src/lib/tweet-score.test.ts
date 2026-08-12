@@ -12,6 +12,23 @@ import {
 
 const testHome = useTestHome({ prefix: "birdclaw-tweet-score-home-" });
 
+function invalidScoreStream() {
+	const events = [
+		{
+			type: "response.output_text.delta",
+			delta: "评分完成\n---\n这不是有效的 JSON",
+		},
+		{
+			type: "response.completed",
+			response: { id: "resp_invalid_score", usage: { output_tokens: 12 } },
+		},
+	];
+	return new Response(
+		events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+		{ headers: { "content-type": "text/event-stream" } },
+	);
+}
+
 const dimensions = {
 	informationDelta: 4,
 	clearThesis: 2,
@@ -150,6 +167,36 @@ describe("tweet score", () => {
 				)
 				.get(),
 		).toEqual({ count: 2 });
+	});
+
+	it("falls back to a printable number when model output is not valid JSON", async () => {
+		const runtime = createRuntimeServices({
+			fetch: vi.fn(async () => invalidScoreStream()),
+			now: () => new Date("2026-08-12T08:00:00.000Z"),
+			env: (name) => {
+				if (name === "OPENAI_API_KEY") return "test-key";
+				if (name === "BIRDCLAW_AI_MODEL") return "test-model";
+				return undefined;
+			},
+		});
+
+		await expect(
+			scoreTweets([{ tweetId: "invalid-json", text: "A specific claim" }], {
+				runtime,
+			}),
+		).resolves.toMatchObject([
+			{
+				tweetId: "invalid-json",
+				score: 0,
+				cached: false,
+				reason: "自动评分服务暂时不可用，当前按保守规则给出临时分。",
+			},
+		]);
+		expect(
+			testHome()
+				.db.prepare("select count(*) as count from tweet_quality_scores")
+				.get(),
+		).toEqual({ count: 0 });
 	});
 
 	it("prevents an older content request from overwriting a newer score", () => {
