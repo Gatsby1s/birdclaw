@@ -347,9 +347,7 @@ function scoreMissingBatchEffect(
 			signal: options.signal,
 			runtime,
 			parse: (value) => modelBatchSchema.parse(value),
-			fallback: () => {
-				throw new Error("Tweet score response was not valid JSON");
-			},
+			fallback: () => ({ scores: [] }),
 		});
 		const expectedIds = new Set(inputs.map((input) => input.tweetId));
 		const scoreById = new Map(
