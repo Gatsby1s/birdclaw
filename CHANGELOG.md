@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.79 - 2026-08-12
+
+### Fixed
+
+- Keep author hover previews fully inside the browser viewport by rendering them outside timeline paint-containment and clipping boundaries, including at 320px and 390px widths.
+- Remove the author-name hover underline, let both the avatar and author name open the same Twitter-style profile preview, and preserve keyboard-safe read-only bio details.
+
 ## 0.8.78 - 2026-08-12
 
 ### Added
