@@ -32,6 +32,7 @@ import { Route as ApiWeeklyDigestHistoryRouteImport } from './routes/api/weekly-
 import { Route as ApiTwillotHistoryRouteImport } from './routes/api/twillot-history'
 import { Route as ApiTweetVideoRouteImport } from './routes/api/tweet-video'
 import { Route as ApiTweetTranslationRouteImport } from './routes/api/tweet-translation'
+import { Route as ApiTweetScoresRouteImport } from './routes/api/tweet-scores'
 import { Route as ApiTweetExpandRouteImport } from './routes/api/tweet-expand'
 import { Route as ApiSyncRouteImport } from './routes/api/sync'
 import { Route as ApiStatusRouteImport } from './routes/api/status'
@@ -172,6 +173,11 @@ const ApiTweetVideoRoute = ApiTweetVideoRouteImport.update({
 const ApiTweetTranslationRoute = ApiTweetTranslationRouteImport.update({
   id: '/api/tweet-translation',
   path: '/api/tweet-translation',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTweetScoresRoute = ApiTweetScoresRouteImport.update({
+  id: '/api/tweet-scores',
+  path: '/api/tweet-scores',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTweetExpandRoute = ApiTweetExpandRouteImport.update({
@@ -346,6 +352,7 @@ export interface FileRoutesByFullPath {
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/tweet-expand': typeof ApiTweetExpandRoute
+  '/api/tweet-scores': typeof ApiTweetScoresRoute
   '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
   '/api/twillot-history': typeof ApiTwillotHistoryRoute
@@ -397,6 +404,7 @@ export interface FileRoutesByTo {
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/tweet-expand': typeof ApiTweetExpandRoute
+  '/api/tweet-scores': typeof ApiTweetScoresRoute
   '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
   '/api/twillot-history': typeof ApiTwillotHistoryRoute
@@ -449,6 +457,7 @@ export interface FileRoutesById {
   '/api/status': typeof ApiStatusRoute
   '/api/sync': typeof ApiSyncRoute
   '/api/tweet-expand': typeof ApiTweetExpandRoute
+  '/api/tweet-scores': typeof ApiTweetScoresRoute
   '/api/tweet-translation': typeof ApiTweetTranslationRoute
   '/api/tweet-video': typeof ApiTweetVideoRoute
   '/api/twillot-history': typeof ApiTwillotHistoryRoute
@@ -502,6 +511,7 @@ export interface FileRouteTypes {
     | '/api/status'
     | '/api/sync'
     | '/api/tweet-expand'
+    | '/api/tweet-scores'
     | '/api/tweet-translation'
     | '/api/tweet-video'
     | '/api/twillot-history'
@@ -553,6 +563,7 @@ export interface FileRouteTypes {
     | '/api/status'
     | '/api/sync'
     | '/api/tweet-expand'
+    | '/api/tweet-scores'
     | '/api/tweet-translation'
     | '/api/tweet-video'
     | '/api/twillot-history'
@@ -604,6 +615,7 @@ export interface FileRouteTypes {
     | '/api/status'
     | '/api/sync'
     | '/api/tweet-expand'
+    | '/api/tweet-scores'
     | '/api/tweet-translation'
     | '/api/tweet-video'
     | '/api/twillot-history'
@@ -656,6 +668,7 @@ export interface RootRouteChildren {
   ApiStatusRoute: typeof ApiStatusRoute
   ApiSyncRoute: typeof ApiSyncRoute
   ApiTweetExpandRoute: typeof ApiTweetExpandRoute
+  ApiTweetScoresRoute: typeof ApiTweetScoresRoute
   ApiTweetTranslationRoute: typeof ApiTweetTranslationRoute
   ApiTweetVideoRoute: typeof ApiTweetVideoRoute
   ApiTwillotHistoryRoute: typeof ApiTwillotHistoryRoute
@@ -830,6 +843,13 @@ declare module '@tanstack/react-router' {
       path: '/api/tweet-translation'
       fullPath: '/api/tweet-translation'
       preLoaderRoute: typeof ApiTweetTranslationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/tweet-scores': {
+      id: '/api/tweet-scores'
+      path: '/api/tweet-scores'
+      fullPath: '/api/tweet-scores'
+      preLoaderRoute: typeof ApiTweetScoresRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/tweet-expand': {
@@ -1069,6 +1089,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiStatusRoute: ApiStatusRoute,
   ApiSyncRoute: ApiSyncRoute,
   ApiTweetExpandRoute: ApiTweetExpandRoute,
+  ApiTweetScoresRoute: ApiTweetScoresRoute,
   ApiTweetTranslationRoute: ApiTweetTranslationRoute,
   ApiTweetVideoRoute: ApiTweetVideoRoute,
   ApiTwillotHistoryRoute: ApiTwillotHistoryRoute,

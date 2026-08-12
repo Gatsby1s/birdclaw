@@ -47,6 +47,8 @@ function switchHome(prefix: string) {
 function clearData() {
 	const db = getNativeDb();
 	db.exec(`
+	delete from tweet_quality_score_requests;
+	delete from tweet_quality_scores;
 	delete from twillot_history_batches;
 	delete from twillot_history_daily_usage;
 	delete from twillot_history_jobs;
@@ -871,6 +873,117 @@ describe("text backup", () => {
 		).toEqual({ count: 0 });
 	}, 20000);
 
+	it("replace removes score cache and request fences absent from the backup", async () => {
+		switchHome("birdclaw-backup-empty-score-src-");
+		const repoPath = makeTempDir("birdclaw-backup-empty-score-repo-");
+		await exportBackup({ repoPath });
+
+		switchHome("birdclaw-backup-stale-score-dest-");
+		const db = getNativeDb({ seedDemoData: false });
+		db.prepare(
+			`insert into tweet_quality_scores (
+				tweet_id, provider, model, score, label, dimensions_json, sentiment,
+				assets_json, reason, explanation, content_hash, updated_at
+			) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		).run(
+			"stale-tweet",
+			"openai",
+			"stale-model",
+			8,
+			"高信息价值",
+			JSON.stringify({
+				informationDelta: 4,
+				clearThesis: 2,
+				explainedMechanism: 1,
+				verifiability: 1,
+				clearBoundaries: 0,
+			}),
+			"positive",
+			JSON.stringify(["股票"]),
+			"这是一条应当被替换导入删除的旧评分。",
+			"这条旧解释也不应残留。",
+			"stale-hash",
+			"2026-08-10T00:00:00.000Z",
+		);
+		db.prepare(
+			`insert into tweet_quality_score_requests (
+				tweet_id, content_hash, generation, updated_at
+			) values (?, ?, ?, ?)`,
+		).run("stale-tweet", "stale-hash", 1, "2026-08-10T00:00:00.000Z");
+
+		await importBackup({ repoPath, mode: "replace" });
+		expect(
+			db.prepare("select count(*) as count from tweet_quality_scores").get(),
+		).toEqual({ count: 0 });
+		expect(
+			db
+				.prepare("select count(*) as count from tweet_quality_score_requests")
+				.get(),
+		).toEqual({ count: 0 });
+	}, 20000);
+
+	it("round-trips tweet quality scores without backing up request fences", async () => {
+		switchHome("birdclaw-backup-score-src-");
+		const sourceDb = getNativeDb({ seedDemoData: false });
+		sourceDb
+			.prepare(
+				`insert into tweet_quality_scores (
+				tweet_id, provider, model, score, label, dimensions_json, sentiment,
+				assets_json, reason, explanation, content_hash, updated_at
+			) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				"scored-tweet",
+				"openai",
+				"score-model",
+				6,
+				"中等信息价值",
+				JSON.stringify({
+					informationDelta: 3,
+					clearThesis: 2,
+					explainedMechanism: 1,
+					verifiability: 0,
+					clearBoundaries: 0,
+				}),
+				"mixed",
+				JSON.stringify(["股票", "加密资产"]),
+				"帖子提供了新信息，也给出了明确判断。",
+				"这条帖子看好股票，同时对加密资产保持谨慎。",
+				"score-hash",
+				"2026-08-12T08:00:00.000Z",
+			);
+		sourceDb
+			.prepare(
+				`insert into tweet_quality_score_requests (
+				tweet_id, content_hash, generation, updated_at
+			) values (?, ?, ?, ?)`,
+			)
+			.run("scored-tweet", "score-hash", 4, "2026-08-12T08:00:00.000Z");
+		const repoPath = makeTempDir("birdclaw-backup-score-repo-");
+		await exportBackup({ repoPath });
+
+		switchHome("birdclaw-backup-score-dest-");
+		await importBackup({ repoPath, mode: "replace" });
+		const destinationDb = getNativeDb({ seedDemoData: false });
+		expect(
+			destinationDb
+				.prepare(
+					"select score, label, reason, content_hash from tweet_quality_scores where tweet_id = ?",
+				)
+				.get("scored-tweet"),
+		).toEqual({
+			score: 6,
+			label: "中等信息价值",
+			reason: "帖子提供了新信息，也给出了明确判断。",
+			content_hash: "score-hash",
+		});
+		expect(
+			destinationDb
+				.prepare("select count(*) as count from tweet_quality_score_requests")
+				.get(),
+		).toEqual({ count: 0 });
+	}, 20000);
+
 	it("does not restore an orphan Twillot batch receipt when job ids differ", async () => {
 		switchHome("birdclaw-backup-twillot-source-");
 		seedBackupFixture();
@@ -913,7 +1026,7 @@ describe("text backup", () => {
 		).toEqual({ count: 0 });
 	}, 20000);
 
-	it("emits byte-identical schema-v9 data and still accepts schema v2", async () => {
+	it("emits byte-identical schema-v10 data and still accepts schema v2", async () => {
 		switchHome("birdclaw-backup-stable-src-");
 		seedBackupFixture();
 		const firstRepoPath = makeTempDir("birdclaw-backup-stable-first-");
@@ -922,7 +1035,7 @@ describe("text backup", () => {
 		const first = await exportBackup({ repoPath: firstRepoPath });
 		const second = await exportBackup({ repoPath: secondRepoPath });
 
-		expect(first.manifest.schemaVersion).toBe(9);
+		expect(first.manifest.schemaVersion).toBe(10);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);
 		expect(second.manifest.backupHash).toBe(first.manifest.backupHash);

@@ -12,7 +12,7 @@ import {
 	useState,
 } from "react";
 
-type PreviewSide = "top" | "bottom";
+type PreviewSide = "top" | "bottom" | "right";
 
 type Rect = {
 	top: number;
@@ -40,6 +40,7 @@ type PlacementInput = {
 	viewport: Rect;
 	gap?: number;
 	gutter?: number;
+	placement?: "vertical" | "right";
 };
 
 const DEFAULT_GAP = 10;
@@ -58,6 +59,11 @@ const initialPosition: PreviewPosition = {
 
 function edgeRect(rects: Rect[], side: PreviewSide) {
 	return rects.reduce((best, rect) => {
+		if (side === "right") {
+			if (rect.right > best.right) return rect;
+			if (rect.right === best.right && rect.height > best.height) return rect;
+			return best;
+		}
 		if (side === "bottom") {
 			if (rect.bottom > best.bottom) return rect;
 			if (rect.bottom === best.bottom && rect.width > best.width) return rect;
@@ -81,11 +87,39 @@ function calculatePreviewPosition({
 	viewport,
 	gap = DEFAULT_GAP,
 	gutter = DEFAULT_GUTTER,
+	placement = "vertical",
 }: PlacementInput): PreviewPosition {
 	const referenceTop = Math.min(...referenceRects.map((rect) => rect.top));
 	const referenceBottom = Math.max(
 		...referenceRects.map((rect) => rect.bottom),
 	);
+	const referenceRight = Math.max(...referenceRects.map((rect) => rect.right));
+	const maxViewportWidth = Math.max(0, viewport.width - gutter * 2);
+	const availableRight = Math.max(
+		0,
+		viewport.right - gutter - referenceRight - gap,
+	);
+	if (
+		placement === "right" &&
+		availableRight >= Math.min(floatingWidth, maxViewportWidth)
+	) {
+		const anchor = edgeRect(referenceRects, "right");
+		const maxHeight = Math.max(0, viewport.height - gutter * 2);
+		const renderedHeight = Math.min(floatingHeight, maxHeight);
+		return {
+			top: clamp(
+				anchor.top + anchor.height / 2 - renderedHeight / 2,
+				viewport.top + gutter,
+				viewport.bottom - gutter - renderedHeight,
+			),
+			left: referenceRight + gap,
+			maxWidth: availableRight,
+			maxHeight,
+			side: "right",
+			measured: true,
+			ready: true,
+		};
+	}
 	const availableBelow = Math.max(
 		0,
 		viewport.bottom - gutter - referenceBottom - gap,
@@ -193,7 +227,12 @@ function containsTarget(
 	);
 }
 
-export function useFloatingPreview(options: { closeDelayMs?: number } = {}): {
+export function useFloatingPreview(
+	options: {
+		closeDelayMs?: number;
+		placement?: "vertical" | "right";
+	} = {},
+): {
 	open: boolean;
 	referenceRef: RefObject<HTMLSpanElement | null>;
 	floatingRef: RefObject<HTMLSpanElement | null>;
@@ -213,15 +252,21 @@ export function useFloatingPreview(options: { closeDelayMs?: number } = {}): {
 		onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
 	};
 	floatingId: string;
+	side: PreviewSide;
+	openPreview: () => void;
+	pinPreview: () => void;
 	closePreview: () => void;
+	togglePreview: () => void;
 } {
 	const closeDelayMs = options.closeDelayMs ?? DEFAULT_CLOSE_DELAY_MS;
+	const placement = options.placement ?? "vertical";
 	const [open, setOpen] = useState(false);
 	const [position, setPosition] = useState(initialPosition);
 	const floatingId = useId();
 	const referenceRef = useRef<HTMLSpanElement | null>(null);
 	const floatingRef = useRef<HTMLSpanElement | null>(null);
 	const closeTimerRef = useRef<number | null>(null);
+	const pinnedRef = useRef(false);
 
 	const clearCloseTimer = useCallback(() => {
 		if (closeTimerRef.current === null) return;
@@ -237,13 +282,33 @@ export function useFloatingPreview(options: { closeDelayMs?: number } = {}): {
 
 	const closePreview = useCallback(() => {
 		clearCloseTimer();
+		pinnedRef.current = false;
 		setOpen(false);
 	}, [clearCloseTimer]);
+	const pinPreview = useCallback(() => {
+		clearCloseTimer();
+		pinnedRef.current = true;
+		if (!open) setPosition(initialPosition);
+		setOpen(true);
+	}, [clearCloseTimer, open]);
+	const togglePreview = useCallback(() => {
+		clearCloseTimer();
+		if (pinnedRef.current) {
+			pinnedRef.current = false;
+			setOpen(false);
+			return;
+		}
+		pinnedRef.current = true;
+		if (!open) setPosition(initialPosition);
+		setOpen(true);
+	}, [clearCloseTimer, open]);
 
 	const scheduleClose = useCallback(() => {
 		clearCloseTimer();
+		if (pinnedRef.current) return;
 		closeTimerRef.current = window.setTimeout(() => {
 			closeTimerRef.current = null;
+			if (pinnedRef.current) return;
 			const reference = referenceRef.current;
 			const floating = floatingRef.current;
 			const focusInside = containsTarget(
@@ -277,8 +342,14 @@ export function useFloatingPreview(options: { closeDelayMs?: number } = {}): {
 	const handleKeyDown = useCallback(
 		(event: KeyboardEvent<HTMLElement>) => {
 			if (event.key !== "Escape") return;
+			const restoreReferenceFocus = containsTarget(
+				event.target,
+				floatingRef.current,
+			);
 			closePreview();
-			referenceRef.current?.querySelector<HTMLElement>("a,button")?.focus();
+			if (restoreReferenceFocus) {
+				referenceRef.current?.querySelector<HTMLElement>("a,button")?.focus();
+			}
 		},
 		[closePreview],
 	);
@@ -316,10 +387,11 @@ export function useFloatingPreview(options: { closeDelayMs?: number } = {}): {
 			floatingWidth: floatingRect.width,
 			floatingHeight: naturalHeight,
 			viewport,
+			placement,
 		});
 		if (floatingRect.width > next.maxWidth + 0.5) next.ready = false;
 		setPosition((current) => (samePosition(current, next) ? current : next));
-	}, []);
+	}, [placement]);
 
 	useLayoutEffect(() => {
 		if (!open) return;
@@ -354,6 +426,19 @@ export function useFloatingPreview(options: { closeDelayMs?: number } = {}): {
 	}, [open, updatePlacement]);
 
 	useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+	useEffect(() => {
+		if (!open) return;
+		const handlePointerDown = (event: globalThis.PointerEvent) => {
+			if (
+				containsTarget(event.target, referenceRef.current, floatingRef.current)
+			) {
+				return;
+			}
+			closePreview();
+		};
+		document.addEventListener("pointerdown", handlePointerDown);
+		return () => document.removeEventListener("pointerdown", handlePointerDown);
+	}, [closePreview, open]);
 
 	const interactionProps = {
 		onPointerEnter: (_event: PointerEvent<HTMLElement>) => openPreview(),
@@ -371,7 +456,11 @@ export function useFloatingPreview(options: { closeDelayMs?: number } = {}): {
 		referenceProps: interactionProps,
 		floatingProps: interactionProps,
 		floatingId,
+		side: position.side,
+		openPreview,
+		pinPreview,
 		closePreview,
+		togglePreview,
 	};
 }
 

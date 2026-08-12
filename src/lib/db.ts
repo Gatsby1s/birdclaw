@@ -220,6 +220,28 @@ const BASE_SCHEMA_SQL = `
     primary key (entity_kind, entity_id)
   );
 
+  create table if not exists tweet_quality_scores (
+    tweet_id text primary key,
+    provider text not null,
+    model text not null,
+    score integer not null check (score between -2 and 9),
+    label text not null,
+    dimensions_json text not null,
+    sentiment text not null,
+    assets_json text not null,
+    reason text not null,
+    explanation text not null,
+    content_hash text not null,
+    updated_at text not null
+  );
+
+  create table if not exists tweet_quality_score_requests (
+    tweet_id text primary key,
+    content_hash text not null,
+    generation integer not null,
+    updated_at text not null
+  );
+
   create table if not exists sync_cache (
     cache_key text primary key,
     value_json text not null,
@@ -455,6 +477,7 @@ const INDEX_SQL = `
   create index if not exists idx_blocks_account_created on blocks(account_id, created_at desc);
   create index if not exists idx_mutes_account_created on mutes(account_id, created_at desc);
   create index if not exists idx_ai_scores_updated on ai_scores(updated_at desc);
+  create index if not exists idx_tweet_quality_scores_updated on tweet_quality_scores(updated_at desc);
   create index if not exists idx_sync_cache_updated on sync_cache(updated_at desc);
   create index if not exists idx_discussion_history_list on discussion_history(deleted_at, pinned_at desc, created_at desc);
   create index if not exists idx_discussion_history_cache on discussion_history(cache_key, deleted_at, created_at desc);
@@ -566,6 +589,33 @@ function ensureTweetCollectionsTable(db: Database) {
       raw_json text not null default '{}',
       updated_at text not null,
       primary key (account_id, tweet_id, kind)
+    );
+  `);
+}
+
+function ensureTweetQualityScoresTable(db: Database) {
+	db.exec(`
+    create table if not exists tweet_quality_scores (
+      tweet_id text primary key,
+      provider text not null,
+      model text not null,
+      score integer not null check (score between -2 and 9),
+      label text not null,
+      dimensions_json text not null,
+      sentiment text not null,
+      assets_json text not null,
+      reason text not null,
+      explanation text not null,
+      content_hash text not null,
+      updated_at text not null
+    );
+    create index if not exists idx_tweet_quality_scores_updated
+      on tweet_quality_scores(updated_at desc);
+    create table if not exists tweet_quality_score_requests (
+      tweet_id text primary key,
+      content_hash text not null,
+      generation integer not null,
+      updated_at text not null
     );
   `);
 }
@@ -1353,6 +1403,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add durable Twillot history queue",
 		up: (db) => {
 			ensureTwillotHistoryQueueTables(db);
+		},
+	},
+	{
+		version: 16,
+		name: "add durable tweet quality scores",
+		up: (db) => {
+			ensureTweetQualityScoresTable(db);
 		},
 	},
 ];

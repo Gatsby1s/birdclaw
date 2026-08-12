@@ -12,6 +12,7 @@ import type {
 	ProfileRecord,
 	TimelineItem,
 	TransportStatus,
+	TweetQualityScore,
 	TweetEntities,
 	TweetMediaItem,
 	UrlExpansionItem,
@@ -440,6 +441,64 @@ export const tweetTranslationResponseSchema = z.object({
 export type TweetTranslationResponse = z.infer<
 	typeof tweetTranslationResponseSchema
 >;
+
+export const tweetScoreDimensionsSchema = z.object({
+	informationDelta: z.number().int().min(-2).max(4),
+	clearThesis: z.number().int().min(0).max(2),
+	explainedMechanism: z.number().int().min(0).max(1),
+	verifiability: z.number().int().min(0).max(1),
+	clearBoundaries: z.number().int().min(0).max(1),
+});
+
+const chineseScoreExplanationSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.max(1_200)
+	.refine((value) => /[\u3400-\u9fff]/u.test(value), {
+		message: "Score explanation must contain Simplified Chinese",
+	});
+
+export const tweetQualityScoreSchema: z.ZodType<TweetQualityScore> = z.object({
+	tweetId: z.string().trim().min(1).max(128),
+	score: z.number().int().min(-2).max(9),
+	label: z.string().trim().min(1).max(40),
+	dimensions: tweetScoreDimensionsSchema,
+	sentiment: z.enum(["positive", "negative", "neutral", "mixed"]),
+	assets: z.array(z.string().trim().min(1).max(80)).max(12),
+	reason: chineseScoreExplanationSchema,
+	explanation: chineseScoreExplanationSchema,
+	updatedAt: z.string().min(1),
+	cached: z.boolean(),
+});
+
+export const tweetScoresRequestSchema = z.object({
+	tweets: z
+		.array(
+			z.object({
+				tweetId: z.string().trim().min(1).max(128),
+				text: z.string().trim().max(20_000),
+				createdAt: z.string().max(100).optional(),
+				author: z
+					.object({
+						handle: z.string().trim().max(100),
+						displayName: z.string().trim().max(200),
+						bio: z.string().trim().max(2_000).optional(),
+					})
+					.optional(),
+			}),
+		)
+		.min(1)
+		.max(50),
+});
+
+export const tweetScoresResponseSchema = z.object({
+	ok: z.literal(true),
+	scores: z.array(tweetQualityScoreSchema),
+});
+
+export type TweetScoresRequest = z.infer<typeof tweetScoresRequestSchema>;
+export type TweetScoresResponse = z.infer<typeof tweetScoresResponseSchema>;
 
 const blockItemSchema = z.object({
 	accountId: z.string(),

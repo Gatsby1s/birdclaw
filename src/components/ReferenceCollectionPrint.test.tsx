@@ -57,4 +57,36 @@ describe("reference collection print", () => {
 			),
 		).toBeInTheDocument();
 	});
+
+	it("prints only the numeric score beside a referenced tweet author", () => {
+		render(
+			<ReferenceCollectionPrint
+				coverTitle="Reference collection"
+				documentSummary="Summary"
+				documentTitle="Document"
+				groups={[
+					{
+						section: "Sources",
+						title: "Topic",
+						summary: "Topic summary",
+						tweetIds: ["tweet_1"],
+					},
+				]}
+				metadata={[]}
+				scores={{ "1": 8 }}
+				testId="scored-reference-collection"
+				tweets={[tweet]}
+			/>,
+		);
+
+		const collection = within(
+			screen.getByTestId("scored-reference-collection"),
+		);
+		expect(
+			collection.getByText("8", { selector: ".today-reference-score" }),
+		).toBeInTheDocument();
+		expect(collection.queryByText("评分依据")).toBeNull();
+		expect(collection.queryByText("判断理由")).toBeNull();
+		expect(collection.queryByText("通俗解释")).toBeNull();
+	});
 });

@@ -1391,6 +1391,51 @@ const definitions = {
 			columns: ["provider", "usage_day", "downloaded_count", "updated_at"],
 		},
 	},
+	tweet_quality_scores: {
+		exportSql: `
+      select tweet_id, provider, model, score, label, dimensions_json,
+        sentiment, assets_json, reason, explanation, content_hash, updated_at
+      from tweet_quality_scores
+      order by tweet_id
+    `,
+		...fixedShard("data/tweet-quality-scores.jsonl", "tweet_quality_scores"),
+		merge: {
+			order: 29,
+			sql: `
+      insert into tweet_quality_scores (
+        tweet_id, provider, model, score, label, dimensions_json, sentiment,
+        assets_json, reason, explanation, content_hash, updated_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict(tweet_id) do update set
+        provider = excluded.provider,
+        model = excluded.model,
+        score = excluded.score,
+        label = excluded.label,
+        dimensions_json = excluded.dimensions_json,
+        sentiment = excluded.sentiment,
+        assets_json = excluded.assets_json,
+        reason = excluded.reason,
+        explanation = excluded.explanation,
+        content_hash = excluded.content_hash,
+        updated_at = excluded.updated_at
+      where excluded.updated_at >= tweet_quality_scores.updated_at
+      `,
+			columns: [
+				"tweet_id",
+				"provider",
+				"model",
+				"score",
+				"label",
+				"dimensions_json",
+				"sentiment",
+				"assets_json",
+				"reason",
+				"explanation",
+				"content_hash",
+				"updated_at",
+			],
+		},
+	},
 } as const satisfies Record<string, BackupTableCodecDefinition>;
 
 export type BackupTableName = keyof typeof definitions;

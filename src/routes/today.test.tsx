@@ -14,6 +14,14 @@ import { ndjsonResponse } from "#/test/ndjson";
 import { renderWithQueryClient as render } from "#/test/render";
 import { TodayRouteView as TodayRoute } from "./today";
 
+const { fetchTweetScoresMock } = vi.hoisted(() => ({
+	fetchTweetScoresMock: vi.fn(),
+}));
+
+vi.mock("#/lib/tweet-score-client", () => ({
+	fetchTweetScores: fetchTweetScoresMock,
+}));
+
 const authorProfile = {
 	id: "profile_alice",
 	handle: "alice",
@@ -145,6 +153,27 @@ function digestResult(label: string, markdown: string, includeDms = false) {
 describe("today route", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
+		fetchTweetScoresMock.mockReset();
+		fetchTweetScoresMock.mockResolvedValue([
+			{
+				tweetId: "tweet_1",
+				score: 8,
+				label: "高信息价值",
+				dimensions: {
+					informationDelta: 4,
+					clearThesis: 2,
+					explainedMechanism: 1,
+					verifiability: 1,
+					clearBoundaries: 0,
+				},
+				sentiment: "positive",
+				assets: ["股票"],
+				reason: "有新信息。",
+				explanation: "这是通俗解释。",
+				updatedAt: "2026-08-12T08:00:00.000Z",
+				cached: false,
+			},
+		]);
 	});
 
 	afterEach(() => {
@@ -525,6 +554,14 @@ describe("today route", () => {
 				expect(document.body.dataset.todayPrintMode).toBe("reference");
 				const referencePdf = screen.getByTestId("today-reference-pdf");
 				const referenceText = referencePdf.textContent ?? "";
+				const printedScores = referencePdf.querySelectorAll(
+					".today-reference-score",
+				);
+				expect(printedScores).toHaveLength(1);
+				expect(printedScores[0]).toHaveTextContent(/^8$/);
+				expect(referenceText).not.toContain("评分依据");
+				expect(referenceText).not.toContain("判断理由");
+				expect(referenceText).not.toContain("通俗解释");
 				const mediaGrid = referencePdf.querySelector(
 					".today-reference-media-grid",
 				);

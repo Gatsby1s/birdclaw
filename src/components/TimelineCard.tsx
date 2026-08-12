@@ -23,6 +23,7 @@ import {
 import { formatCompactNumber } from "#/lib/present";
 import { exportReferenceCollectionPdf } from "#/lib/pdf-export-client";
 import { queryKeys } from "#/lib/query-client";
+import { requestTweetScore } from "#/lib/tweet-score-client";
 import { shouldAutoTranslateTweetText } from "#/lib/tweet-language";
 import {
 	isTweetArticleUrlEntity,
@@ -69,6 +70,7 @@ import { SmartTimestamp } from "./SmartTimestamp";
 import { TweetArticleCard } from "./TweetArticleCard";
 import { TweetMediaGrid } from "./TweetMediaGrid";
 import { TweetRichText } from "./TweetRichText";
+import { TweetScoreBadge } from "./TweetScoreBadge";
 import { XRemarkAnnotationCard } from "./XRemarkAnnotation";
 
 let activeTimelinePrintSourceId: string | null = null;
@@ -480,6 +482,28 @@ export function TimelineCard({
 		staleTime: Number.POSITIVE_INFINITY,
 		retry: false,
 	});
+	const scoreQuery = useQuery({
+		queryKey: [
+			"tweet-score",
+			presentedTweet.id,
+			presentedTweet.text,
+			presentedTweet.createdAt,
+		],
+		queryFn: () =>
+			requestTweetScore({
+				tweetId: presentedTweet.id,
+				text: presentedTweet.text,
+				createdAt: presentedTweet.createdAt,
+				author: {
+					handle: presentedTweet.author.handle,
+					displayName: presentedTweet.author.displayName,
+					bio: presentedTweet.author.bio,
+				},
+			}),
+		enabled: translationViewport.nearViewport,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+	});
 	useEffect(() => {
 		setShowTranslation(true);
 	}, [presentedTweet.id, presentedTweet.text]);
@@ -622,19 +646,26 @@ export function TimelineCard({
 				conversation.toggle();
 			}}
 		>
-			<ProfilePreview
-				className="h-fit"
-				profile={displayAuthor}
-				triggerAriaLabel={`View @${displayAuthor.handle} local posts`}
-				triggerClassName="rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-			>
-				<AvatarChip
-					avatarUrl={displayAuthor.avatarUrl}
-					hue={displayAuthor.avatarHue}
-					name={displayAuthor.displayName}
-					profileId={displayAuthor.id}
-				/>
-			</ProfilePreview>
+			<div className="flex w-11 shrink-0 flex-col items-center gap-3">
+				<ProfilePreview
+					className="h-fit"
+					profile={displayAuthor}
+					triggerAriaLabel={`View @${displayAuthor.handle} local posts`}
+					triggerClassName="rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+				>
+					<AvatarChip
+						avatarUrl={displayAuthor.avatarUrl}
+						hue={displayAuthor.avatarHue}
+						name={displayAuthor.displayName}
+						profileId={displayAuthor.id}
+					/>
+				</ProfilePreview>
+				{scoreQuery.data ? (
+					<TweetScoreBadge score={scoreQuery.data} />
+				) : (
+					<span aria-hidden="true" className="size-11" />
+				)}
+			</div>
 			<div className={feedRowBodyClass}>
 				{item.retweetedTweet ? (
 					<div className="inline-flex items-center gap-2 text-[13px] font-medium text-[var(--ink-soft)]">
