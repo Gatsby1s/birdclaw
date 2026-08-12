@@ -57,6 +57,13 @@ function sessionId() {
 		: `special-follow-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function samePositionCandidate(
+	left: { id: string; pixelOffset: number } | null,
+	right: { id: string; pixelOffset: number },
+) {
+	return left?.id === right.id && left.pixelOffset === right.pixelOffset;
+}
+
 function visibleFeedTop(container: HTMLElement | null) {
 	if (!container || typeof window === "undefined") return 0;
 	const header = container.querySelector<HTMLElement>("header");
@@ -131,6 +138,10 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		null,
 	);
 	const pendingRef = useRef<{ id: string; pixelOffset: number } | null>(null);
+	const keepaliveCandidateRef = useRef<{
+		id: string;
+		pixelOffset: number;
+	} | null>(null);
 	const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const saveChainRef = useRef(Promise.resolve());
 	const loadingNewerRef = useRef(false);
@@ -397,6 +408,7 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 				expectedRevision: revisionRef.current,
 			};
 			if (keepalive) {
+				keepaliveCandidateRef.current = candidate;
 				void fetch("/api/special-follow-position", {
 					method: "PATCH",
 					headers: { "content-type": "application/json" },
@@ -406,13 +418,33 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 				pendingRef.current = null;
 				return;
 			}
+			keepaliveCandidateRef.current = null;
 			saveChainRef.current = saveChainRef.current
 				.then(async () => {
-					const result = await savePosition({
+					let savedCandidate = candidate;
+					let result = await savePosition({
 						...body,
 						expectedRevision: revisionRef.current,
 					});
 					revisionRef.current = result.position?.revision ?? 0;
+					if (result.conflict) {
+						const retryCandidate =
+							sequenceRef.current === body.clientSequence &&
+							samePositionCandidate(pendingRef.current, candidate)
+								? candidate
+								: keepaliveCandidateRef.current;
+						if (retryCandidate) {
+							savedCandidate = retryCandidate;
+							result = await savePosition({
+								...body,
+								anchorTweetId: retryCandidate.id,
+								pixelOffset: retryCandidate.pixelOffset,
+								clientSequence: ++sequenceRef.current,
+								expectedRevision: revisionRef.current,
+							});
+							revisionRef.current = result.position?.revision ?? 0;
+						}
+					}
 					if (result.conflict) {
 						lastPersistedRef.current = result.position
 							? {
@@ -420,12 +452,34 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 									pixelOffset: result.position.pixelOffset,
 								}
 							: null;
-						pendingRef.current = null;
+						if (samePositionCandidate(pendingRef.current, savedCandidate)) {
+							pendingRef.current = null;
+						}
+						if (
+							samePositionCandidate(
+								keepaliveCandidateRef.current,
+								savedCandidate,
+							)
+						) {
+							keepaliveCandidateRef.current = null;
+						}
 						return;
 					}
-					lastPersistedRef.current = candidate;
-					if (pendingRef.current?.id === candidate.id) {
+					lastPersistedRef.current = result.applied
+						? savedCandidate
+						: result.position
+							? {
+									id: result.position.anchorTweetId,
+									pixelOffset: result.position.pixelOffset,
+								}
+							: null;
+					if (samePositionCandidate(pendingRef.current, savedCandidate)) {
 						pendingRef.current = null;
+					}
+					if (
+						samePositionCandidate(keepaliveCandidateRef.current, savedCandidate)
+					) {
+						keepaliveCandidateRef.current = null;
 					}
 					setSaveError(null);
 					queryClient.setQueryData(

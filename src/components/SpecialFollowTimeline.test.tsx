@@ -394,7 +394,7 @@ describe("SpecialFollowTimeline", () => {
 		).not.toBeInTheDocument();
 	});
 
-	it("persists only after a real reading interaction, with a bounded cadence", async () => {
+	it("persists after real reading and retries one cross-device conflict", async () => {
 		const patchBodies: Array<Record<string, unknown>> = [];
 		const fetchMock = vi.fn(
 			async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -407,6 +407,27 @@ describe("SpecialFollowTimeline", () => {
 							unknown
 						>;
 						patchBodies.push(body);
+						if (patchBodies.length === 1) {
+							return Response.json(
+								{
+									ok: false,
+									applied: false,
+									conflict: true,
+									accountId: "acct_primary",
+									viewKey: "special-follow",
+									position: {
+										anchorTweetId: "remote-anchor",
+										anchorCreatedAt: "2026-08-12T00:00:00.000Z",
+										pixelOffset: 12,
+										clientSessionId: "device-b",
+										clientSequence: 9,
+										revision: 7,
+										updatedAt: "2026-08-13T00:00:00.000Z",
+									},
+								},
+								{ status: 409 },
+							);
+						}
 						return Response.json({
 							ok: true,
 							applied: true,
@@ -418,7 +439,7 @@ describe("SpecialFollowTimeline", () => {
 								pixelOffset: body.pixelOffset,
 								clientSessionId: body.clientSessionId,
 								clientSequence: body.clientSequence,
-								revision: 1,
+								revision: 8,
 								updatedAt: "2026-08-13T00:00:00.000Z",
 							},
 						});
@@ -473,7 +494,7 @@ describe("SpecialFollowTimeline", () => {
 		fireEvent.wheel(window);
 		fireEvent.scroll(window);
 
-		await waitFor(() => expect(patchBodies).toHaveLength(1), {
+		await waitFor(() => expect(patchBodies).toHaveLength(2), {
 			timeout: 4_000,
 		});
 		expect(patchBodies[0]).toMatchObject({
@@ -482,6 +503,278 @@ describe("SpecialFollowTimeline", () => {
 			pixelOffset: 36,
 			expectedRevision: 0,
 		});
+		expect(patchBodies[1]).toMatchObject({
+			accountId: "acct_primary",
+			anchorTweetId: "anchor",
+			pixelOffset: 36,
+			expectedRevision: 7,
+		});
+		expect(patchBodies[1].clientSequence).not.toBe(
+			patchBodies[0].clientSequence,
+		);
+	});
+
+	it("lets a newer queued reading position win an older request conflict", async () => {
+		const patchBodies: Array<Record<string, unknown>> = [];
+		let scrollOffset = 0;
+		let resolveFirstPatch!: (response: Response) => void;
+		const firstPatch = new Promise<Response>((resolve) => {
+			resolveFirstPatch = resolve;
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/status") return status();
+				if (url.pathname === "/api/special-follow-position") {
+					if (init?.method === "PATCH") {
+						const body = JSON.parse(String(init.body)) as Record<
+							string,
+							unknown
+						>;
+						patchBodies.push(body);
+						if (patchBodies.length === 1) return firstPatch;
+						return Response.json({
+							ok: true,
+							applied: true,
+							accountId: "acct_primary",
+							viewKey: "special-follow",
+							position: {
+								anchorTweetId: body.anchorTweetId,
+								anchorCreatedAt: "2026-08-12T00:00:00.000Z",
+								pixelOffset: body.pixelOffset,
+								clientSessionId: body.clientSessionId,
+								clientSequence: body.clientSequence,
+								revision: 8,
+								updatedAt: "2026-08-13T00:00:00.000Z",
+							},
+						});
+					}
+					return Response.json({
+						accountId: "acct_primary",
+						viewKey: "special-follow",
+						position: null,
+					});
+				}
+				if (url.pathname === "/api/special-follow-feed") {
+					return Response.json({
+						items: [
+							item("a", "first reading post", "2026-08-13T01:00:00.000Z"),
+							item("b", "later reading post", "2026-08-13T00:00:00.000Z"),
+						],
+						specialFollowProfileCount: 1,
+						page: {
+							mode: "resume",
+							hasNewer: false,
+							hasOlder: false,
+							newerCursor: null,
+							olderCursor: null,
+							restore: null,
+						},
+					});
+				}
+				throw new Error(`Unexpected fetch ${url.pathname}`);
+			}),
+		);
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+			function (this: HTMLElement) {
+				const id = this.dataset.specialFollowAnchor;
+				const baseTop = id === "a" ? 100 : id === "b" ? 300 : 0;
+				const top = this.tagName === "HEADER" ? 0 : baseTop - scrollOffset;
+				const bottom = this.tagName === "HEADER" ? 0 : top + 200;
+				return {
+					x: 0,
+					y: top,
+					top,
+					left: 0,
+					right: 680,
+					bottom,
+					width: 680,
+					height: bottom - top,
+					toJSON: () => ({}),
+				};
+			},
+		);
+
+		render(<SpecialFollowTimeline viewTabs={<div>views</div>} />);
+		expect(await screen.findByText("first reading post")).toBeInTheDocument();
+		fireEvent.wheel(window);
+		fireEvent.scroll(window);
+		await waitFor(() => expect(patchBodies).toHaveLength(1), {
+			timeout: 4_000,
+		});
+
+		scrollOffset = 300;
+		fireEvent.scroll(window);
+		await new Promise((resolve) => setTimeout(resolve, 2_200));
+		expect(patchBodies).toHaveLength(1);
+		await act(async () => {
+			resolveFirstPatch(
+				Response.json(
+					{
+						ok: false,
+						applied: false,
+						conflict: true,
+						accountId: "acct_primary",
+						viewKey: "special-follow",
+						position: {
+							anchorTweetId: "remote",
+							anchorCreatedAt: "2026-08-12T00:00:00.000Z",
+							pixelOffset: 10,
+							clientSessionId: "device-b",
+							clientSequence: 9,
+							revision: 7,
+							updatedAt: "2026-08-13T00:00:00.000Z",
+						},
+					},
+					{ status: 409 },
+				),
+			);
+		});
+		await waitFor(() => expect(patchBodies).toHaveLength(2));
+		expect(patchBodies[0].anchorTweetId).toBe("a");
+		expect(patchBodies[1]).toMatchObject({
+			anchorTweetId: "b",
+			pixelOffset: 0,
+			expectedRevision: 7,
+		});
+		expect(Number(patchBodies[1].clientSequence)).toBeGreaterThan(
+			Number(patchBodies[0].clientSequence),
+		);
+	});
+
+	it("retries the latest pagehide position instead of an older in-flight save", async () => {
+		const patchBodies: Array<Record<string, unknown>> = [];
+		let scrollOffset = 0;
+		let resolveFirstPatch!: (response: Response) => void;
+		const firstPatch = new Promise<Response>((resolve) => {
+			resolveFirstPatch = resolve;
+		});
+		const conflictResponse = () =>
+			Response.json(
+				{
+					ok: false,
+					applied: false,
+					conflict: true,
+					accountId: "acct_primary",
+					viewKey: "special-follow",
+					position: {
+						anchorTweetId: "remote",
+						anchorCreatedAt: "2026-08-12T00:00:00.000Z",
+						pixelOffset: 10,
+						clientSessionId: "device-b",
+						clientSequence: 9,
+						revision: 7,
+						updatedAt: "2026-08-13T00:00:00.000Z",
+					},
+				},
+				{ status: 409 },
+			);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/status") return status();
+				if (url.pathname === "/api/special-follow-position") {
+					if (init?.method === "PATCH") {
+						const body = JSON.parse(String(init.body)) as Record<
+							string,
+							unknown
+						>;
+						patchBodies.push(body);
+						if (patchBodies.length === 1) return firstPatch;
+						if (patchBodies.length === 2) return conflictResponse();
+						return Response.json({
+							ok: true,
+							applied: true,
+							accountId: "acct_primary",
+							viewKey: "special-follow",
+							position: {
+								anchorTweetId: body.anchorTweetId,
+								anchorCreatedAt: "2026-08-12T00:00:00.000Z",
+								pixelOffset: body.pixelOffset,
+								clientSessionId: body.clientSessionId,
+								clientSequence: body.clientSequence,
+								revision: 8,
+								updatedAt: "2026-08-13T00:00:00.000Z",
+							},
+						});
+					}
+					return Response.json({
+						accountId: "acct_primary",
+						viewKey: "special-follow",
+						position: null,
+					});
+				}
+				if (url.pathname === "/api/special-follow-feed") {
+					return Response.json({
+						items: [
+							item("a", "pagehide first post", "2026-08-13T01:00:00.000Z"),
+							item("b", "pagehide latest post", "2026-08-13T00:00:00.000Z"),
+						],
+						specialFollowProfileCount: 1,
+						page: {
+							mode: "resume",
+							hasNewer: false,
+							hasOlder: false,
+							newerCursor: null,
+							olderCursor: null,
+							restore: null,
+						},
+					});
+				}
+				throw new Error(`Unexpected fetch ${url.pathname}`);
+			}),
+		);
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+			function (this: HTMLElement) {
+				const id = this.dataset.specialFollowAnchor;
+				const baseTop = id === "a" ? 100 : id === "b" ? 300 : 0;
+				const top = this.tagName === "HEADER" ? 0 : baseTop - scrollOffset;
+				const bottom = this.tagName === "HEADER" ? 0 : top + 200;
+				return {
+					x: 0,
+					y: top,
+					top,
+					left: 0,
+					right: 680,
+					bottom,
+					width: 680,
+					height: bottom - top,
+					toJSON: () => ({}),
+				};
+			},
+		);
+
+		render(<SpecialFollowTimeline viewTabs={<div>views</div>} />);
+		expect(await screen.findByText("pagehide first post")).toBeInTheDocument();
+		fireEvent.wheel(window);
+		fireEvent.scroll(window);
+		await waitFor(() => expect(patchBodies).toHaveLength(1), {
+			timeout: 4_000,
+		});
+
+		scrollOffset = 300;
+		fireEvent.scroll(window);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		fireEvent(window, new Event("pagehide"));
+		await waitFor(() => expect(patchBodies).toHaveLength(2));
+		expect(patchBodies[1]).toMatchObject({
+			anchorTweetId: "b",
+			pixelOffset: 0,
+		});
+		await act(async () => {
+			resolveFirstPatch(conflictResponse());
+		});
+		await waitFor(() => expect(patchBodies).toHaveLength(3));
+		expect(patchBodies[2]).toMatchObject({
+			anchorTweetId: "b",
+			pixelOffset: 0,
+			expectedRevision: 7,
+		});
+		expect(Number(patchBodies[2].clientSequence)).toBeGreaterThan(
+			Number(patchBodies[1].clientSequence),
+		);
 	});
 
 	it("waits for the fresh cloud window before restoring a remounted cached feed", async () => {
