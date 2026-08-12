@@ -34,6 +34,7 @@ import {
 	exportCurrentPdf,
 	exportReferenceCollectionPdf,
 } from "#/lib/pdf-export-client";
+import { fetchTweetScores } from "#/lib/tweet-score-client";
 import {
 	hydrateProfileHandles,
 	normalizeProfileHydrationHandle as normalizeHandle,
@@ -547,11 +548,13 @@ function ReferenceTweetCard({
 	anchorId,
 	includeMedia,
 	label,
+	score,
 	tweet,
 }: {
 	anchorId?: string;
 	includeMedia: boolean;
 	label: string;
+	score?: number;
 	tweet: ReferenceTweet | null;
 }) {
 	if (!tweet) {
@@ -572,7 +575,10 @@ function ReferenceTweetCard({
 			<div className="today-reference-source-head" id={anchorId}>
 				<span className="today-reference-badge">{label}</span>
 				<strong className="today-reference-author">
-					{formatReferenceAuthor(tweet)}
+					<span>{formatReferenceAuthor(tweet)}</span>
+					{score === undefined ? null : (
+						<span className="today-reference-score">{score}</span>
+					)}
 				</strong>
 				{tweet.createdAt ? (
 					<time dateTime={tweet.createdAt}>
@@ -620,10 +626,12 @@ function ReferenceDigestPrint({
 	generatedAt,
 	markdown,
 	result,
+	scores,
 }: {
 	generatedAt: string | null;
 	markdown: string;
 	result: PeriodDigestRunResult;
+	scores: Record<string, number>;
 }) {
 	const groups = collectReferenceGroups(result, markdown);
 	const documentMeta = markdownReferenceDocumentMeta(
@@ -827,6 +835,7 @@ function ReferenceDigestPrint({
 										includeMedia={firstOccurrence}
 										key={normalized}
 										label={label}
+										score={scores[normalized]}
 										tweet={referenceTweetFor(tweetLookup, tweetId)}
 									/>
 								);
@@ -1369,6 +1378,12 @@ export function TodayRouteView({
 			})
 		: null;
 	const [referencePdfActive, setReferencePdfActive] = useState(false);
+	const [referencePdfError, setReferencePdfError] = useState<string | null>(
+		null,
+	);
+	const [referenceScores, setReferenceScores] = useState<
+		Record<string, number>
+	>({});
 	const refreshAfterHistoryRef = useRef(false);
 	const handleExportPdf = useCallback(() => {
 		if (!canExportPdf) return;
@@ -1377,22 +1392,69 @@ export function TodayRouteView({
 	const handleExportReferencePdf = useCallback(() => {
 		if (!canExportReferencePdf || !result || referencePdfActive) return;
 		flushSync(() => setReferencePdfActive(true));
-		if (
-			typeof CSS === "undefined" ||
-			typeof CSS.supports !== "function" ||
-			!CSS.supports("page", "reference")
-		) {
-			exportCurrentPdf(referenceExportTitle, "reference", () =>
-				setReferencePdfActive(false),
-			);
-			return;
-		}
-		void exportReferenceCollectionPdf({
-			title: referenceExportTitle,
-			sourceSelector: '[data-testid="today-reference-pdf"]',
-			onCleanup: () => setReferencePdfActive(false),
-		});
-	}, [canExportReferencePdf, referenceExportTitle, referencePdfActive, result]);
+		setReferencePdfError(null);
+		void (async () => {
+			try {
+				const groups = collectReferenceGroups(result, displayMarkdown);
+				const lookup = buildReferenceTweetLookup(result.context);
+				const tweets = [
+					...new Map(
+						groups
+							.flatMap((group) => group.tweetIds)
+							.map((tweetId) => referenceTweetFor(lookup, tweetId))
+							.filter((tweet): tweet is ReferenceTweet => Boolean(tweet))
+							.map((tweet) => [normalizeReferenceTweetId(tweet.id), tweet]),
+					).values(),
+				];
+				const scores = await fetchTweetScores(
+					tweets.map((tweet) => ({
+						tweetId: tweet.id,
+						text: tweet.text,
+						createdAt: tweet.createdAt,
+						author: {
+							handle: tweet.author,
+							displayName: tweet.name,
+							bio: tweet.authorProfile.bio,
+						},
+					})),
+				);
+				flushSync(() =>
+					setReferenceScores(
+						Object.fromEntries(
+							scores.map((score) => [
+								normalizeReferenceTweetId(score.tweetId),
+								score.score,
+							]),
+						),
+					),
+				);
+				if (
+					typeof CSS === "undefined" ||
+					typeof CSS.supports !== "function" ||
+					!CSS.supports("page", "reference")
+				) {
+					exportCurrentPdf(referenceExportTitle, "reference", () =>
+						setReferencePdfActive(false),
+					);
+					return;
+				}
+				await exportReferenceCollectionPdf({
+					title: referenceExportTitle,
+					sourceSelector: '[data-testid="today-reference-pdf"]',
+					onCleanup: () => setReferencePdfActive(false),
+				});
+			} catch {
+				setReferencePdfError("评分暂时不可用，完整 PDF 未导出");
+				setReferencePdfActive(false);
+			}
+		})();
+	}, [
+		canExportReferencePdf,
+		displayMarkdown,
+		referenceExportTitle,
+		referencePdfActive,
+		result,
+	]);
 	const handleRefreshDigest = useCallback(() => {
 		if (activeHistoryId) {
 			refreshAfterHistoryRef.current = true;
@@ -1545,7 +1607,7 @@ export function TodayRouteView({
 					</div>
 				</header>
 
-				{error || historyRestoreError ? (
+				{error || historyRestoreError || referencePdfError ? (
 					<div
 						className={cx(
 							errorCopyClass,
@@ -1553,10 +1615,14 @@ export function TodayRouteView({
 						)}
 						role="alert"
 					>
-						<span>{error ?? historyRestoreError}</span>
+						<span>{error ?? historyRestoreError ?? referencePdfError}</span>
 						<button
 							className="shrink-0 font-semibold underline underline-offset-2"
-							onClick={handleRefreshDigest}
+							onClick={
+								referencePdfError
+									? handleExportReferencePdf
+									: handleRefreshDigest
+							}
 							type="button"
 						>
 							Retry
@@ -1594,6 +1660,7 @@ export function TodayRouteView({
 						generatedAt={referenceGeneratedAt}
 						markdown={displayMarkdown}
 						result={result}
+						scores={referenceScores}
 					/>
 				) : null}
 

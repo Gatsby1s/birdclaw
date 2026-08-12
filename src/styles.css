@@ -742,7 +742,17 @@ html.theme-transition::view-transition-new(theme) {
 		color: #111827 !important;
 		font-size: 10.8pt;
 		font-weight: 600;
+		gap: 2mm;
+		justify-content: space-between;
 		line-height: 1.35;
+	}
+
+	.today-reference-score {
+		color: #0369a1 !important;
+		font-size: 12pt;
+		font-variant-numeric: tabular-nums;
+		font-weight: 700;
+		line-height: 1;
 	}
 
 	.today-reference-source-head time {

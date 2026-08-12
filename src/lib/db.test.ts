@@ -463,7 +463,7 @@ describe("database init", () => {
 				.all()
 				.map((column) => (column as { name: string }).name),
 		).toContain("format_version");
-		expect(db.pragma("user_version", { simple: true })).toBe(15);
+		expect(db.pragma("user_version", { simple: true })).toBe(16);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -492,7 +492,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(15);
+		expect(db.pragma("user_version", { simple: true })).toBe(16);
 	});
 
 	it("migrates v12 profile notes without overriding imported descriptions", () => {
@@ -529,7 +529,7 @@ describe("database init", () => {
 				)
 				.get(),
 		).toEqual({ remark: "Legacy local remark", description: null });
-		expect(db.pragma("user_version", { simple: true })).toBe(15);
+		expect(db.pragma("user_version", { simple: true })).toBe(16);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

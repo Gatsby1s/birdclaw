@@ -53,6 +53,7 @@ interface ReferenceCollectionPrintProps {
 	insights?: ReferenceCollectionInsight[];
 	sectionLabels?: Record<string, string>;
 	sectionNotes?: Record<string, string>;
+	scores?: Record<string, number>;
 	testId: string;
 }
 
@@ -125,12 +126,14 @@ function ReferenceTweetCard({
 	includeMedia,
 	includeQuotedTweet = false,
 	label,
+	score,
 	tweet,
 }: {
 	anchorId?: string;
 	includeMedia: boolean;
 	includeQuotedTweet?: boolean;
 	label: string;
+	score?: number;
 	tweet: ReferenceCollectionTweet | null;
 }) {
 	if (!tweet) {
@@ -151,7 +154,10 @@ function ReferenceTweetCard({
 			<div className="today-reference-source-head" id={anchorId}>
 				<span className="today-reference-badge">{label}</span>
 				<strong className="today-reference-author">
-					{formatAuthor(tweet)}
+					<span>{formatAuthor(tweet)}</span>
+					{score === undefined ? null : (
+						<span className="today-reference-score">{score}</span>
+					)}
 				</strong>
 				{tweet.createdAt ? (
 					<time dateTime={tweet.createdAt}>
@@ -241,6 +247,7 @@ export function ReferenceCollectionPrint({
 	insights = [],
 	sectionLabels = {},
 	sectionNotes = {},
+	scores = {},
 	testId,
 }: ReferenceCollectionPrintProps) {
 	const sections: Array<{
@@ -298,6 +305,13 @@ export function ReferenceCollectionPrint({
 		group.tweetIds
 			.map((tweetId) => labelsById.get(normalizeTweetId(tweetId)))
 			.filter((label): label is string => Boolean(label));
+	const scoreFor = (tweetId: string) => {
+		for (const key of tweetLookupKeys(tweetId)) {
+			const score = scores[key];
+			if (score !== undefined) return score;
+		}
+		return undefined;
+	};
 
 	return (
 		<article
@@ -479,6 +493,7 @@ export function ReferenceCollectionPrint({
 										includeMedia={firstOccurrence}
 										key={`${groupAnchors.get(group) ?? group.title}-${normalized}`}
 										label={label}
+										score={scoreFor(tweetId)}
 										tweet={tweetFor(tweetLookup, tweetId)}
 									/>
 								);

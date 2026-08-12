@@ -14,6 +14,14 @@ import type { TweetMediaItem } from "#/lib/types";
 import { ndjsonResponse } from "#/test/ndjson";
 import { DiscussRouteView as DiscussRoute } from "./discuss";
 
+const { fetchTweetScoresMock } = vi.hoisted(() => ({
+	fetchTweetScoresMock: vi.fn(),
+}));
+
+vi.mock("#/lib/tweet-score-client", () => ({
+	fetchTweetScores: fetchTweetScoresMock,
+}));
+
 function referenceTimestamp(value: string) {
 	const date = new Date(value);
 	return `${date.toLocaleDateString("sv-SE")} ${date.toLocaleTimeString(
@@ -137,6 +145,27 @@ function historyMetadataBase(id: string) {
 describe("discuss route", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
+		fetchTweetScoresMock.mockReset();
+		fetchTweetScoresMock.mockResolvedValue([
+			{
+				tweetId: "tweet_1",
+				score: 8,
+				label: "高信息价值",
+				dimensions: {
+					informationDelta: 4,
+					clearThesis: 2,
+					explainedMechanism: 1,
+					verifiability: 1,
+					clearBoundaries: 0,
+				},
+				sentiment: "positive",
+				assets: ["股票"],
+				reason: "有新信息。",
+				explanation: "这是通俗解释。",
+				updatedAt: "2026-08-12T08:00:00.000Z",
+				cached: false,
+			},
+		]);
 	});
 
 	afterEach(() => {
@@ -643,6 +672,16 @@ describe("discuss route", () => {
 				);
 				expect(document.body.dataset.todayPrintMode).toBe("reference");
 				const referencePdf = screen.getByTestId("discuss-reference-pdf");
+				const printedScores = [
+					...referencePdf.querySelectorAll(".today-reference-score"),
+				];
+				expect(printedScores.length).toBeGreaterThan(0);
+				for (const printedScore of printedScores) {
+					expect(printedScore).toHaveTextContent(/^8$/);
+				}
+				expect(referencePdf).not.toHaveTextContent("评分依据");
+				expect(referencePdf).not.toHaveTextContent("判断理由");
+				expect(referencePdf).not.toHaveTextContent("通俗解释");
 				const mediaGrid = referencePdf.querySelector(
 					".today-reference-media-pair",
 				);
@@ -812,7 +851,7 @@ describe("discuss route", () => {
 		expect(discussionRequests).toHaveLength(1);
 		fireEvent.click(screen.getByRole("button", { name: "导出完整 PDF" }));
 
-		expect(printMock).toHaveBeenCalledTimes(1);
+		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
 		expect(discussionRequests).toHaveLength(1);
 		expect(document.title).toBe("birdclaw");
 		expect(document.body.dataset.todayPrintMode).toBeUndefined();

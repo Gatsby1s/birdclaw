@@ -14,9 +14,15 @@ import { TimelineCard } from "./TimelineCard";
 const { exportReferenceCollectionPdfMock } = vi.hoisted(() => ({
 	exportReferenceCollectionPdfMock: vi.fn(),
 }));
+const { requestTweetScoreMock } = vi.hoisted(() => ({
+	requestTweetScoreMock: vi.fn(() => new Promise(() => {})),
+}));
 
 vi.mock("#/lib/pdf-export-client", () => ({
 	exportReferenceCollectionPdf: exportReferenceCollectionPdfMock,
+}));
+vi.mock("#/lib/tweet-score-client", () => ({
+	requestTweetScore: requestTweetScoreMock,
 }));
 
 function render(ui: ReactNode) {
@@ -130,6 +136,8 @@ describe("TimelineCard", () => {
 	afterEach(() => {
 		cleanup();
 		exportReferenceCollectionPdfMock.mockReset();
+		requestTweetScoreMock.mockReset();
+		requestTweetScoreMock.mockImplementation(() => new Promise(() => {}));
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
 	});
@@ -459,6 +467,68 @@ describe("TimelineCard", () => {
 		expect(
 			screen.getByRole("group", { name: "Sam Altman profile preview" }),
 		).toBeInTheDocument();
+	});
+
+	it("places the numeric score in the avatar column", async () => {
+		class VisibleIntersectionObserver {
+			private readonly callback: IntersectionObserverCallback;
+
+			constructor(callback: IntersectionObserverCallback) {
+				this.callback = callback;
+			}
+
+			observe(element: Element) {
+				this.callback(
+					[
+						{
+							isIntersecting: true,
+							target: element,
+						} as IntersectionObserverEntry,
+					],
+					this as unknown as IntersectionObserver,
+				);
+			}
+
+			disconnect() {}
+			unobserve() {}
+			takeRecords() {
+				return [];
+			}
+			root = null;
+			rootMargin = "0px";
+			thresholds = [0];
+		}
+		vi.stubGlobal("IntersectionObserver", VisibleIntersectionObserver);
+		requestTweetScoreMock.mockResolvedValue({
+			tweetId: "tweet_1",
+			score: 8,
+			label: "高信息价值",
+			dimensions: {
+				informationDelta: 4,
+				clearThesis: 2,
+				explainedMechanism: 1,
+				verifiability: 1,
+				clearBoundaries: 0,
+			},
+			sentiment: "positive",
+			assets: ["股票"],
+			reason: "有明确的新信息。",
+			explanation: "作者给出了事实和结论。",
+			updatedAt: "2026-08-12T08:00:00.000Z",
+			cached: false,
+		});
+
+		render(<TimelineCard item={item} onReply={vi.fn()} />);
+		const avatar = screen.getByRole("link", {
+			name: "View @sam local posts",
+		});
+		const scoreButton = await screen.findByRole("button", {
+			name: /帖子评分 8 分/,
+		});
+		const avatarColumn = avatar.parentElement?.parentElement;
+		expect(avatarColumn).toContainElement(scoreButton);
+		expect(avatarColumn).toHaveClass("flex-col", "gap-3");
+		expect(scoreButton).toHaveTextContent(/^8$/);
 	});
 
 	it("uses the author homepage for identity links and keeps explicit analysis links direct", () => {

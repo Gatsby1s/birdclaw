@@ -84,6 +84,45 @@ describe("floating preview placement", () => {
 		expect(position.left).toBe(12);
 	});
 
+	it("places score details to the right of the avatar when room is available", () => {
+		const position = __test__.calculatePreviewPosition({
+			referenceRects: [
+				{ top: 180, right: 80, bottom: 212, left: 40, width: 40, height: 32 },
+			],
+			floatingWidth: 420,
+			floatingHeight: 360,
+			viewport,
+			placement: "right",
+		});
+
+		expect(position.side).toBe("right");
+		expect(position.left).toBe(90);
+		expect(position.top).toBe(16);
+		expect(position.maxWidth).toBe(698);
+	});
+
+	it("falls back above or below on a narrow mobile viewport", () => {
+		const position = __test__.calculatePreviewPosition({
+			referenceRects: [
+				{ top: 100, right: 52, bottom: 132, left: 12, width: 40, height: 32 },
+			],
+			floatingWidth: 420,
+			floatingHeight: 360,
+			viewport: {
+				...viewport,
+				right: 320,
+				bottom: 640,
+				width: 320,
+				height: 640,
+			},
+			placement: "right",
+		});
+
+		expect(position.side).toBe("bottom");
+		expect(position.left).toBe(12);
+		expect(position.maxWidth).toBe(296);
+	});
+
 	it("applies width constraints while a narrow preview is still hidden", () => {
 		expect(
 			__test__.floatingStyle({

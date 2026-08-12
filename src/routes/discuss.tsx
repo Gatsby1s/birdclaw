@@ -49,6 +49,7 @@ import {
 	exportCurrentPdf,
 	exportReferenceCollectionPdf,
 } from "#/lib/pdf-export-client";
+import { fetchTweetScores } from "#/lib/tweet-score-client";
 import {
 	type DiscussRouteSearch,
 	type RouteSearchChange,
@@ -592,6 +593,12 @@ export function DiscussRouteView({
 	);
 	const exportQuery = result?.context.query ?? submittedSearch.query;
 	const [referencePdfActive, setReferencePdfActive] = useState(false);
+	const [referencePdfError, setReferencePdfError] = useState<string | null>(
+		null,
+	);
+	const [referenceScores, setReferenceScores] = useState<
+		Record<string, number>
+	>({});
 	const canExportPdf = Boolean(markdown.trim()) && !loading;
 	const canExportReferencePdf = Boolean(result) && !loading;
 	const exportTitle = `BirdClaw ${exportQuery || "Discuss"} discussion`;
@@ -626,22 +633,66 @@ export function DiscussRouteView({
 	const handleExportReferencePdf = useCallback(() => {
 		if (!canExportReferencePdf || !result || referencePdfActive) return;
 		flushSync(() => setReferencePdfActive(true));
-		if (
-			typeof CSS === "undefined" ||
-			typeof CSS.supports !== "function" ||
-			!CSS.supports("page", "reference")
-		) {
-			exportCurrentPdf(referenceExportTitle, "reference", () =>
-				setReferencePdfActive(false),
-			);
-			return;
-		}
-		void exportReferenceCollectionPdf({
-			title: referenceExportTitle,
-			sourceSelector: '[data-testid="discuss-reference-pdf"]',
-			onCleanup: () => setReferencePdfActive(false),
-		});
-	}, [canExportReferencePdf, referenceExportTitle, referencePdfActive, result]);
+		setReferencePdfError(null);
+		void (async () => {
+			try {
+				const referencedIds = new Set(
+					referenceGroups.flatMap((group) =>
+						group.tweetIds.map(normalizeDiscussionReferenceId),
+					),
+				);
+				const tweets = result.context.tweets.filter((tweet) =>
+					referencedIds.has(normalizeDiscussionReferenceId(tweet.id)),
+				);
+				const scores = await fetchTweetScores(
+					tweets.map((tweet) => ({
+						tweetId: tweet.id,
+						text: tweet.text,
+						createdAt: tweet.createdAt,
+						author: {
+							handle: tweet.author,
+							displayName: tweet.name,
+							bio: tweet.authorProfile.bio,
+						},
+					})),
+				);
+				flushSync(() =>
+					setReferenceScores(
+						Object.fromEntries(
+							scores.map((score) => [
+								normalizeDiscussionReferenceId(score.tweetId),
+								score.score,
+							]),
+						),
+					),
+				);
+				if (
+					typeof CSS === "undefined" ||
+					typeof CSS.supports !== "function" ||
+					!CSS.supports("page", "reference")
+				) {
+					exportCurrentPdf(referenceExportTitle, "reference", () =>
+						setReferencePdfActive(false),
+					);
+					return;
+				}
+				await exportReferenceCollectionPdf({
+					title: referenceExportTitle,
+					sourceSelector: '[data-testid="discuss-reference-pdf"]',
+					onCleanup: () => setReferencePdfActive(false),
+				});
+			} catch {
+				setReferencePdfError("评分暂时不可用，完整 PDF 未导出");
+				setReferencePdfActive(false);
+			}
+		})();
+	}, [
+		canExportReferencePdf,
+		referenceExportTitle,
+		referenceGroups,
+		referencePdfActive,
+		result,
+	]);
 	const loadHistory = useCallback(async () => {
 		if (!historyEnabled) return;
 		setHistoryLoading(true);
@@ -1084,8 +1135,10 @@ export function DiscussRouteView({
 					</form>
 				</header>
 
-				{error || historyRestoreError ? (
-					<div className={errorCopyClass}>{error ?? historyRestoreError}</div>
+				{error || historyRestoreError || referencePdfError ? (
+					<div className={errorCopyClass}>
+						{error ?? historyRestoreError ?? referencePdfError}
+					</div>
 				) : null}
 
 				<div className="today-screen-only border-b border-[var(--line)] px-4 py-2 text-[13px] text-[var(--ink-soft)]">
@@ -1138,6 +1191,7 @@ export function DiscussRouteView({
 							"Discussion themes": "按讨论主题逐组阅读。",
 							"Supplemental source list": "只作完整性补充。",
 						}}
+						scores={referenceScores}
 						testId="discuss-reference-pdf"
 						tweets={result.context.tweets}
 					/>

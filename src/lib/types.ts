@@ -235,6 +235,29 @@ export interface TimelineItem {
 	qualityReason?: string | null;
 }
 
+export interface TweetScoreDimensions {
+	informationDelta: number;
+	clearThesis: number;
+	explainedMechanism: number;
+	verifiability: number;
+	clearBoundaries: number;
+}
+
+export type TweetScoreSentiment = "positive" | "negative" | "neutral" | "mixed";
+
+export interface TweetQualityScore {
+	tweetId: string;
+	score: number;
+	label: string;
+	dimensions: TweetScoreDimensions;
+	sentiment: TweetScoreSentiment;
+	assets: string[];
+	reason: string;
+	explanation: string;
+	updatedAt: string;
+	cached: boolean;
+}
+
 export interface DmMessageItem {
 	id: string;
 	conversationId: string;
