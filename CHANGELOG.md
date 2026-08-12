@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.78 - 2026-08-12
+
+### Added
+
+- Add a direct Print action immediately beside each actionable timeline Open link, reusing the complete-PDF A4 pagination, image handling, and source-card typography for the selected tweet.
+
+### Fixed
+
+- Keep Print and Open visible inside timeline cards at 320px and 390px with full touch targets, and prevent overlapping print jobs across cards.
+- Preserve the existing Discuss complete-PDF output while including reply and quoted-post context only in direct single-tweet printing.
+
 ## 0.8.77 - 2026-08-10
 
 ### Fixed
