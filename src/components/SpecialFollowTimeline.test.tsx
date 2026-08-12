@@ -164,10 +164,15 @@ describe("SpecialFollowTimeline", () => {
 	});
 
 	it("loads newer posts while scrolling up without moving the visible card", async () => {
-		const scrollBy = vi.spyOn(window, "scrollBy").mockImplementation(() => {});
+		let userScroll = 0;
+		const scrollBy = vi
+			.spyOn(window, "scrollBy")
+			.mockImplementation((options: ScrollToOptions | number, y?: number) => {
+				userScroll +=
+					typeof options === "number" ? (y ?? 0) : (options.top ?? 0);
+			});
 		const feedModes: Array<string | null> = [];
 		const patchBodies: Array<Record<string, unknown>> = [];
-		let userScroll = 0;
 		let resolveNewer!: (response: Response) => void;
 		const newerResponse = new Promise<Response>((resolve) => {
 			resolveNewer = resolve;
@@ -254,13 +259,20 @@ describe("SpecialFollowTimeline", () => {
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
 			function (this: HTMLElement) {
 				const id = this.dataset.specialFollowAnchor;
+				const latestInserted = Boolean(
+					document.querySelector('[data-special-follow-anchor="latest"]'),
+				);
 				const baseTop =
 					id === "latest"
-						? -100
+						? 100
 						: id === "near-newer"
-							? 100
-							: id === "anchor"
+							? latestInserted
 								? 300
+								: 100
+							: id === "anchor"
+								? latestInserted
+									? 500
+									: 300
 								: 100;
 				const top = this.tagName === "HEADER" ? 0 : baseTop - userScroll;
 				const bottom = this.tagName === "HEADER" ? 0 : top + 200;
@@ -317,7 +329,8 @@ describe("SpecialFollowTimeline", () => {
 			);
 		});
 		expect(await screen.findByText("latest post")).toBeInTheDocument();
-		expect(scrollBy).not.toHaveBeenCalled();
+		expect(scrollBy).toHaveBeenCalledWith({ behavior: "auto", top: 200 });
+		expect(userScroll).toBe(320);
 		expect(feedModes).toEqual(["resume", "newer"]);
 		await waitFor(
 			() =>

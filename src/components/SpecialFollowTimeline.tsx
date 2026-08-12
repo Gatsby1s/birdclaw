@@ -99,6 +99,7 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 	const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const saveChainRef = useRef(Promise.resolve());
 	const loadingNewerRef = useRef(false);
+	const pendingPrependRef = useRef<{ id: string; top: number } | null>(null);
 	const [restored, setRestored] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -194,7 +195,7 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 			mode: "newer",
 			cursor: newerStartCursor ?? undefined,
 		} as FeedPageParam,
-		queryFn: ({ pageParam, signal }) => {
+		queryFn: async ({ pageParam, signal }) => {
 			if (!pageParam.cursor) throw new Error("没有可加载的新动态");
 			const url = new URL("/api/special-follow-feed", window.location.origin);
 			url.searchParams.set("account", selectedAccountId as string);
@@ -202,12 +203,34 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 			url.searchParams.set("limit", String(PAGE_SIZE));
 			url.searchParams.set("cursorCreatedAt", pageParam.cursor.createdAt);
 			url.searchParams.set("cursorTweetId", pageParam.cursor.tweetId);
-			return fetchJson(
+			const response = await fetchJson(
 				url,
 				{ signal },
 				specialFollowFeedResponseSchema,
 				"特别关注动态暂时不可用",
 			);
+			if (loadingNewerRef.current) {
+				const cards = [
+					...(feedRef.current?.querySelectorAll<HTMLElement>(
+						"[data-special-follow-anchor]",
+					) ?? []),
+				].map((node) => {
+					const rect = node.getBoundingClientRect();
+					return {
+						id: node.dataset.specialFollowAnchor as string,
+						top: rect.top,
+						bottom: rect.bottom,
+					};
+				});
+				const anchor = selectSpecialFollowReadAnchor(
+					cards,
+					visibleFeedTop(headerRef.current),
+				);
+				pendingPrependRef.current = anchor
+					? { id: anchor.id, top: anchor.top }
+					: null;
+			}
+			return response;
 		},
 		getNextPageParam: (lastPage): FeedPageParam | undefined =>
 			lastPage.page.hasNewer && lastPage.page.newerCursor
@@ -410,6 +433,24 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		}, SAVE_DELAY_MS);
 	}, [persist]);
 
+	useLayoutEffect(() => {
+		const pending = pendingPrependRef.current;
+		if (!pending) return;
+		const anchor = [
+			...(feedRef.current?.querySelectorAll<HTMLElement>(
+				"[data-special-follow-anchor]",
+			) ?? []),
+		].find((node) => node.dataset.specialFollowAnchor === pending.id);
+		pendingPrependRef.current = null;
+		if (!anchor) return;
+		const delta = anchor.getBoundingClientRect().top - pending.top;
+		if (Math.abs(delta) >= 1) {
+			window.scrollBy({ top: delta, behavior: "auto" });
+		}
+		const frame = requestAnimationFrame(capturePosition);
+		return () => cancelAnimationFrame(frame);
+	}, [capturePosition, newerQuery.data]);
+
 	const loadNewerWithoutDisplacement = useCallback(async () => {
 		if (
 			!restoredRef.current ||
@@ -423,14 +464,10 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 		loadingNewerRef.current = true;
 		try {
 			await newerQuery.fetchNextPage();
-			await new Promise<void>((resolve) =>
-				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-			);
-			capturePosition();
 		} finally {
 			loadingNewerRef.current = false;
 		}
-	}, [capturePosition, newerQuery, newerStartCursor]);
+	}, [newerQuery, newerStartCursor]);
 
 	useEffect(() => {
 		if (!restored) return;
@@ -595,7 +632,10 @@ export function SpecialFollowTimeline({ viewTabs }: { viewTabs: ReactNode }) {
 					aria-hidden={!restored}
 					data-special-follow-feed-state={restored ? "restored" : "restoring"}
 					ref={feedRef}
-					style={{ visibility: restored ? "visible" : "hidden" }}
+					style={{
+						overflowAnchor: "none",
+						visibility: restored ? "visible" : "hidden",
+					}}
 				>
 					{items.map((item) => (
 						<div data-special-follow-anchor={item.id} key={item.id}>

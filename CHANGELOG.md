@@ -10,6 +10,7 @@
 ### Fixed
 
 - Isolate automatic newer-post pagination from the cloud resume query so cached pages never replace another device's fresh reading anchor, even after slow-network scrolling and a same-browser remount.
+- Preserve the currently visible post when automatic newer-post pagination reaches the browser's absolute top, where native Chrome scroll anchoring cannot keep the reading point stable by itself.
 
 ## 0.8.86 - 2026-08-13
 
