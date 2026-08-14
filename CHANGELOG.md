@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.88 - 2026-08-15
+
+### Changed
+
+- Add a REST-only 6551 recovery mode that skips unsupported Watch and WebSocket traffic while reporting successful periodic recovery as polling.
+- Preserve the next recovery due time across failover worker recreation so a flapping local bridge cannot repeatedly trigger full paid backfills; an explicit manual sync still runs exactly once.
+
+### Fixed
+
+- Keep a successful full Following timeline collection fresh when a supplemental watched-account or target-post refresh fails, preventing false 6551 takeovers while retaining the supplemental error for diagnostics.
+
 ## 0.8.87 - 2026-08-13
 
 ### Changed
