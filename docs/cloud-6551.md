@@ -22,6 +22,7 @@ BIRDCLAW_6551_ACCOUNT_ID=acct_primary
 BIRDCLAW_6551_WATCH_USERS=TingHu888
 BIRDCLAW_6551_TARGET_TWEETS=2082353480547660173
 BIRDCLAW_6551_BACKFILL_MINUTES=120
+BIRDCLAW_6551_REST_ONLY=1
 BIRDCLAW_6551_FAILOVER_MODE=1
 BIRDCLAW_LOCAL_STALE_SECONDS=180
 BIRDCLAW_LOCAL_BRIDGE_TOKEN=<a separate random bridge token>
@@ -56,11 +57,12 @@ Following home timeline, watched account, target thread, and quote tweets
 through the local `bird` session every 120 seconds without depending on an open
 browser tab. Normalized timeline increments continue uploading when a
 supplemental target fails, so one partial failure cannot freeze the cloud Home
-feed. The cloud accepts a heartbeat only after the full timeline and every
-configured target have completed successfully. A watched-account-only success
-cannot keep 6551 on standby when the full timeline is stale. After 180 seconds
-without a healthy heartbeat, 6551 takes over. A returning Mac replays the last
-24 hours idempotently before the cloud process returns 6551 to standby.
+feed. The cloud accepts a heartbeat when it carries a fresh successful full
+timeline attestation; supplemental watched-account or target failures stay
+visible without forcing a 6551 takeover. A watched-account-only success cannot
+keep 6551 on standby when the full timeline is stale. After 180 seconds without
+a healthy heartbeat, 6551 takes over. A returning Mac replays the last 24 hours
+idempotently before the cloud process returns 6551 to standby.
 
 ## Recovery behavior
 
@@ -71,8 +73,12 @@ without a healthy heartbeat, 6551 takes over. A returning Mac replays the last
   minutes and after reconnecting.
 - Target posts, best-effort conversation search results, and quote tweets are
   also refreshed.
-- If the current 6551 plan does not allow Watch/WebSocket, REST recovery
-  polling continues and Settings reports a degraded state.
+- With `BIRDCLAW_6551_REST_ONLY=1`, BirdClaw never adds Watch entries or opens
+  WebSocket connections. Settings reports healthy recovery polling after a
+  successful REST sync and reserves error state for an actual REST failure.
+- A failover worker recreated before `BIRDCLAW_6551_BACKFILL_MINUTES` elapses
+  keeps the original next recovery due time instead of repeating the full REST
+  poll immediately.
 
 6551 monitors account activity; it does not guarantee every third-party reply
 to a particular post. The public REST API also exposes no complete reply cursor,

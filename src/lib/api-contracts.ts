@@ -683,6 +683,7 @@ export const twitter6551RuntimeStatusSchema = z.object({
 		"starting",
 		"connecting",
 		"connected",
+		"polling",
 		"degraded",
 		"error",
 		"standby",
