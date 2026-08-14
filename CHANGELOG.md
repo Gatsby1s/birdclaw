@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 0.8.89 - 2026-08-15
+
+### Added
+
+- Add no-key FxTwitter recovery for configured watched accounts, target posts, conversations, and quote posts, with bounded retries, response validation, and clear runtime status.
+
+### Changed
+
+- Prefer free REST-only FxTwitter recovery when enabled, without creating a paid 6551 client or attempting Watch and WebSocket connections.
+- Keep public recovery fill-only so authenticated or archived canonical tweets and Home edges are never downgraded; isolate endpoint failures so healthy targets continue syncing.
+- Skip native repost rows that lack a wrapper ID and repost timestamp instead of inventing incorrect Home authorship or ordering.
+
 ## 0.8.88 - 2026-08-15
 
 ### Changed
