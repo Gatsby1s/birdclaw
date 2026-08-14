@@ -75,6 +75,7 @@ export interface Twitter6551RuntimeStatus {
 		| "starting"
 		| "connecting"
 		| "connected"
+		| "polling"
 		| "degraded"
 		| "error"
 		| "standby"
@@ -741,6 +742,7 @@ export function getTwitter6551RuntimeConfig() {
 			"BIRDCLAW_6551_BACKFILL_MINUTES",
 			base.backfillMinutes || DEFAULT_BACKFILL_MINUTES,
 		),
+		restOnly: process.env.BIRDCLAW_6551_REST_ONLY === "1",
 		failoverMode: process.env.BIRDCLAW_6551_FAILOVER_MODE === "1",
 		localStaleSeconds: positiveEnvNumber(
 			"BIRDCLAW_LOCAL_STALE_SECONDS",
@@ -803,11 +805,25 @@ const INITIAL_RUNTIME_STATUS: Twitter6551RuntimeStatus = {
 	ingestedCount: 0,
 };
 const RUNTIME_STATUS_KEY = Symbol.for("birdclaw.twitter6551.runtime-status");
+const RECOVERY_ATTEMPTS_KEY = Symbol.for(
+	"birdclaw.twitter6551.recovery-attempts",
+);
+type RecoveryAttempt = {
+	attemptedAt: number;
+	outcome: "running" | "success" | "failed";
+	error: string | null;
+	lastBackfillAt: string | null;
+};
 const runtimeGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
 let runtimeStatus =
 	(runtimeGlobal[RUNTIME_STATUS_KEY] as Twitter6551RuntimeStatus | undefined) ??
 	INITIAL_RUNTIME_STATUS;
 runtimeGlobal[RUNTIME_STATUS_KEY] = runtimeStatus;
+const recoveryAttempts =
+	(runtimeGlobal[RECOVERY_ATTEMPTS_KEY] as
+		| Map<string, RecoveryAttempt>
+		| undefined) ?? new Map<string, RecoveryAttempt>();
+runtimeGlobal[RECOVERY_ATTEMPTS_KEY] = recoveryAttempts;
 
 function assignRuntimeStatus(next: Twitter6551RuntimeStatus) {
 	runtimeStatus = next;
@@ -832,7 +848,7 @@ function websocketUrl(baseUrl: string, token: string) {
 export class Twitter6551Worker {
 	private socket: WebSocket | null = null;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-	private backfillTimer: ReturnType<typeof setInterval> | null = null;
+	private backfillTimer: ReturnType<typeof setTimeout> | null = null;
 	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	private subscriptionTimer: ReturnType<typeof setTimeout> | null = null;
 	private stopped = false;
@@ -841,23 +857,28 @@ export class Twitter6551Worker {
 	private backfillRunning = false;
 	private watchUnavailable = false;
 	private hasSubscribedOnce = false;
-	private readonly inFlight = new Set<Promise<void>>();
+	private readonly inFlight = new Set<Promise<unknown>>();
 
 	constructor(
-		private readonly config = getTwitter6551RuntimeConfig(),
+		private readonly config: Omit<
+			ReturnType<typeof getTwitter6551RuntimeConfig>,
+			"restOnly"
+		> & { restOnly?: boolean } = getTwitter6551RuntimeConfig(),
 		private readonly client = new Twitter6551Client({
 			token: config.token,
 			baseUrl: config.baseUrl,
 		}),
 	) {}
 
-	async start() {
+	async start(options: { forceBackfill?: boolean } = {}) {
 		if (!this.config.enabled || this.stopped) return;
+		const previousRecovery = recoveryAttempts.get(this.recoveryScope());
 		assignRuntimeStatus({
 			...emptyStatus(),
 			enabled: true,
 			state: "starting",
 			activeSource: "6551",
+			lastBackfillAt: previousRecovery?.lastBackfillAt ?? null,
 		});
 		await enqueueDatabaseWrite((db) => {
 			ensureTwitter6551Tables(db);
@@ -866,21 +887,35 @@ export class Twitter6551Worker {
 		if (this.stopped) return;
 		await this.replayPendingEvents();
 		if (this.stopped) return;
-		await this.prepareWatches();
+		if (!this.config.restOnly) await this.prepareWatches();
 		if (this.stopped) return;
-		await this.runBackfill();
+		const recoveryResult = options.forceBackfill
+			? await this.runBackfill()
+			: await this.runBackfillIfDue();
 		if (this.stopped) return;
-		this.connect();
-		this.backfillTimer = setInterval(
-			() => this.track(this.runRecoveryCycle()),
-			this.config.backfillMinutes * 60_000,
-		);
+		if (this.config.restOnly) {
+			if (recoveryResult === "skipped") {
+				const previousAttempt = recoveryAttempts.get(this.recoveryScope());
+				assignRuntimeStatus({
+					...runtimeStatus,
+					state: previousAttempt?.outcome === "failed" ? "error" : "polling",
+					connected: false,
+					lastError:
+						previousAttempt?.outcome === "failed"
+							? previousAttempt.error
+							: null,
+				});
+			}
+		} else {
+			this.connect();
+		}
+		this.scheduleRecovery();
 	}
 
 	async stop() {
 		this.stopped = true;
 		if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-		if (this.backfillTimer) clearInterval(this.backfillTimer);
+		if (this.backfillTimer) clearTimeout(this.backfillTimer);
 		if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
 		if (this.subscriptionTimer) clearTimeout(this.subscriptionTimer);
 		this.socket?.close(1000, "BirdClaw shutdown");
@@ -893,7 +928,7 @@ export class Twitter6551Worker {
 		});
 	}
 
-	private track(promise: Promise<void>) {
+	private track(promise: Promise<unknown>) {
 		this.inFlight.add(promise);
 		void promise
 			.catch((error) => {
@@ -919,8 +954,16 @@ export class Twitter6551Worker {
 	}
 
 	async runBackfill() {
-		if (this.backfillRunning || this.stopped) return;
+		if (this.backfillRunning || this.stopped) return "skipped" as const;
 		this.backfillRunning = true;
+		const scope = this.recoveryScope();
+		const attemptedAt = Date.now();
+		recoveryAttempts.set(scope, {
+			attemptedAt,
+			outcome: "running",
+			error: null,
+			lastBackfillAt: runtimeStatus.lastBackfillAt,
+		});
 		try {
 			const batches: Twitter6551Tweet[][] = [];
 			for (const username of this.config.watchUsers) {
@@ -959,8 +1002,9 @@ export class Twitter6551Worker {
 			);
 			assignRuntimeStatus({
 				...runtimeStatus,
-				state:
-					runtimeStatus.connected && !this.watchUnavailable
+				state: this.config.restOnly
+					? "polling"
+					: runtimeStatus.connected && !this.watchUnavailable
 						? "connected"
 						: "degraded",
 				lastBackfillAt: new Date().toISOString(),
@@ -969,20 +1013,72 @@ export class Twitter6551Worker {
 					: null,
 				ingestedCount: runtimeStatus.ingestedCount + ingested.length,
 			});
+			recoveryAttempts.set(scope, {
+				attemptedAt,
+				outcome: "success",
+				error: null,
+				lastBackfillAt: runtimeStatus.lastBackfillAt,
+			});
+			return "success" as const;
 		} catch (error) {
 			assignRuntimeStatus({
 				...runtimeStatus,
 				state: runtimeStatus.connected ? "degraded" : "error",
 				lastError: errorMessage(error),
 			});
+			recoveryAttempts.set(scope, {
+				attemptedAt,
+				outcome: "failed",
+				error: runtimeStatus.lastError,
+				lastBackfillAt: runtimeStatus.lastBackfillAt,
+			});
+			return "failed" as const;
 		} finally {
 			this.backfillRunning = false;
 		}
 	}
 
+	private recoveryScope() {
+		return JSON.stringify({
+			accountId: this.config.accountId,
+			watchUsers: [...this.config.watchUsers].sort(),
+			targetTweetIds: [...this.config.targetTweetIds].sort(),
+		});
+	}
+
+	private recoveryIntervalMs() {
+		return this.config.backfillMinutes * 60_000;
+	}
+
+	private recoveryDelayMs(now = Date.now()) {
+		const lastAttempt = recoveryAttempts.get(this.recoveryScope());
+		if (!lastAttempt) return 0;
+		return Math.max(
+			0,
+			lastAttempt.attemptedAt + this.recoveryIntervalMs() - now,
+		);
+	}
+
+	private async runBackfillIfDue() {
+		if (this.recoveryDelayMs() > 0) return "skipped" as const;
+		return this.runBackfill();
+	}
+
+	private scheduleRecovery() {
+		if (this.backfillTimer) clearTimeout(this.backfillTimer);
+		if (this.stopped) return;
+		const delay = Math.max(1, this.recoveryDelayMs());
+		this.backfillTimer = setTimeout(() => {
+			this.backfillTimer = null;
+			this.track(this.runRecoveryCycle());
+		}, delay);
+		this.backfillTimer.unref?.();
+	}
+
 	private async runRecoveryCycle() {
-		await this.prepareWatches();
-		await this.runBackfill();
+		if (!this.config.restOnly) await this.prepareWatches();
+		await this.runBackfillIfDue();
+		this.scheduleRecovery();
 	}
 
 	private async prepareWatches() {
@@ -1329,7 +1425,9 @@ function localBridgeIsFresh(
 	);
 }
 
-export async function startTwitter6551Worker() {
+export async function startTwitter6551Worker(
+	options: { forceBackfill?: boolean } = {},
+) {
 	const config = getTwitter6551RuntimeConfig();
 	if (!config.enabled) {
 		assignRuntimeStatus(emptyStatus());
@@ -1350,7 +1448,7 @@ export async function startTwitter6551Worker() {
 	const worker = new Twitter6551Worker(config);
 	activeWorker = worker;
 	try {
-		await worker.start();
+		await worker.start(options);
 	} catch (error) {
 		activeWorker = null;
 		assignRuntimeStatus({
@@ -1476,9 +1574,10 @@ export async function runTwitter6551Backfill() {
 		);
 	}
 	if (!activeWorker) {
-		const worker = await startTwitter6551Worker();
+		const worker = await startTwitter6551Worker({ forceBackfill: true });
 		if (!worker) throw new Twitter6551Error("6551 worker is disabled");
+		return getTwitter6551RuntimeStatus();
 	}
-	await activeWorker?.runBackfill();
+	await activeWorker.runBackfill();
 	return getTwitter6551RuntimeStatus();
 }

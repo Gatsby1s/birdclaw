@@ -153,7 +153,7 @@ describe("local Twitter collector home timeline sync", () => {
 		expect(collector.isFresh()).toBe(false);
 	});
 
-	it("keeps watched-user failures visible after the timeline succeeds", async () => {
+	it("keeps the collector fresh when Home succeeds but a supplemental watch fails", async () => {
 		process.env.BIRDCLAW_LOCAL_COLLECTOR_WATCH_USERS = "watched";
 		syncHomeTimelineMock.mockResolvedValue({ count: 4, source: "bird" });
 		birdMocks.listUserTweets.mockRejectedValue(
@@ -169,7 +169,8 @@ describe("local Twitter collector home timeline sync", () => {
 			lastError: "Watched user @watched sync failed: profile rate limited",
 			ingestedCount: 4,
 		});
-		expect(collector.isFresh()).toBe(false);
+		expect(collector.isFresh()).toBe(true);
+		expect(collector.isFresh(new Date("2026-08-09T12:03:00.001Z"))).toBe(false);
 	});
 
 	it("prevents overlapping interval runs and stops future runs", async () => {

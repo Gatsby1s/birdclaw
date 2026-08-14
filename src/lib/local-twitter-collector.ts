@@ -150,17 +150,13 @@ export class LocalTwitterCollector {
 
 	isFresh(now = new Date()) {
 		if (!this.config.enabled) return false;
-		const requiredSuccessTimes = [
-			this.status.lastSuccessAt,
-			...(this.config.timelineEnabled
-				? [this.status.lastTimelineSuccessAt]
-				: []),
-		];
-		return requiredSuccessTimes.every(
-			(timestamp) =>
-				Boolean(timestamp) &&
-				now.getTime() - new Date(timestamp as string).getTime() <=
-					this.config.intervalSeconds * FRESHNESS_MULTIPLIER * 1000,
+		const requiredSuccessAt = this.config.timelineEnabled
+			? this.status.lastTimelineSuccessAt
+			: this.status.lastSuccessAt;
+		return Boolean(
+			requiredSuccessAt &&
+			now.getTime() - new Date(requiredSuccessAt).getTime() <=
+				this.config.intervalSeconds * FRESHNESS_MULTIPLIER * 1000,
 		);
 	}
 

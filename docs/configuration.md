@@ -95,6 +95,7 @@ See [Backup](backup.md). When `autoSync` is enabled, read commands pull + merge 
 | `BIRDCLAW_6551_WATCH_USERS`                 | Comma-separated X handles to monitor and recovery-sync                                                                                               |
 | `BIRDCLAW_6551_TARGET_TWEETS`               | Comma-separated tweet IDs to preserve and refresh with quote tweets                                                                                  |
 | `BIRDCLAW_6551_BACKFILL_MINUTES`            | Minutes between latest-100 recovery polls; defaults to `120`                                                                                         |
+| `BIRDCLAW_6551_REST_ONLY`                   | Set to `1` to skip Watch/WebSocket entirely and run only periodic REST recovery polling                                                              |
 | `BIRDCLAW_6551_FAILOVER_MODE`               | Set to `1` to keep 6551 on standby while an authenticated local bridge heartbeat is fresh                                                            |
 | `BIRDCLAW_LOCAL_STALE_SECONDS`              | Seconds without a local heartbeat before 6551 takes over; defaults to `180`                                                                          |
 | `BIRDCLAW_LOCAL_BRIDGE_TOKEN`               | Cloud-side secret accepted only by the local bridge ingest endpoint                                                                                  |

@@ -11,6 +11,8 @@ import {
 	getTwitter6551RuntimeStatus,
 	getTwitter6551RuntimeConfig,
 	recordTwitter6551LocalHeartbeat,
+	runTwitter6551Backfill,
+	startTwitter6551WorkerManager,
 	stopTwitter6551WorkerManager,
 	Twitter6551Worker,
 	twitter6551TweetsToPayload,
@@ -649,6 +651,7 @@ describe("6551 Twitter adapter", () => {
 			"BIRDCLAW_6551_TARGET_TWEETS",
 			"BIRDCLAW_6551_ACCOUNT_ID",
 			"BIRDCLAW_6551_BACKFILL_MINUTES",
+			"BIRDCLAW_6551_REST_ONLY",
 			"BIRDCLAW_6551_FAILOVER_MODE",
 			"BIRDCLAW_LOCAL_STALE_SECONDS",
 		];
@@ -663,6 +666,7 @@ describe("6551 Twitter adapter", () => {
 			process.env.BIRDCLAW_6551_TARGET_TWEETS = "10,10,20";
 			process.env.BIRDCLAW_6551_ACCOUNT_ID = " custom ";
 			process.env.BIRDCLAW_6551_BACKFILL_MINUTES = "bad";
+			process.env.BIRDCLAW_6551_REST_ONLY = "1";
 			process.env.BIRDCLAW_6551_FAILOVER_MODE = "1";
 			process.env.BIRDCLAW_LOCAL_STALE_SECONDS = "90";
 			expect(getTwitter6551RuntimeConfig()).toMatchObject({
@@ -671,6 +675,7 @@ describe("6551 Twitter adapter", () => {
 				accountId: "custom",
 				watchUsers: ["alice", "bob"],
 				targetTweetIds: ["10", "20"],
+				restOnly: true,
 				failoverMode: true,
 				localStaleSeconds: 90,
 			});
@@ -694,6 +699,312 @@ describe("6551 Twitter adapter", () => {
 					baseUrl: "https://evil.example",
 				}),
 		).toThrow("protect the API token");
+	});
+
+	it("runs configured REST-only recovery without Watch or WebSocket attempts", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-15T00:00:00.000Z"));
+		const WebSocketMock = vi.fn();
+		vi.stubGlobal("WebSocket", WebSocketMock);
+		const client = {
+			getUserTweets: vi.fn().mockResolvedValue([]),
+			addWatch: vi.fn(),
+		};
+		const worker = new Twitter6551Worker(
+			{
+				baseUrl: "https://ai.6551.io",
+				tokenEnv: "TWITTER_TOKEN",
+				tokenDetected: true,
+				token: "secret-token",
+				enabled: true,
+				accountId: "acct_rest_only",
+				watchUsers: ["rest_only_user"],
+				targetTweetIds: [],
+				backfillMinutes: 1,
+				restOnly: true,
+				failoverMode: false,
+				localStaleSeconds: 180,
+			},
+			client as never,
+		);
+		try {
+			await worker.start();
+			expect(client.getUserTweets).toHaveBeenCalledTimes(1);
+			expect(client.addWatch).not.toHaveBeenCalled();
+			expect(WebSocketMock).not.toHaveBeenCalled();
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				state: "polling",
+				connected: false,
+				lastBackfillAt: "2026-08-15T00:00:00.000Z",
+				lastError: null,
+			});
+
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(client.getUserTweets).toHaveBeenCalledTimes(2);
+			expect(client.addWatch).not.toHaveBeenCalled();
+			expect(WebSocketMock).not.toHaveBeenCalled();
+		} finally {
+			await worker.stop();
+			vi.unstubAllGlobals();
+			vi.useRealTimers();
+		}
+	});
+
+	it("preserves the REST recovery due time across failover worker recreation", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-15T01:00:00.000Z"));
+		const client = {
+			getUserTweets: vi.fn().mockResolvedValue([]),
+			addWatch: vi.fn(),
+		};
+		const config = {
+			baseUrl: "https://ai.6551.io",
+			tokenEnv: "TWITTER_TOKEN",
+			tokenDetected: true,
+			token: "secret-token",
+			enabled: true,
+			accountId: "acct_recovery_cooldown",
+			watchUsers: ["cooldown_user"],
+			targetTweetIds: [],
+			backfillMinutes: 10,
+			restOnly: true,
+			failoverMode: true,
+			localStaleSeconds: 180,
+		};
+		let worker = new Twitter6551Worker(config, client as never);
+		try {
+			await worker.start();
+			expect(client.getUserTweets).toHaveBeenCalledTimes(1);
+			const firstBackfillAt = getTwitter6551RuntimeStatus().lastBackfillAt;
+			await worker.stop();
+
+			vi.setSystemTime(new Date("2026-08-15T01:01:00.000Z"));
+			worker = new Twitter6551Worker(config, client as never);
+			await worker.start();
+			expect(client.getUserTweets).toHaveBeenCalledTimes(1);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				state: "polling",
+				lastBackfillAt: firstBackfillAt,
+				lastError: null,
+			});
+
+			await vi.advanceTimersByTimeAsync(8 * 60_000 + 59_999);
+			expect(client.getUserTweets).toHaveBeenCalledTimes(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(client.getUserTweets).toHaveBeenCalledTimes(2);
+			await worker.stop();
+
+			vi.setSystemTime(new Date("2026-08-15T01:20:00.000Z"));
+			worker = new Twitter6551Worker(config, client as never);
+			await worker.start();
+			expect(client.getUserTweets).toHaveBeenCalledTimes(3);
+		} finally {
+			await worker.stop();
+			vi.useRealTimers();
+		}
+	});
+
+	it("preserves REST-only errors through cooldown and clears them after recovery", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-15T02:00:00.000Z"));
+		const client = {
+			getUserTweets: vi
+				.fn()
+				.mockRejectedValueOnce(new Error("REST unavailable"))
+				.mockResolvedValue([]),
+			addWatch: vi.fn(),
+		};
+		const config = {
+			baseUrl: "https://ai.6551.io",
+			tokenEnv: "TWITTER_TOKEN",
+			tokenDetected: true,
+			token: "secret-token",
+			enabled: true,
+			accountId: "acct_recovery_error",
+			watchUsers: ["recovery_error_user"],
+			targetTweetIds: [],
+			backfillMinutes: 10,
+			restOnly: true,
+			failoverMode: true,
+			localStaleSeconds: 180,
+		};
+		let worker = new Twitter6551Worker(config, client as never);
+		try {
+			await worker.start();
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				state: "error",
+				lastBackfillAt: null,
+				lastError: "REST unavailable",
+			});
+			await worker.stop();
+
+			vi.setSystemTime(new Date("2026-08-15T02:01:00.000Z"));
+			worker = new Twitter6551Worker(config, client as never);
+			await worker.start();
+			expect(client.getUserTweets).toHaveBeenCalledTimes(1);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				state: "error",
+				lastError: "REST unavailable",
+			});
+
+			await vi.advanceTimersByTimeAsync(9 * 60_000);
+			expect(client.getUserTweets).toHaveBeenCalledTimes(2);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				state: "polling",
+				lastBackfillAt: "2026-08-15T02:10:00.000Z",
+				lastError: null,
+			});
+		} finally {
+			await worker.stop();
+			vi.useRealTimers();
+		}
+	});
+
+	it("runs exactly one forced recovery per manual cold start despite cooldown", async () => {
+		const keys = [
+			"BIRDCLAW_6551_ENABLED",
+			"BIRDCLAW_6551_ACCOUNT_ID",
+			"BIRDCLAW_6551_WATCH_USERS",
+			"BIRDCLAW_6551_TARGET_TWEETS",
+			"BIRDCLAW_6551_REST_ONLY",
+			"BIRDCLAW_6551_FAILOVER_MODE",
+			"TWITTER_TOKEN",
+		];
+		const before = Object.fromEntries(
+			keys.map((key) => [key, process.env[key]]),
+		);
+		const fetchMock = vi.fn<typeof fetch>(async (input) => {
+			const url = String(input);
+			return url.endsWith("/twitter_user_info")
+				? Response.json({
+						success: true,
+						data: {
+							userId: "cold-user-id",
+							screenName: "cold_sync_user",
+							name: "Cold Sync User",
+						},
+					})
+				: Response.json({ success: true, data: [] });
+		});
+		try {
+			await stopTwitter6551WorkerManager();
+			process.env.BIRDCLAW_6551_ENABLED = "1";
+			process.env.BIRDCLAW_6551_ACCOUNT_ID = "acct_cold_manual_sync";
+			process.env.BIRDCLAW_6551_WATCH_USERS = "cold_sync_user";
+			process.env.BIRDCLAW_6551_TARGET_TWEETS = "";
+			process.env.BIRDCLAW_6551_REST_ONLY = "1";
+			process.env.BIRDCLAW_6551_FAILOVER_MODE = "0";
+			process.env.TWITTER_TOKEN = "secret-token";
+			vi.stubGlobal("fetch", fetchMock);
+
+			await runTwitter6551Backfill();
+
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			await stopTwitter6551WorkerManager();
+			await runTwitter6551Backfill();
+
+			expect(fetchMock).toHaveBeenCalledTimes(4);
+			expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(
+				Array.from({ length: 2 }).flatMap(() => [
+					"https://ai.6551.io/open/twitter_user_info",
+					"https://ai.6551.io/open/twitter_user_tweets",
+				]),
+			);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				state: "polling",
+				lastError: null,
+			});
+		} finally {
+			await stopTwitter6551WorkerManager();
+			vi.unstubAllGlobals();
+			for (const key of keys) {
+				const value = before[key];
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	});
+
+	it("reuses cooldown across a real local-to-6551 failover recreation", async () => {
+		const keys = [
+			"BIRDCLAW_6551_ENABLED",
+			"BIRDCLAW_6551_ACCOUNT_ID",
+			"BIRDCLAW_6551_WATCH_USERS",
+			"BIRDCLAW_6551_TARGET_TWEETS",
+			"BIRDCLAW_6551_BACKFILL_MINUTES",
+			"BIRDCLAW_6551_REST_ONLY",
+			"BIRDCLAW_6551_FAILOVER_MODE",
+			"BIRDCLAW_LOCAL_STALE_SECONDS",
+			"TWITTER_TOKEN",
+		];
+		const before = Object.fromEntries(
+			keys.map((key) => [key, process.env[key]]),
+		);
+		const fetchMock = vi.fn<typeof fetch>(async (input) => {
+			const url = String(input);
+			return url.endsWith("/twitter_user_info")
+				? Response.json({
+						success: true,
+						data: {
+							userId: "manager-user-id",
+							screenName: "manager_failover_user",
+							name: "Manager Failover User",
+						},
+					})
+				: Response.json({ success: true, data: [] });
+		});
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-15T03:00:00.000Z"));
+		try {
+			await stopTwitter6551WorkerManager();
+			process.env.BIRDCLAW_6551_ENABLED = "1";
+			process.env.BIRDCLAW_6551_ACCOUNT_ID = "acct_manager_failover";
+			process.env.BIRDCLAW_6551_WATCH_USERS = "manager_failover_user";
+			process.env.BIRDCLAW_6551_TARGET_TWEETS = "";
+			process.env.BIRDCLAW_6551_BACKFILL_MINUTES = "10";
+			process.env.BIRDCLAW_6551_REST_ONLY = "1";
+			process.env.BIRDCLAW_6551_FAILOVER_MODE = "1";
+			process.env.BIRDCLAW_LOCAL_STALE_SECONDS = "1";
+			process.env.TWITTER_TOKEN = "secret-token";
+			vi.stubGlobal("fetch", fetchMock);
+
+			await startTwitter6551WorkerManager();
+			expect(fetchMock).not.toHaveBeenCalled();
+
+			vi.setSystemTime(new Date("2026-08-15T03:00:01.001Z"));
+			await startTwitter6551WorkerManager();
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				state: "polling",
+				activeSource: "6551",
+			});
+
+			await recordTwitter6551LocalHeartbeat(
+				0,
+				new Date("2026-08-15T03:00:02.000Z"),
+			);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				state: "standby",
+				activeSource: "local",
+			});
+
+			vi.setSystemTime(new Date("2026-08-15T03:00:03.001Z"));
+			await startTwitter6551WorkerManager();
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				state: "polling",
+				activeSource: "6551",
+			});
+		} finally {
+			await stopTwitter6551WorkerManager();
+			vi.unstubAllGlobals();
+			vi.useRealTimers();
+			for (const key of keys) {
+				const value = before[key];
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
 	});
 
 	it("keeps recovery alive when watch preparation has a transient failure", async () => {
@@ -804,7 +1115,7 @@ describe("6551 Twitter adapter", () => {
 		const worker = new Twitter6551Worker(config, client as never);
 		const first = worker.runBackfill();
 		await vi.waitFor(() => expect(client.getUserTweets).toHaveBeenCalledOnce());
-		await expect(worker.runBackfill()).resolves.toBeUndefined();
+		await expect(worker.runBackfill()).resolves.toBe("skipped");
 		release?.([]);
 		await first;
 
