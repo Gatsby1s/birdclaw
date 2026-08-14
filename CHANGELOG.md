@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 0.8.90 - 2026-08-15
+
+### Added
+
+- Add a guarded three-tier Twitter recovery chain: authenticated local Home first, free FxTwitter second, and paid 6551 only after consecutive total free-source failures.
+- Persist the 6551 failure threshold, six-hour paid cooldown, and UTC-day request-attempt budget across worker and service restarts.
+
+### Changed
+
+- Cap paid 6551 at 24 actual HTTP attempts per day by default, counting retries before network access and failing closed when budget state is invalid or unavailable.
+- Keep combined recovery REST-only, make manual free sync incapable of escalating to paid 6551, and stop paid batches as soon as the local bridge returns.
+- Preserve authenticated canonical tweets while retaining successfully fetched paid partial results, and apply the same paid budget to profile analysis requests.
+
 ## 0.8.89 - 2026-08-15
 
 ### Added
