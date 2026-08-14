@@ -101,6 +101,14 @@ permit it.
   transport retries. Budget exhaustion, invalid state, or an unverifiable
   budget blocks the request before the network. A fresh local heartbeat also
   suppresses the next paid attempt before it consumes budget.
+- The daily budget, consecutive Fx failure count, and paid cooldown claim use
+  reserved, already-processed synthetic rows in the existing
+  `twitter6551_events` inbox. They survive process restarts and content-backup
+  replacement, never enter event replay, and require no additional schema
+  migration or full SQLite copy. A database that already recorded v0.8.90's
+  legacy v18 budget or cooldown rows promotes them once in an immediate
+  transaction; invalid current or legacy row metadata, schema, or payloads fail
+  closed.
 - Paid partial results are ingested fill-only before the batch stops, so a later
   endpoint failure or budget boundary does not discard requests already spent.
 - Native repost rows are skipped because the public API does not expose their

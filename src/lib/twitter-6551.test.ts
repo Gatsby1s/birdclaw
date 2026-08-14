@@ -6,6 +6,10 @@ import {
 	readTwitter6551DailyBudget,
 	readTwitter6551FallbackState,
 	recordTwitter6551FxRecovery,
+	TWITTER6551_STATE_EVENT_PREFIX,
+	TWITTER6551_STATE_EVENT_TYPE,
+	TWITTER6551_STATE_WATCH_USER,
+	twitter6551UsageDay,
 	Twitter6551RequestBudgetError,
 } from "./twitter-6551-state";
 import {
@@ -978,23 +982,34 @@ describe("6551 Twitter adapter", () => {
 
 	it("still ingests free Fx success when corrupt paid state is blocked", async () => {
 		const home = getHome();
+		const now = new Date().toISOString();
 		home.db
 			.prepare(
-				`insert into twitter6551_recovery_state (
-					account_id, scope, consecutive_fx_total_failures,
-					last_counted_fx_failure_at, last_paid_fallback_at, updated_at
-				 ) values (?, ?, ?, null, null, ?)`,
+				`insert into twitter6551_events (
+					event_id, event_type, watch_user, tweet_id, raw_json,
+					received_at, processed_at, error
+				 ) values (?, ?, ?, null, ?, ?, ?, null)`,
 			)
 			.run(
-				"acct_fx_corrupt_paid_state",
+				`${TWITTER6551_STATE_EVENT_PREFIX}fallback:acct_fx_corrupt_paid_state`,
+				TWITTER6551_STATE_EVENT_TYPE,
+				TWITTER6551_STATE_WATCH_USER,
 				JSON.stringify({
-					provider: "fxtwitter",
+					version: 1,
+					kind: "fallback_state",
 					accountId: "acct_fx_corrupt_paid_state",
-					watchUsers: ["free_recovery"],
-					targetTweetIds: [],
+					scope: JSON.stringify({
+						provider: "fxtwitter",
+						accountId: "acct_fx_corrupt_paid_state",
+						watchUsers: ["free_recovery"],
+						targetTweetIds: [],
+					}),
+					consecutiveFxTotalFailures: "corrupt",
+					lastCountedFxFailureAt: null,
+					lastPaidFallbackAt: null,
 				}),
-				"corrupt",
-				new Date().toISOString(),
+				now,
+				now,
 			);
 		const paidClient = { getUserTweets: vi.fn() };
 		const fxtwitter = {
@@ -1227,6 +1242,91 @@ describe("6551 Twitter adapter", () => {
 				"daily request budget exhausted",
 			);
 			expect(fetchMock).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("serializes concurrent paid attempts so only one reaches the network", async () => {
+		const fetchMock = vi.fn<typeof fetch>(async () =>
+			Response.json({
+				userId: "88",
+				screenName: "budget_user",
+				name: "Budget",
+			}),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const config = {
+			...getTwitter6551RuntimeConfig(),
+			token: "secret-token",
+			paidDailyRequestBudget: 1,
+		};
+		try {
+			const results = await Promise.allSettled([
+				createBudgetedTwitter6551Client(config).getUser("first"),
+				createBudgetedTwitter6551Client(config).getUser("second"),
+			]);
+			expect(results.map((result) => result.status).sort()).toEqual([
+				"fulfilled",
+				"rejected",
+			]);
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(
+				readTwitter6551DailyBudget(getHome().db, 1, new Date()),
+			).toMatchObject({ attempts: 1, remaining: 0 });
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("blocks the network when a legacy v18 budget row is corrupt", async () => {
+		const home = getHome();
+		home.db.exec(`
+			create table twitter6551_paid_daily_usage (
+				usage_day text primary key,
+				request_attempts integer not null default 0
+					check (request_attempts >= 0),
+				updated_at text not null
+			);
+		`);
+		home.db
+			.prepare(
+				`insert into twitter6551_paid_daily_usage
+				 (usage_day, request_attempts, updated_at) values (?, ?, ?)`,
+			)
+			.run(twitter6551UsageDay(), "corrupt", new Date().toISOString());
+		const fetchMock = vi.fn<typeof fetch>();
+		vi.stubGlobal("fetch", fetchMock);
+		const config = {
+			...getTwitter6551RuntimeConfig(),
+			token: "secret-token",
+			paidDailyRequestBudget: 24,
+		};
+		try {
+			await expect(
+				createBudgetedTwitter6551Client(config).getUser("blocked"),
+			).rejects.toThrow("budget could not be verified");
+			expect(fetchMock).not.toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("blocks the network when a v18 database is missing its legacy budget table", async () => {
+		const home = getHome();
+		home.db.exec("pragma user_version = 18");
+		const fetchMock = vi.fn<typeof fetch>();
+		vi.stubGlobal("fetch", fetchMock);
+		const config = {
+			...getTwitter6551RuntimeConfig(),
+			token: "secret-token",
+			paidDailyRequestBudget: 24,
+		};
+		try {
+			await expect(
+				createBudgetedTwitter6551Client(config).getUser("blocked-missing"),
+			).rejects.toThrow("budget could not be verified");
+			expect(fetchMock).not.toHaveBeenCalled();
 		} finally {
 			vi.unstubAllGlobals();
 		}

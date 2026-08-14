@@ -19,7 +19,7 @@ import {
 	resolveBirdclawRoot,
 } from "../bin/migration-backup.mjs";
 
-function fixture(version = 17) {
+function fixture(version = 16) {
 	const rootDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-migration-"));
 	const databasePath = path.join(rootDir, "birdclaw.sqlite");
 	const db = new DatabaseSync(databasePath);
@@ -32,12 +32,12 @@ function fixture(version = 17) {
 	return { rootDir, databasePath };
 }
 
-test("creates and validates a private v17 backup before the v18 migration", async () => {
+test("creates and validates a private v16 backup before the v17 migration", async () => {
 	const { rootDir } = fixture();
 	try {
 		const result = await ensurePreMigrationBackup({ rootDir, log: () => {} });
 		assert.equal(result.created, true);
-		const backupPath = path.join(rootDir, "backups", "pre-v18-birdclaw.sqlite");
+		const backupPath = path.join(rootDir, "backups", "pre-v17-birdclaw.sqlite");
 		assert.equal(statSync(backupPath).mode & 0o777, 0o600);
 		const backupDb = new DatabaseSync(backupPath, { readOnly: true });
 		assert.equal(
@@ -47,7 +47,7 @@ test("creates and validates a private v17 backup before the v18 migration", asyn
 		);
 		assert.equal(
 			backupDb.prepare("pragma user_version").get().user_version,
-			17,
+			16,
 		);
 		backupDb.close();
 		assert.equal(
@@ -59,17 +59,18 @@ test("creates and validates a private v17 backup before the v18 migration", asyn
 	}
 });
 
-test("does not create a migration backup for an already-current database", async () => {
-	const { rootDir, databasePath } = fixture(18);
+test("does not create a migration backup for an already-current v17 database", async () => {
+	const { rootDir, databasePath } = fixture(17);
 	try {
 		const before = readFileSync(databasePath);
 		const result = await ensurePreMigrationBackup({ rootDir, log: () => {} });
 		assert.deepEqual(result, {
 			created: false,
 			reason: "current",
-			currentVersion: 18,
+			currentVersion: 17,
 		});
 		assert.deepEqual(readFileSync(databasePath), before);
+		assert.equal(existsSync(path.join(rootDir, "backups")), false);
 	} finally {
 		rmSync(rootDir, { recursive: true, force: true });
 	}
@@ -100,7 +101,7 @@ test("removes an invalid stale partial before creating the verified backup", asy
 		const backupDir = path.join(rootDir, "backups");
 		const stalePath = path.join(
 			backupDir,
-			"pre-v18-birdclaw.sqlite.partial-99999",
+			"pre-v17-birdclaw.sqlite.partial-99999",
 		);
 		mkdirSync(backupDir, { recursive: true });
 		writeFileSync(stalePath, "incomplete");
@@ -109,7 +110,7 @@ test("removes an invalid stale partial before creating the verified backup", asy
 		assert.equal(result.created, true);
 		assert.equal(existsSync(stalePath), false);
 		assert.equal(
-			existsSync(path.join(backupDir, "pre-v18-birdclaw.sqlite")),
+			existsSync(path.join(backupDir, "pre-v17-birdclaw.sqlite")),
 			true,
 		);
 	} finally {
@@ -123,7 +124,7 @@ test("promotes a complete stale partial without taking a second backup", async (
 		const backupDir = path.join(rootDir, "backups");
 		const partialPath = path.join(
 			backupDir,
-			"pre-v18-birdclaw.sqlite.partial-99999",
+			"pre-v17-birdclaw.sqlite.partial-99999",
 		);
 		mkdirSync(backupDir, { recursive: true });
 		copyFileSync(databasePath, partialPath);
@@ -141,8 +142,8 @@ test("promotes one complete partial and removes additional owned partials", asyn
 	const { rootDir, databasePath } = fixture();
 	try {
 		const backupDir = path.join(rootDir, "backups");
-		const first = path.join(backupDir, "pre-v18-birdclaw.sqlite.partial-1000");
-		const second = path.join(backupDir, "pre-v18-birdclaw.sqlite.partial-2000");
+		const first = path.join(backupDir, "pre-v17-birdclaw.sqlite.partial-1000");
+		const second = path.join(backupDir, "pre-v17-birdclaw.sqlite.partial-2000");
 		mkdirSync(backupDir, { recursive: true });
 		copyFileSync(databasePath, first);
 		copyFileSync(databasePath, second);

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.8.91 - 2026-08-15
+
+### Changed
+
+- Keep the 6551 daily paid-request budget and Fx recovery/cooldown state in reserved, already-processed rows of the existing `twitter6551_events` inbox. Strictly valid state already written by v0.8.90 is promoted transactionally on first use, while corrupt legacy state blocks paid requests. This preserves the hard guards across restarts and content restores without a new SQLite schema version or a full-database pre-migration copy.
+- Restore the latest BirdClaw schema and migration-backup threshold to v17 so a production v17 database can start without allocating a redundant v18 backup.
+
 ## 0.8.90 - 2026-08-15
 
 ### Added
