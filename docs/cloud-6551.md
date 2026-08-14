@@ -19,16 +19,18 @@ BIRDCLAW_WEB_TOKEN=<a unique web login passphrase>
 BIRDCLAW_DISABLE_LIVE_WRITES=1
 BIRDCLAW_FXTWITTER_ENABLED=1
 BIRDCLAW_FXTWITTER_BACKFILL_MINUTES=30
-BIRDCLAW_6551_ENABLED=0
+BIRDCLAW_6551_ENABLED=1
 BIRDCLAW_6551_ACCOUNT_ID=acct_primary
 BIRDCLAW_6551_WATCH_USERS=TingHu888
 BIRDCLAW_6551_TARGET_TWEETS=2082353480547660173
-BIRDCLAW_6551_BACKFILL_MINUTES=240
 BIRDCLAW_6551_REST_ONLY=1
 BIRDCLAW_6551_FAILOVER_MODE=1
+BIRDCLAW_6551_PAID_FALLBACK_FAILURE_THRESHOLD=3
+BIRDCLAW_6551_PAID_FALLBACK_COOLDOWN_MINUTES=360
+BIRDCLAW_6551_PAID_DAILY_REQUEST_BUDGET=24
 BIRDCLAW_LOCAL_STALE_SECONDS=180
 BIRDCLAW_LOCAL_BRIDGE_TOKEN=<a separate random bridge token>
-TWITTER_TOKEN=<optional 6551 API token kept only for explicit paid recovery>
+TWITTER_TOKEN=<6551 API token used only by the guarded paid reserve>
 DEEPSEEK_API_KEY=<the DeepSeek API key used only for translation>
 BIRDCLAW_TRANSLATION_MODEL=deepseek-v4-flash
 ```
@@ -67,7 +69,10 @@ configured stale window without a healthy heartbeat, free FxTwitter recovery
 refreshes only the configured watched accounts and target threads. It does not
 claim to rebuild the complete Following Home. A returning Mac replays the last
 24 hours idempotently before the cloud process returns FxTwitter to standby.
-Paid 6551 remains disabled unless an operator explicitly chooses it instead.
+When both providers are enabled, FxTwitter remains the first recovery layer.
+Paid 6551 is claimed only after three consecutive total FxTwitter failures, a
+six-hour persistent cooldown, and the persistent UTC-day request budget all
+permit it.
 
 ## Recovery behavior
 
@@ -75,11 +80,12 @@ Paid 6551 remains disabled unless an operator explicitly chooses it instead.
   is deduplicated.
 - WebSocket events are written to `twitter6551_events` before processing.
 - Duplicate events and tweets are idempotent.
-- When `BIRDCLAW_FXTWITTER_ENABLED=1`, BirdClaw uses the public, no-key
-  FxTwitter v2 API instead of paid 6551. It identifies itself with a BirdClaw
-  User-Agent and performs no Watch or WebSocket calls.
+- When `BIRDCLAW_FXTWITTER_ENABLED=1`, BirdClaw always tries the public, no-key
+  FxTwitter v2 API first. A successful or partial response suppresses paid 6551.
+  Combined mode performs no Watch or WebSocket calls; any eligible 6551 reserve
+  is REST-only.
 - BirdClaw fetches the latest 100 public tweets for each watched account at the
-  configured recovery interval and after reconnecting.
+  configured recovery interval.
 - Target posts, best-effort conversation search results, and quote tweets are
   also refreshed.
 - Free recovery is fill-only: existing canonical tweets and Home edges from
@@ -88,15 +94,24 @@ Paid 6551 remains disabled unless an operator explicitly chooses it instead.
 - Each watched account and target endpoint is isolated. Successful results are
   ingested when another target fails, and runtime status reports the partial
   failure as degraded.
+- Total FxTwitter failure is counted persistently and debounced across worker
+  recreation. Paid fallback requires the configured consecutive-failure
+  threshold, then atomically claims the persistent cooldown before any request.
+- The daily paid budget counts every actual HTTP attempt, including 429/5xx or
+  transport retries. Budget exhaustion, invalid state, or an unverifiable
+  budget blocks the request before the network. A fresh local heartbeat also
+  suppresses the next paid attempt before it consumes budget.
+- Paid partial results are ingested fill-only before the batch stops, so a later
+  endpoint failure or budget boundary does not discard requests already spent.
 - Native repost rows are skipped because the public API does not expose their
   wrapper ID or repost timestamp; treating the original post as the repost
   would create a false author and Home position.
 - With `BIRDCLAW_6551_REST_ONLY=1`, BirdClaw never adds Watch entries or opens
   WebSocket connections. Settings reports healthy recovery polling after a
   successful REST sync and reserves error state for an actual REST failure.
-- A failover worker recreated before `BIRDCLAW_6551_BACKFILL_MINUTES` elapses
-  keeps the original next recovery due time instead of repeating the full REST
-  poll immediately.
+- A failover worker recreated before the configured FxTwitter or 6551 recovery
+  interval elapses keeps the original next due time instead of repeating the
+  full REST poll immediately.
 
 FxTwitter targeted recovery does not provide an authenticated Following Home,
 protected-account content, or lossless native-retweet events. It must never

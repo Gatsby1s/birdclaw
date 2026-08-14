@@ -13,6 +13,16 @@ import {
 	normalizeFxTwitterTweets,
 } from "./fxtwitter";
 import { ingestTweetPayload } from "./tweet-repository";
+import {
+	readTwitter6551DailyBudget,
+	readTwitter6551FallbackState,
+	claimTwitter6551PaidFallback,
+	recordTwitter6551FxRecovery,
+	reserveTwitter6551RequestAttempt,
+	twitter6551UsageDay,
+	Twitter6551RecoveryStateError,
+	Twitter6551RequestBudgetError,
+} from "./twitter-6551-state";
 import type {
 	XurlMedia,
 	XurlMentionData,
@@ -32,6 +42,9 @@ const MAX_RECONNECT_MS = 60_000;
 const AUTH_RECONNECT_MS = 5 * 60_000;
 const DEFAULT_LOCAL_STALE_SECONDS = 180;
 const FAILOVER_CHECK_MS = 15_000;
+const DEFAULT_PAID_FALLBACK_FAILURE_THRESHOLD = 3;
+const DEFAULT_PAID_FALLBACK_COOLDOWN_MINUTES = 360;
+const DEFAULT_PAID_DAILY_REQUEST_BUDGET = 24;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -100,12 +113,20 @@ export interface Twitter6551RuntimeStatus {
 	lastConnectedAt: string | null;
 	lastEventAt: string | null;
 	lastBackfillAt: string | null;
+	lastPaidFallbackAt: string | null;
 	lastLocalHeartbeatAt: string | null;
 	localStaleSeconds: number;
 	localBridgeIngestedCount: number;
 	lastError: string | null;
 	reconnectCount: number;
 	ingestedCount: number;
+	fxConsecutiveTotalFailures: number;
+	paidFallbackFailureThreshold: number;
+	paidFallbackCooldownMinutes: number;
+	paidBudgetDay: string;
+	paidRequestsToday: number;
+	paidDailyRequestBudget: number;
+	paidRequestsRemaining: number;
 }
 
 export class Twitter6551Error extends Error {
@@ -115,6 +136,13 @@ export class Twitter6551Error extends Error {
 	) {
 		super(message);
 		this.name = "Twitter6551Error";
+	}
+}
+
+export class Twitter6551PaidRequestSuppressedError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "Twitter6551PaidRequestSuppressedError";
 	}
 }
 
@@ -520,6 +548,7 @@ export function ingestTwitter6551Tweets(
 	accountId: string,
 	tweets: Twitter6551Tweet[],
 	edgeKind: "home" | "profile" | "thread_context" = "home",
+	preserveExistingCanonical = false,
 ) {
 	if (tweets.length === 0) return [];
 	ensureTwitter6551Account(db, accountId);
@@ -529,6 +558,7 @@ export function ingestTwitter6551Tweets(
 		source: SOURCE,
 		edgeKind,
 		markRepliesAsReplied: false,
+		preserveExistingCanonical,
 	});
 }
 
@@ -538,6 +568,7 @@ export interface Twitter6551ClientOptions {
 	fetchImpl?: typeof fetch;
 	timeoutMs?: number;
 	sleep?: (ms: number) => Promise<void>;
+	beforeRequestAttempt?: () => Promise<void>;
 }
 
 function validatedBaseUrl(value: string) {
@@ -575,6 +606,10 @@ export class Twitter6551Client {
 	private async request<T>(endpoint: string, body: JsonRecord): Promise<T> {
 		let lastError: unknown;
 		for (let attempt = 0; attempt < 3; attempt += 1) {
+			// The gate is deliberately outside the retry catch and before the network
+			// timeout. A suppressed or unverified request must neither retry nor spend
+			// an allowance on an already-aborted fetch.
+			await this.options.beforeRequestAttempt?.();
 			const controller = new AbortController();
 			const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 			try {
@@ -615,7 +650,14 @@ export class Twitter6551Client {
 				}
 				return (payloadRecord?.data ?? payload) as T;
 			} catch (error) {
-				if (error instanceof Twitter6551Error) throw error;
+				if (
+					error instanceof Twitter6551Error ||
+					error instanceof Twitter6551RequestBudgetError ||
+					error instanceof Twitter6551RecoveryStateError ||
+					error instanceof Twitter6551PaidRequestSuppressedError
+				) {
+					throw error;
+				}
 				lastError = error;
 				if (attempt < 2) {
 					await this.sleep(500 * 2 ** attempt);
@@ -733,6 +775,27 @@ function positiveEnvNumber(name: string, fallback: number) {
 	return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function failClosedPositiveEnvInteger(name: string, fallback: number) {
+	const raw = process.env[name];
+	if (raw === undefined || raw.trim() === "") return fallback;
+	const value = Number(raw);
+	return Number.isInteger(value) && value > 0 ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function failClosedPositiveEnvNumber(name: string, fallback: number) {
+	const raw = process.env[name];
+	if (raw === undefined || raw.trim() === "") return fallback;
+	const value = Number(raw);
+	return Number.isFinite(value) && value > 0 ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function dailyBudgetEnvInteger(name: string, fallback: number) {
+	const raw = process.env[name];
+	if (raw === undefined || raw.trim() === "") return fallback;
+	const value = Number(raw);
+	return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
 export function getTwitter6551RuntimeConfig() {
 	const base = getTwitter6551Config();
 	const token =
@@ -783,6 +846,18 @@ export function getTwitter6551RuntimeConfig() {
 			"BIRDCLAW_LOCAL_STALE_SECONDS",
 			DEFAULT_LOCAL_STALE_SECONDS,
 		),
+		paidFallbackFailureThreshold: failClosedPositiveEnvInteger(
+			"BIRDCLAW_6551_PAID_FALLBACK_FAILURE_THRESHOLD",
+			DEFAULT_PAID_FALLBACK_FAILURE_THRESHOLD,
+		),
+		paidFallbackCooldownMinutes: failClosedPositiveEnvNumber(
+			"BIRDCLAW_6551_PAID_FALLBACK_COOLDOWN_MINUTES",
+			DEFAULT_PAID_FALLBACK_COOLDOWN_MINUTES,
+		),
+		paidDailyRequestBudget: dailyBudgetEnvInteger(
+			"BIRDCLAW_6551_PAID_DAILY_REQUEST_BUDGET",
+			DEFAULT_PAID_DAILY_REQUEST_BUDGET,
+		),
 	};
 }
 
@@ -811,6 +886,7 @@ function emptyStatus(): Twitter6551RuntimeStatus {
 		lastConnectedAt: null,
 		lastEventAt: null,
 		lastBackfillAt: null,
+		lastPaidFallbackAt: null,
 		lastLocalHeartbeatAt: lastLocalHeartbeatAtMs
 			? new Date(lastLocalHeartbeatAtMs).toISOString()
 			: null,
@@ -819,6 +895,13 @@ function emptyStatus(): Twitter6551RuntimeStatus {
 		lastError: null,
 		reconnectCount: 0,
 		ingestedCount: 0,
+		fxConsecutiveTotalFailures: 0,
+		paidFallbackFailureThreshold: config.paidFallbackFailureThreshold,
+		paidFallbackCooldownMinutes: config.paidFallbackCooldownMinutes,
+		paidBudgetDay: twitter6551UsageDay(),
+		paidRequestsToday: 0,
+		paidDailyRequestBudget: config.paidDailyRequestBudget,
+		paidRequestsRemaining: config.paidDailyRequestBudget,
 	};
 }
 
@@ -834,12 +917,20 @@ const INITIAL_RUNTIME_STATUS: Twitter6551RuntimeStatus = {
 	lastConnectedAt: null,
 	lastEventAt: null,
 	lastBackfillAt: null,
+	lastPaidFallbackAt: null,
 	lastLocalHeartbeatAt: null,
 	localStaleSeconds: DEFAULT_LOCAL_STALE_SECONDS,
 	localBridgeIngestedCount: 0,
 	lastError: null,
 	reconnectCount: 0,
 	ingestedCount: 0,
+	fxConsecutiveTotalFailures: 0,
+	paidFallbackFailureThreshold: DEFAULT_PAID_FALLBACK_FAILURE_THRESHOLD,
+	paidFallbackCooldownMinutes: DEFAULT_PAID_FALLBACK_COOLDOWN_MINUTES,
+	paidBudgetDay: twitter6551UsageDay(),
+	paidRequestsToday: 0,
+	paidDailyRequestBudget: DEFAULT_PAID_DAILY_REQUEST_BUDGET,
+	paidRequestsRemaining: DEFAULT_PAID_DAILY_REQUEST_BUDGET,
 };
 const RUNTIME_STATUS_KEY = Symbol.for("birdclaw.twitter6551.runtime-status");
 const RECOVERY_ATTEMPTS_KEY = Symbol.for(
@@ -867,6 +958,124 @@ function assignRuntimeStatus(next: Twitter6551RuntimeStatus) {
 	runtimeGlobal[RUNTIME_STATUS_KEY] = next;
 }
 
+type Twitter6551RuntimeConfig = ReturnType<typeof getTwitter6551RuntimeConfig>;
+
+function recoveryScopeForConfig(
+	config: Pick<
+		Twitter6551RuntimeConfig,
+		"accountId" | "watchUsers" | "targetTweetIds" | "fxtwitterEnabled"
+	>,
+) {
+	return JSON.stringify({
+		provider: config.fxtwitterEnabled ? "fxtwitter" : "6551",
+		accountId: config.accountId,
+		watchUsers: [...config.watchUsers].sort(),
+		targetTweetIds: [...config.targetTweetIds].sort(),
+	});
+}
+
+function applyBudgetStatus(
+	budget: ReturnType<typeof readTwitter6551DailyBudget>,
+) {
+	assignRuntimeStatus({
+		...runtimeStatus,
+		paidBudgetDay: budget.day,
+		paidRequestsToday: budget.attempts,
+		paidDailyRequestBudget: budget.limit,
+		paidRequestsRemaining: budget.remaining,
+	});
+}
+
+function applyFallbackStatus(
+	state: ReturnType<typeof readTwitter6551FallbackState>,
+) {
+	assignRuntimeStatus({
+		...runtimeStatus,
+		fxConsecutiveTotalFailures: state.consecutiveFxTotalFailures,
+		lastPaidFallbackAt: state.lastPaidFallbackAt,
+	});
+}
+
+async function reservePaidTwitter6551Request(
+	config: Pick<Twitter6551RuntimeConfig, "paidDailyRequestBudget">,
+) {
+	try {
+		const budget = await enqueueDatabaseWrite((db) =>
+			reserveTwitter6551RequestAttempt(
+				db,
+				config.paidDailyRequestBudget,
+				new Date(),
+			),
+		);
+		applyBudgetStatus(budget);
+		return budget;
+	} catch (error) {
+		if (error instanceof Twitter6551RequestBudgetError) throw error;
+		throw new Twitter6551RequestBudgetError(
+			`6551 paid request budget could not be verified; requests are blocked (${errorMessage(error)})`,
+		);
+	}
+}
+
+export function createBudgetedTwitter6551Client(
+	config = getTwitter6551RuntimeConfig(),
+	options: { shouldSuppress?: () => boolean } = {},
+) {
+	return new Twitter6551Client({
+		token: config.token,
+		baseUrl: config.baseUrl,
+		beforeRequestAttempt: async () => {
+			if (options.shouldSuppress?.()) {
+				throw new Twitter6551PaidRequestSuppressedError(
+					"6551 paid recovery was suppressed because the local BirdClaw bridge recovered",
+				);
+			}
+			await reservePaidTwitter6551Request(config);
+		},
+	});
+}
+
+function refreshPersistentTwitter6551Status(config: Twitter6551RuntimeConfig) {
+	let budget: ReturnType<typeof readTwitter6551DailyBudget> | undefined;
+	try {
+		budget = readTwitter6551DailyBudget(
+			getNativeDb({ seedDemoData: false }),
+			config.paidDailyRequestBudget,
+		);
+	} catch {
+		budget = {
+			day: twitter6551UsageDay(),
+			attempts: config.paidDailyRequestBudget,
+			limit: config.paidDailyRequestBudget,
+			remaining: 0,
+		};
+	}
+	let fallback: ReturnType<typeof readTwitter6551FallbackState> | undefined;
+	if (config.fxtwitterEnabled) {
+		try {
+			fallback = readTwitter6551FallbackState(
+				getNativeDb({ seedDemoData: false }),
+				config.accountId,
+				recoveryScopeForConfig(config),
+			);
+		} catch {
+			fallback = undefined;
+		}
+	}
+	assignRuntimeStatus({
+		...runtimeStatus,
+		paidBudgetDay: budget.day,
+		paidRequestsToday: budget.attempts,
+		paidDailyRequestBudget: budget.limit,
+		paidRequestsRemaining: budget.remaining,
+		fxConsecutiveTotalFailures:
+			fallback?.consecutiveFxTotalFailures ??
+			runtimeStatus.fxConsecutiveTotalFailures,
+		lastPaidFallbackAt:
+			fallback?.lastPaidFallbackAt ?? runtimeStatus.lastPaidFallbackAt,
+	});
+}
+
 let activeWorker: Twitter6551Worker | null = null;
 
 function errorMessage(error: unknown) {
@@ -882,6 +1091,29 @@ function websocketUrl(baseUrl: string, token: string) {
 	return base.toString();
 }
 
+type Twitter6551WorkerConfigInput = Omit<
+	Twitter6551RuntimeConfig,
+	| "restOnly"
+	| "paidEnabled"
+	| "fxtwitterEnabled"
+	| "provider"
+	| "paidFallbackFailureThreshold"
+	| "paidFallbackCooldownMinutes"
+	| "paidDailyRequestBudget"
+> &
+	Partial<
+		Pick<
+			Twitter6551RuntimeConfig,
+			| "restOnly"
+			| "paidEnabled"
+			| "fxtwitterEnabled"
+			| "provider"
+			| "paidFallbackFailureThreshold"
+			| "paidFallbackCooldownMinutes"
+			| "paidDailyRequestBudget"
+		>
+	>;
+
 export class Twitter6551Worker {
 	private socket: WebSocket | null = null;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -895,38 +1127,40 @@ export class Twitter6551Worker {
 	private watchUnavailable = false;
 	private hasSubscribedOnce = false;
 	private readonly inFlight = new Set<Promise<unknown>>();
-	private readonly config: Omit<
-		ReturnType<typeof getTwitter6551RuntimeConfig>,
-		"restOnly" | "paidEnabled" | "fxtwitterEnabled" | "provider"
-	> & {
-		restOnly?: boolean;
-		paidEnabled?: boolean;
-		fxtwitterEnabled?: boolean;
-		provider?: "disabled" | "fxtwitter" | "6551";
-	};
+	private readonly config: Twitter6551RuntimeConfig;
 	private readonly client: Twitter6551Client | null;
 	private readonly fxtwitter: FxTwitterClient;
 
 	constructor(
-		config: Omit<
-			ReturnType<typeof getTwitter6551RuntimeConfig>,
-			"restOnly" | "paidEnabled" | "fxtwitterEnabled" | "provider"
-		> & {
-			restOnly?: boolean;
-			paidEnabled?: boolean;
-			fxtwitterEnabled?: boolean;
-			provider?: "disabled" | "fxtwitter" | "6551";
-		} = getTwitter6551RuntimeConfig(),
+		config: Twitter6551WorkerConfigInput = getTwitter6551RuntimeConfig(),
 		client?: Twitter6551Client,
 		fxtwitter = new FxTwitterClient(),
 	) {
-		this.config = config;
+		const fxtwitterEnabled = Boolean(config.fxtwitterEnabled);
+		const paidEnabled = config.paidEnabled ?? Boolean(config.token);
+		this.config = {
+			...config,
+			paidEnabled,
+			fxtwitterEnabled,
+			provider:
+				config.provider ??
+				(fxtwitterEnabled ? "fxtwitter" : paidEnabled ? "6551" : "disabled"),
+			restOnly: config.restOnly ?? fxtwitterEnabled,
+			paidFallbackFailureThreshold:
+				config.paidFallbackFailureThreshold ??
+				DEFAULT_PAID_FALLBACK_FAILURE_THRESHOLD,
+			paidFallbackCooldownMinutes:
+				config.paidFallbackCooldownMinutes ??
+				DEFAULT_PAID_FALLBACK_COOLDOWN_MINUTES,
+			paidDailyRequestBudget:
+				config.paidDailyRequestBudget ?? DEFAULT_PAID_DAILY_REQUEST_BUDGET,
+		};
 		this.client =
 			client ??
-			(this.recoveryProvider() === "6551"
-				? new Twitter6551Client({
-						token: config.token,
-						baseUrl: config.baseUrl,
+			(this.config.paidEnabled
+				? createBudgetedTwitter6551Client(this.config, {
+						shouldSuppress: () =>
+							this.stopped || localBridgeIsFresh(this.config),
 					})
 				: null);
 		this.fxtwitter = fxtwitter;
@@ -950,7 +1184,7 @@ export class Twitter6551Worker {
 		);
 	}
 
-	async start(options: { forceBackfill?: boolean } = {}) {
+	async start(options: { forceBackfill?: boolean; allowPaid?: boolean } = {}) {
 		if (!this.config.enabled || this.stopped) return;
 		const previousRecovery = recoveryAttempts.get(this.recoveryScope());
 		assignRuntimeStatus({
@@ -969,13 +1203,14 @@ export class Twitter6551Worker {
 				this.recoveryProvider(),
 			);
 		});
+		refreshPersistentTwitter6551Status(this.config);
 		if (this.stopped) return;
 		await this.replayPendingEvents();
 		if (this.stopped) return;
 		if (!this.isRestOnly()) await this.prepareWatches();
 		if (this.stopped) return;
 		const recoveryResult = options.forceBackfill
-			? await this.runBackfill()
+			? await this.runBackfill({ allowPaid: options.allowPaid })
 			: await this.runBackfillIfDue();
 		if (this.stopped) return;
 		if (this.isRestOnly()) {
@@ -1047,37 +1282,77 @@ export class Twitter6551Worker {
 	private async fetchTwitter6551Tweets() {
 		const client = this.paidClient();
 		const batches: Twitter6551Tweet[][] = [];
-		for (const username of this.config.watchUsers) {
-			batches.push(await client.getUserTweets(username, 100));
-		}
-		for (const tweetId of this.config.targetTweetIds) {
-			const target = await client.getTweet(tweetId);
-			batches.push([target]);
-			try {
-				batches.push(
-					await client.searchTweets(`conversation_id:${tweetId}`, 100),
+		const failures: string[] = [];
+		let completedRequests = 0;
+		let haltError: Error | null = null;
+		let firstError: Error | null = null;
+		const capture = async (
+			label: string,
+			request: () => Promise<Twitter6551Tweet[]>,
+			ignoreStatuses: number[] = [],
+		) => {
+			if (this.stopped || localBridgeIsFresh(this.config)) {
+				haltError = new Twitter6551PaidRequestSuppressedError(
+					"6551 paid recovery was suppressed because the local BirdClaw bridge recovered",
 				);
+				return;
+			}
+			try {
+				batches.push(await request());
+				completedRequests += 1;
 			} catch (error) {
 				if (
-					!(
-						error instanceof Twitter6551Error &&
-						(error.status === 400 || error.status === 403)
-					)
+					error instanceof Twitter6551PaidRequestSuppressedError ||
+					error instanceof Twitter6551RequestBudgetError ||
+					error instanceof Twitter6551RecoveryStateError
 				) {
-					throw error;
+					haltError = error;
+					return;
 				}
-			}
-			try {
-				batches.push(await client.getQuoteTweets(tweetId, 100));
-			} catch (error) {
-				if (!(error instanceof Twitter6551Error && error.status === 403)) {
-					throw error;
+				if (
+					error instanceof Twitter6551Error &&
+					error.status !== undefined &&
+					ignoreStatuses.includes(error.status)
+				) {
+					completedRequests += 1;
+					return;
 				}
+				failures.push(`${label}: ${errorMessage(error)}`);
+				firstError ??=
+					error instanceof Error ? error : new Twitter6551Error(String(error));
 			}
+		};
+		for (const username of this.config.watchUsers) {
+			await capture(`@${username}`, () => client.getUserTweets(username, 100));
+			if (haltError) break;
 		}
-		return [
-			...new Map(batches.flat().map((tweet) => [tweet.id, tweet])).values(),
-		];
+		for (const tweetId of this.config.targetTweetIds) {
+			if (haltError) break;
+			await capture(`status ${tweetId}`, async () => [
+				await client.getTweet(tweetId),
+			]);
+			if (haltError) break;
+			await capture(
+				`conversation ${tweetId}`,
+				() => client.searchTweets(`conversation_id:${tweetId}`, 100),
+				[400, 403],
+			);
+			if (haltError) break;
+			await capture(
+				`quotes ${tweetId}`,
+				() => client.getQuoteTweets(tweetId, 100),
+				[403],
+			);
+		}
+		return {
+			tweets: [
+				...new Map(batches.flat().map((tweet) => [tweet.id, tweet])).values(),
+			],
+			failures,
+			completedRequests,
+			haltError: haltError as Error | null,
+			firstError: firstError as Error | null,
+		};
 	}
 
 	private tweetsFromStatusEnvelope(envelope: FxTwitterStatusEnvelope) {
@@ -1176,8 +1451,144 @@ export class Twitter6551Worker {
 		});
 	}
 
-	async runBackfill() {
+	private async recordFxRecoveryOutcome(
+		outcome: "success" | "partial" | "total_failure",
+		options: { countFailure?: boolean } = {},
+	) {
+		if (outcome === "total_failure" && options.countFailure === false) {
+			const state = readTwitter6551FallbackState(
+				getNativeDb({ seedDemoData: false }),
+				this.config.accountId,
+				this.recoveryScope(),
+			);
+			applyFallbackStatus(state);
+			return state;
+		}
+		const state = await enqueueDatabaseWrite((db) =>
+			recordTwitter6551FxRecovery(
+				db,
+				this.config.accountId,
+				this.recoveryScope(),
+				outcome,
+				new Date(),
+				this.recoveryIntervalMs(),
+			),
+		);
+		applyFallbackStatus(state);
+		return state;
+	}
+
+	private ensurePaidBudgetAvailable() {
+		try {
+			const budget = readTwitter6551DailyBudget(
+				getNativeDb({ seedDemoData: false }),
+				this.config.paidDailyRequestBudget,
+			);
+			applyBudgetStatus(budget);
+			if (budget.remaining === 0) {
+				throw new Twitter6551RequestBudgetError(
+					`6551 paid daily request budget exhausted (${String(budget.attempts)}/${String(budget.limit)} UTC ${budget.day}); requests are blocked`,
+				);
+			}
+		} catch (error) {
+			if (error instanceof Twitter6551RequestBudgetError) throw error;
+			throw new Twitter6551RequestBudgetError(
+				`6551 paid request budget could not be verified; requests are blocked (${errorMessage(error)})`,
+			);
+		}
+	}
+
+	private async runPaidFallback(
+		fxError: unknown,
+		fallbackState: ReturnType<typeof readTwitter6551FallbackState>,
+		attemptedAt: number,
+	) {
+		if (!this.config.paidEnabled || !this.client) {
+			throw new Twitter6551Error(
+				`${errorMessage(fxError)}; 6551 paid reserve is disabled`,
+			);
+		}
+		if (
+			fallbackState.consecutiveFxTotalFailures <
+			this.config.paidFallbackFailureThreshold
+		) {
+			throw new Twitter6551Error(
+				`${errorMessage(fxError)}; paid reserve remains gated (${String(fallbackState.consecutiveFxTotalFailures)}/${String(this.config.paidFallbackFailureThreshold)} consecutive total failures)`,
+			);
+		}
+		if (this.stopped || localBridgeIsFresh(this.config)) {
+			throw new Twitter6551PaidRequestSuppressedError(
+				"6551 paid recovery was suppressed because the local BirdClaw bridge recovered",
+			);
+		}
+		this.ensurePaidBudgetAvailable();
+		const claim = await enqueueDatabaseWrite((db) =>
+			claimTwitter6551PaidFallback(
+				db,
+				this.config.accountId,
+				this.recoveryScope(),
+				this.config.paidFallbackFailureThreshold,
+				this.config.paidFallbackCooldownMinutes * 60_000,
+				new Date(),
+			),
+		);
+		applyFallbackStatus(claim.state);
+		if (!claim.claimed) {
+			throw new Twitter6551Error(
+				claim.reason === "cooldown"
+					? `${errorMessage(fxError)}; 6551 paid reserve is cooling down`
+					: `${errorMessage(fxError)}; 6551 paid reserve failure threshold is not met`,
+			);
+		}
+
+		const paid = await this.fetchTwitter6551Tweets();
+		const ingested = await enqueueDatabaseWrite((db) =>
+			ingestTwitter6551Tweets(
+				db,
+				this.config.accountId,
+				paid.tweets,
+				"home",
+				true,
+			),
+		);
+		if (paid.completedRequests === 0) {
+			if (paid.haltError) throw paid.haltError;
+			if (paid.firstError) throw paid.firstError;
+			throw new Twitter6551Error(
+				paid.failures.length > 0
+					? `6551 paid recovery failed: ${paid.failures.join("; ")}`
+					: "6551 paid recovery returned no completed requests",
+			);
+		}
+		const partial = paid.failures.length > 0 || Boolean(paid.haltError);
+		const paidError = [
+			...paid.failures,
+			...(paid.haltError ? [paid.haltError.message] : []),
+		];
+		assignRuntimeStatus({
+			...runtimeStatus,
+			provider: "fxtwitter",
+			activeSource: "6551",
+			state: "degraded",
+			connected: false,
+			lastBackfillAt: new Date().toISOString(),
+			lastError: partial
+				? `6551 partial reserve recovery after FxTwitter total failure: ${paidError.slice(0, 3).join("; ")}`
+				: "FxTwitter recovery failed; 6551 REST reserve completed",
+			ingestedCount: runtimeStatus.ingestedCount + ingested.length,
+		});
+		recoveryAttempts.set(this.recoveryScope(), {
+			attemptedAt,
+			outcome: partial ? "partial" : "success",
+			error: runtimeStatus.lastError,
+			lastBackfillAt: runtimeStatus.lastBackfillAt,
+		});
+		return partial ? ("partial" as const) : ("success" as const);
+	}
+
+	async runBackfill(options: { allowPaid?: boolean } = {}) {
 		if (this.backfillRunning || this.stopped) return "skipped" as const;
+		const allowPaid = options.allowPaid ?? true;
 		this.backfillRunning = true;
 		const scope = this.recoveryScope();
 		const attemptedAt = Date.now();
@@ -1192,13 +1603,53 @@ export class Twitter6551Worker {
 			let ingested: string[];
 			let partialFailures: string[] = [];
 			if (provider === "fxtwitter") {
-				const result = await this.fetchFxTwitterTweets();
+				let result: Awaited<ReturnType<typeof this.fetchFxTwitterTweets>>;
+				try {
+					result = await this.fetchFxTwitterTweets();
+				} catch (error) {
+					const fallbackState = await this.recordFxRecoveryOutcome(
+						"total_failure",
+						{ countFailure: allowPaid },
+					);
+					if (!allowPaid) throw error;
+					return await this.runPaidFallback(error, fallbackState, attemptedAt);
+				}
 				partialFailures = result.failures;
+				try {
+					await this.recordFxRecoveryOutcome(
+						partialFailures.length > 0 ? "partial" : "success",
+					);
+				} catch (error) {
+					if (!(error instanceof Twitter6551RecoveryStateError)) throw error;
+					partialFailures = [
+						...partialFailures,
+						`paid fallback state remains blocked: ${error.message}`,
+					];
+				}
 				ingested = await this.ingestFxTwitterTweets(result.tweets);
 			} else {
-				const tweets = await this.fetchTwitter6551Tweets();
+				const paid = await this.fetchTwitter6551Tweets();
+				if (paid.completedRequests === 0) {
+					if (paid.haltError) throw paid.haltError;
+					if (paid.firstError) throw paid.firstError;
+					throw new Twitter6551Error(
+						paid.failures.length > 0
+							? `6551 recovery failed: ${paid.failures.join("; ")}`
+							: "6551 recovery returned no completed requests",
+					);
+				}
+				partialFailures = [
+					...paid.failures,
+					...(paid.haltError ? [paid.haltError.message] : []),
+				];
 				ingested = await enqueueDatabaseWrite((db) =>
-					ingestTwitter6551Tweets(db, this.config.accountId, tweets, "home"),
+					ingestTwitter6551Tweets(
+						db,
+						this.config.accountId,
+						paid.tweets,
+						"home",
+						true,
+					),
 				);
 			}
 			assignRuntimeStatus({
@@ -1216,7 +1667,7 @@ export class Twitter6551Worker {
 				lastBackfillAt: new Date().toISOString(),
 				lastError:
 					partialFailures.length > 0
-						? `FxTwitter partial recovery: ${partialFailures.slice(0, 3).join("; ")}${partialFailures.length > 3 ? `; and ${String(partialFailures.length - 3)} more` : ""}`
+						? `${provider === "fxtwitter" ? "FxTwitter" : "6551 REST"} partial recovery: ${partialFailures.slice(0, 3).join("; ")}${partialFailures.length > 3 ? `; and ${String(partialFailures.length - 3)} more` : ""}`
 						: this.watchUnavailable
 							? "6551 watch access is unavailable; REST recovery remains active"
 							: null,
@@ -1250,12 +1701,7 @@ export class Twitter6551Worker {
 	}
 
 	private recoveryScope() {
-		return JSON.stringify({
-			provider: this.recoveryProvider(),
-			accountId: this.config.accountId,
-			watchUsers: [...this.config.watchUsers].sort(),
-			targetTweetIds: [...this.config.targetTweetIds].sort(),
-		});
+		return recoveryScopeForConfig(this.config);
 	}
 
 	private recoveryIntervalMs() {
@@ -1639,7 +2085,7 @@ function localBridgeIsFresh(
 }
 
 export async function startTwitter6551Worker(
-	options: { forceBackfill?: boolean } = {},
+	options: { forceBackfill?: boolean; allowPaid?: boolean } = {},
 ) {
 	const config = getTwitter6551RuntimeConfig();
 	if (!config.enabled) {
@@ -1658,6 +2104,7 @@ export async function startTwitter6551Worker(
 			activeSource: "local",
 			lastError: null,
 		});
+		refreshPersistentTwitter6551Status(config);
 		return null;
 	}
 	if (activeWorker) return activeWorker;
@@ -1726,6 +2173,7 @@ async function reconcileTwitter6551Failover() {
 				localBridgeIngestedCount,
 				lastError: null,
 			});
+			refreshPersistentTwitter6551Status(config);
 			return;
 		}
 		const graceElapsed =
@@ -1738,6 +2186,7 @@ async function reconcileTwitter6551Failover() {
 				state: "standby",
 				activeSource: "waiting",
 			});
+			refreshPersistentTwitter6551Status(config);
 			return;
 		}
 		await startTwitter6551Worker();
@@ -1773,6 +2222,26 @@ export async function recordTwitter6551LocalHeartbeat(
 		lastLocalHeartbeatAt: now.toISOString(),
 		localBridgeIngestedCount,
 	});
+	const config = getTwitter6551RuntimeConfig();
+	if (config.fxtwitterEnabled) {
+		try {
+			const state = await enqueueDatabaseWrite((db) =>
+				recordTwitter6551FxRecovery(
+					db,
+					config.accountId,
+					recoveryScopeForConfig(config),
+					"success",
+					now,
+				),
+			);
+			applyFallbackStatus(state);
+		} catch (error) {
+			assignRuntimeStatus({
+				...runtimeStatus,
+				lastError: `Local recovery is active, but the paid fallback state could not be reset (${errorMessage(error)})`,
+			});
+		}
+	}
 	await reconcileTwitter6551Failover();
 	return getTwitter6551RuntimeStatus();
 }
@@ -1792,10 +2261,13 @@ export async function runTwitter6551Backfill() {
 		);
 	}
 	if (!activeWorker) {
-		const worker = await startTwitter6551Worker({ forceBackfill: true });
+		const worker = await startTwitter6551Worker({
+			forceBackfill: true,
+			allowPaid: false,
+		});
 		if (!worker) throw new Twitter6551Error("Twitter recovery is disabled");
 		return getTwitter6551RuntimeStatus();
 	}
-	await activeWorker.runBackfill();
+	await activeWorker.runBackfill({ allowPaid: false });
 	return getTwitter6551RuntimeStatus();
 }

@@ -908,6 +908,27 @@ function ensureTwillotHistoryQueueTables(db: Database) {
 	`);
 }
 
+function ensureTwitter6551RecoveryTables(db: Database) {
+	db.exec(`
+		create table if not exists twitter6551_recovery_state (
+			account_id text primary key,
+			scope text not null,
+			consecutive_fx_total_failures integer not null default 0
+				check (consecutive_fx_total_failures >= 0),
+			last_counted_fx_failure_at text,
+			last_paid_fallback_at text,
+			updated_at text not null
+		);
+
+		create table if not exists twitter6551_paid_daily_usage (
+			usage_day text primary key,
+			request_attempts integer not null default 0
+				check (request_attempts >= 0),
+			updated_at text not null
+		);
+	`);
+}
+
 function ensureDiscussionHistoryTable(db: Database) {
 	db.exec(`
     create table if not exists discussion_history (
@@ -1438,6 +1459,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add durable timeline reading positions",
 		up: (db) => {
 			ensureTimelineReadPositionsTable(db);
+		},
+	},
+	{
+		version: 18,
+		name: "add durable 6551 recovery limits",
+		up: (db) => {
+			ensureTwitter6551RecoveryTables(db);
 		},
 	},
 ];

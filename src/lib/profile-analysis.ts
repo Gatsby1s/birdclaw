@@ -52,9 +52,9 @@ import {
 	searchRecentByConversationIdEffect,
 } from "./xurl";
 import {
+	createBudgetedTwitter6551Client,
 	getTwitter6551RuntimeConfig,
 	ingestTwitter6551Tweets,
-	Twitter6551Client,
 	twitter6551UserToXurl,
 } from "./twitter-6551";
 
@@ -1225,10 +1225,7 @@ export function collectProfileAnalysisContextEffect(
 			}
 			emitStatus(handlers, "Resolving profile through 6551", `@${handle}`);
 			yield* abortIfRequestedEffect(options.signal);
-			const client = new Twitter6551Client({
-				token: config.token,
-				baseUrl: config.baseUrl,
-			});
+			const client = createBudgetedTwitter6551Client(config);
 			const user = yield* tryProfilePromise(() => client.getUser(handle));
 			yield* abortIfRequestedEffect(options.signal);
 			emitStatus(
@@ -1246,6 +1243,7 @@ export function collectProfileAnalysisContextEffect(
 					account.id,
 					tweets.slice(0, maxTweets),
 					"profile",
+					true,
 				);
 			});
 			const context = yield* tryProfileSync(() =>
