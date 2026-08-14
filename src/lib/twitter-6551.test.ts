@@ -3,6 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { useTestHome } from "../test/test-home";
 import { ingestTweetPayload } from "./tweet-repository";
 import {
+	readTwitter6551DailyBudget,
+	readTwitter6551FallbackState,
+	recordTwitter6551FxRecovery,
+	Twitter6551RequestBudgetError,
+} from "./twitter-6551-state";
+import {
+	createBudgetedTwitter6551Client,
 	ensureTwitter6551Account,
 	ingestTwitter6551Tweets,
 	normalizeTwitter6551Tweet,
@@ -679,6 +686,9 @@ describe("6551 Twitter adapter", () => {
 			"BIRDCLAW_LOCAL_STALE_SECONDS",
 			"BIRDCLAW_FXTWITTER_ENABLED",
 			"BIRDCLAW_FXTWITTER_BACKFILL_MINUTES",
+			"BIRDCLAW_6551_PAID_FALLBACK_FAILURE_THRESHOLD",
+			"BIRDCLAW_6551_PAID_FALLBACK_COOLDOWN_MINUTES",
+			"BIRDCLAW_6551_PAID_DAILY_REQUEST_BUDGET",
 		];
 		const before = Object.fromEntries(
 			keys.map((key) => [key, process.env[key]]),
@@ -707,15 +717,27 @@ describe("6551 Twitter adapter", () => {
 				restOnly: true,
 				failoverMode: true,
 				localStaleSeconds: 90,
+				paidFallbackFailureThreshold: 3,
+				paidFallbackCooldownMinutes: 360,
+				paidDailyRequestBudget: 24,
 			});
 
-			process.env.BIRDCLAW_6551_ENABLED = "0";
-			delete process.env.OPENNEWS_TOKEN;
+			process.env.BIRDCLAW_6551_PAID_DAILY_REQUEST_BUDGET = "invalid";
+			process.env.BIRDCLAW_6551_PAID_FALLBACK_FAILURE_THRESHOLD = "-1";
+			process.env.BIRDCLAW_6551_PAID_FALLBACK_COOLDOWN_MINUTES = "invalid";
+			expect(getTwitter6551RuntimeConfig()).toMatchObject({
+				paidDailyRequestBudget: 0,
+				paidFallbackFailureThreshold: Number.MAX_SAFE_INTEGER,
+				paidFallbackCooldownMinutes: Number.MAX_SAFE_INTEGER,
+			});
+			delete process.env.BIRDCLAW_6551_PAID_DAILY_REQUEST_BUDGET;
+			delete process.env.BIRDCLAW_6551_PAID_FALLBACK_FAILURE_THRESHOLD;
+			delete process.env.BIRDCLAW_6551_PAID_FALLBACK_COOLDOWN_MINUTES;
 			process.env.BIRDCLAW_FXTWITTER_ENABLED = "1";
 			process.env.BIRDCLAW_FXTWITTER_BACKFILL_MINUTES = "30";
 			expect(getTwitter6551RuntimeConfig()).toMatchObject({
 				enabled: true,
-				paidEnabled: false,
+				paidEnabled: true,
 				fxtwitterEnabled: true,
 				provider: "fxtwitter",
 				backfillMinutes: 30,
@@ -954,6 +976,430 @@ describe("6551 Twitter adapter", () => {
 		}
 	});
 
+	it("still ingests free Fx success when corrupt paid state is blocked", async () => {
+		const home = getHome();
+		home.db
+			.prepare(
+				`insert into twitter6551_recovery_state (
+					account_id, scope, consecutive_fx_total_failures,
+					last_counted_fx_failure_at, last_paid_fallback_at, updated_at
+				 ) values (?, ?, ?, null, null, ?)`,
+			)
+			.run(
+				"acct_fx_corrupt_paid_state",
+				JSON.stringify({
+					provider: "fxtwitter",
+					accountId: "acct_fx_corrupt_paid_state",
+					watchUsers: ["free_recovery"],
+					targetTweetIds: [],
+				}),
+				"corrupt",
+				new Date().toISOString(),
+			);
+		const paidClient = { getUserTweets: vi.fn() };
+		const fxtwitter = {
+			getProfileStatuses: vi.fn().mockResolvedValue({
+				code: 200,
+				results: [fxTestStatus("fx-survives-corrupt-paid-state")],
+				cursor: null,
+			}),
+		};
+		const worker = new Twitter6551Worker(
+			{
+				baseUrl: "https://ai.6551.io",
+				tokenEnv: "TWITTER_TOKEN",
+				tokenDetected: true,
+				token: "secret-token",
+				enabled: true,
+				accountId: "acct_fx_corrupt_paid_state",
+				watchUsers: ["free_recovery"],
+				targetTweetIds: [],
+				backfillMinutes: 30,
+				paidEnabled: true,
+				fxtwitterEnabled: true,
+				provider: "fxtwitter",
+				failoverMode: false,
+				localStaleSeconds: 180,
+				paidFallbackFailureThreshold: 3,
+				paidFallbackCooldownMinutes: 360,
+				paidDailyRequestBudget: 24,
+			},
+			paidClient as never,
+			fxtwitter as never,
+		);
+		try {
+			await expect(worker.runBackfill()).resolves.toBe("partial");
+			expect(paidClient.getUserTweets).not.toHaveBeenCalled();
+			expect(
+				home.db
+					.prepare("select text from tweets where id = ?")
+					.get("fx-survives-corrupt-paid-state"),
+			).toEqual({ text: "free recovery fx-survives-corrupt-paid-state" });
+			expect(getTwitter6551RuntimeStatus().lastError).toContain(
+				"paid fallback state remains blocked",
+			);
+		} finally {
+			await worker.stop();
+		}
+	});
+
+	it("uses paid REST only after persisted consecutive Fx total failures and keeps cooldown across worker recreation", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-15T00:00:00.000Z"));
+		const WebSocketMock = vi.fn();
+		vi.stubGlobal("WebSocket", WebSocketMock);
+		const paidTweet = normalizeTwitter6551Tweet({
+			id: "paid-reserve-tweet",
+			text: "paid reserve",
+			createdAt: "2026-08-15T00:00:00.000Z",
+			userIdStr: "paid-user",
+			userScreenName: "paid_user",
+		})!;
+		const paidClient = {
+			getUserTweets: vi.fn().mockResolvedValue([paidTweet]),
+			addWatch: vi.fn(),
+		};
+		const failingFx = () => ({
+			getProfileStatuses: vi.fn().mockRejectedValue(new Error("Fx offline")),
+		});
+		const config = {
+			baseUrl: "https://ai.6551.io",
+			tokenEnv: "TWITTER_TOKEN",
+			tokenDetected: true,
+			token: "secret-token",
+			enabled: true,
+			accountId: "acct_three_tier",
+			watchUsers: ["three_tier_user"],
+			targetTweetIds: [],
+			backfillMinutes: 1,
+			restOnly: false,
+			paidEnabled: true,
+			fxtwitterEnabled: true,
+			provider: "fxtwitter" as const,
+			failoverMode: false,
+			localStaleSeconds: 180,
+			paidFallbackFailureThreshold: 3,
+			paidFallbackCooldownMinutes: 360,
+			paidDailyRequestBudget: 24,
+		};
+		let worker = new Twitter6551Worker(
+			config,
+			paidClient as never,
+			failingFx() as never,
+		);
+		try {
+			await worker.runBackfill();
+			expect(paidClient.getUserTweets).not.toHaveBeenCalled();
+			vi.setSystemTime(new Date("2026-08-15T00:01:00.000Z"));
+			await worker.runBackfill();
+			expect(paidClient.getUserTweets).not.toHaveBeenCalled();
+			vi.setSystemTime(new Date("2026-08-15T00:02:00.000Z"));
+			await worker.runBackfill();
+			expect(paidClient.getUserTweets).toHaveBeenCalledTimes(1);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				provider: "fxtwitter",
+				activeSource: "6551",
+				state: "degraded",
+				fxConsecutiveTotalFailures: 0,
+				lastPaidFallbackAt: "2026-08-15T00:02:00.000Z",
+			});
+			expect(paidClient.addWatch).not.toHaveBeenCalled();
+			expect(WebSocketMock).not.toHaveBeenCalled();
+			await worker.stop();
+
+			worker = new Twitter6551Worker(
+				config,
+				paidClient as never,
+				failingFx() as never,
+			);
+			for (const minute of [3, 4, 5]) {
+				vi.setSystemTime(new Date(`2026-08-15T00:0${String(minute)}:00.000Z`));
+				await worker.runBackfill();
+			}
+			expect(paidClient.getUserTweets).toHaveBeenCalledTimes(1);
+			expect(
+				readTwitter6551FallbackState(
+					getHome().db,
+					config.accountId,
+					JSON.stringify({
+						provider: "fxtwitter",
+						accountId: config.accountId,
+						watchUsers: config.watchUsers,
+						targetTweetIds: config.targetTweetIds,
+					}),
+				),
+			).toMatchObject({ consecutiveFxTotalFailures: 3 });
+
+			vi.setSystemTime(new Date("2026-08-15T06:02:00.000Z"));
+			await worker.runBackfill();
+			expect(paidClient.getUserTweets).toHaveBeenCalledTimes(2);
+		} finally {
+			await worker.stop();
+			vi.unstubAllGlobals();
+			vi.useRealTimers();
+		}
+	});
+
+	it("resets the paid threshold on Fx partial success", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-15T07:00:00.000Z"));
+		const paidClient = { getUserTweets: vi.fn() };
+		const fxtwitter = {
+			getProfileStatuses: vi
+				.fn()
+				.mockRejectedValueOnce(new Error("Fx offline"))
+				.mockRejectedValueOnce(new Error("Fx offline"))
+				.mockRejectedValueOnce(new Error("Fx offline"))
+				.mockRejectedValueOnce(new Error("Fx offline"))
+				.mockImplementationOnce(async (handle: string) => {
+					if (handle === "broken") throw new Error("one target offline");
+					return {
+						code: 200,
+						results: [fxTestStatus("fx-resets-threshold")],
+						cursor: null,
+					};
+				})
+				.mockRejectedValue(new Error("Fx offline")),
+		};
+		const config = {
+			baseUrl: "https://ai.6551.io",
+			tokenEnv: "TWITTER_TOKEN",
+			tokenDetected: true,
+			token: "secret-token",
+			enabled: true,
+			accountId: "acct_fx_reset",
+			watchUsers: ["healthy", "broken"],
+			targetTweetIds: [],
+			backfillMinutes: 1,
+			paidEnabled: true,
+			fxtwitterEnabled: true,
+			provider: "fxtwitter" as const,
+			failoverMode: false,
+			localStaleSeconds: 180,
+			paidFallbackFailureThreshold: 3,
+			paidFallbackCooldownMinutes: 360,
+			paidDailyRequestBudget: 24,
+		};
+		const worker = new Twitter6551Worker(
+			config,
+			paidClient as never,
+			fxtwitter as never,
+		);
+		try {
+			await worker.runBackfill();
+			vi.setSystemTime(new Date("2026-08-15T07:01:00.000Z"));
+			await worker.runBackfill();
+			vi.setSystemTime(new Date("2026-08-15T07:02:00.000Z"));
+			await worker.runBackfill();
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				state: "degraded",
+				fxConsecutiveTotalFailures: 0,
+			});
+			expect(paidClient.getUserTweets).not.toHaveBeenCalled();
+		} finally {
+			await worker.stop();
+			vi.useRealTimers();
+		}
+	});
+
+	it("counts every paid retry and blocks the network at the persistent daily limit", async () => {
+		const fetchMock = vi.fn<typeof fetch>(async () =>
+			Response.json({ success: false, message: "retry" }, { status: 503 }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const config = {
+			...getTwitter6551RuntimeConfig(),
+			token: "secret-token",
+			paidDailyRequestBudget: 2,
+		};
+		const client = createBudgetedTwitter6551Client(config);
+		try {
+			await expect(client.getUser("budget_user")).rejects.toThrow(
+				"daily request budget exhausted",
+			);
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			expect(
+				readTwitter6551DailyBudget(getHome().db, 2, new Date()),
+			).toMatchObject({ attempts: 2, remaining: 0 });
+
+			const recreated = createBudgetedTwitter6551Client(config);
+			await expect(recreated.getUser("budget_user")).rejects.toThrow(
+				"daily request budget exhausted",
+			);
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it("ingests paid partial results fill-only before a later budget stop", async () => {
+		const home = getHome();
+		const paidTweet = normalizeTwitter6551Tweet({
+			id: "paid-partial-existing",
+			text: "lower-priority paid text",
+			createdAt: "2026-08-15T09:00:00.000Z",
+			userIdStr: "paid-partial-user",
+			userScreenName: "paid_partial_user",
+		})!;
+		ingestTweetPayload(home.db, {
+			accountId: "acct_paid_partial",
+			payload: {
+				data: [
+					{
+						id: paidTweet.id,
+						author_id: "bird-paid-partial-user",
+						text: "authenticated bird text",
+						created_at: "2026-08-15T08:59:00.000Z",
+					},
+				],
+				includes: {
+					users: [
+						{
+							id: "bird-paid-partial-user",
+							name: "Bird Source",
+							username: "bird_source",
+						},
+					],
+				},
+				meta: { result_count: 1 },
+			},
+			source: "bird",
+			edgeKind: "home",
+		});
+		const paidClient = {
+			getUserTweets: vi.fn(async (handle: string) => {
+				if (handle === "budget-blocked") {
+					throw new Twitter6551RequestBudgetError("budget boundary");
+				}
+				return [paidTweet];
+			}),
+		};
+		const fxtwitter = {
+			getProfileStatuses: vi.fn().mockRejectedValue(new Error("Fx offline")),
+		};
+		const worker = new Twitter6551Worker(
+			{
+				baseUrl: "https://ai.6551.io",
+				tokenEnv: "TWITTER_TOKEN",
+				tokenDetected: true,
+				token: "secret-token",
+				enabled: true,
+				accountId: "acct_paid_partial",
+				watchUsers: ["paid-success", "budget-blocked"],
+				targetTweetIds: [],
+				backfillMinutes: 1,
+				paidEnabled: true,
+				fxtwitterEnabled: true,
+				provider: "fxtwitter",
+				failoverMode: false,
+				localStaleSeconds: 180,
+				paidFallbackFailureThreshold: 1,
+				paidFallbackCooldownMinutes: 360,
+				paidDailyRequestBudget: 24,
+			},
+			paidClient as never,
+			fxtwitter as never,
+		);
+		try {
+			await expect(worker.runBackfill()).resolves.toBe("partial");
+			expect(paidClient.getUserTweets).toHaveBeenCalledTimes(2);
+			expect(
+				home.db
+					.prepare("select text, created_at from tweets where id = ?")
+					.get(paidTweet.id),
+			).toEqual({
+				text: "authenticated bird text",
+				created_at: "2026-08-15T08:59:00.000Z",
+			});
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				activeSource: "6551",
+				state: "degraded",
+				lastError: expect.stringContaining("budget boundary"),
+			});
+		} finally {
+			await worker.stop();
+		}
+	});
+
+	it("suppresses the rest of a paid batch before budget when local heartbeat recovers", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-15T10:00:00.000Z"));
+		await recordTwitter6551LocalHeartbeat(
+			0,
+			new Date("2000-01-01T00:00:00.000Z"),
+		);
+		const fetchMock = vi.fn<typeof fetch>(async (input) => {
+			expect(String(input)).toBe("https://ai.6551.io/open/twitter_tweet_by_id");
+			await recordTwitter6551LocalHeartbeat(0, new Date());
+			return Response.json({
+				success: true,
+				data: {
+					id: "local-return-tweet",
+					text: "result fetched before local return",
+					createdAt: "2026-08-15T10:02:00.000Z",
+					userIdStr: "local-return-user",
+					userScreenName: "local_return_user",
+				},
+			});
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		const fxtwitter = {
+			getStatus: vi.fn().mockRejectedValue(new Error("Fx offline")),
+			getConversation: vi.fn().mockRejectedValue(new Error("Fx offline")),
+			getQuotes: vi.fn().mockRejectedValue(new Error("Fx offline")),
+		};
+		const config = {
+			baseUrl: "https://ai.6551.io",
+			tokenEnv: "TWITTER_TOKEN",
+			tokenDetected: true,
+			token: "secret-token",
+			enabled: true,
+			accountId: "acct_local_return",
+			watchUsers: [],
+			targetTweetIds: ["local-return-tweet"],
+			backfillMinutes: 1,
+			paidEnabled: true,
+			fxtwitterEnabled: true,
+			provider: "fxtwitter" as const,
+			failoverMode: true,
+			localStaleSeconds: 180,
+			paidFallbackFailureThreshold: 3,
+			paidFallbackCooldownMinutes: 360,
+			paidDailyRequestBudget: 24,
+		};
+		const worker = new Twitter6551Worker(config, undefined, fxtwitter as never);
+		try {
+			for (const minute of [0, 1, 2]) {
+				vi.setSystemTime(new Date(`2026-08-15T10:0${String(minute)}:00.000Z`));
+				await worker.runBackfill();
+			}
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(
+				readTwitter6551DailyBudget(
+					getHome().db,
+					24,
+					new Date("2026-08-15T10:02:00.000Z"),
+				),
+			).toMatchObject({ attempts: 1, remaining: 23 });
+			expect(getTwitter6551RuntimeStatus().lastError).toContain(
+				"local BirdClaw bridge recovered",
+			);
+			expect(
+				getHome()
+					.db.prepare("select text from tweets where id = ?")
+					.get("local-return-tweet"),
+			).toEqual({ text: "result fetched before local return" });
+		} finally {
+			await worker.stop();
+			await recordTwitter6551LocalHeartbeat(
+				0,
+				new Date("2000-01-01T00:00:00.000Z"),
+			);
+			vi.unstubAllGlobals();
+			vi.useRealTimers();
+		}
+	});
+
 	it("preserves the REST recovery due time across failover worker recreation", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-08-15T01:00:00.000Z"));
@@ -1118,6 +1564,88 @@ describe("6551 Twitter adapter", () => {
 				state: "polling",
 				lastError: null,
 			});
+		} finally {
+			await stopTwitter6551WorkerManager();
+			vi.unstubAllGlobals();
+			for (const key of keys) {
+				const value = before[key];
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	});
+
+	it("keeps cold and hot manual free syncs off paid even when the stored threshold is already met", async () => {
+		const keys = [
+			"BIRDCLAW_FXTWITTER_ENABLED",
+			"BIRDCLAW_FXTWITTER_BACKFILL_MINUTES",
+			"BIRDCLAW_6551_ENABLED",
+			"BIRDCLAW_6551_ACCOUNT_ID",
+			"BIRDCLAW_6551_WATCH_USERS",
+			"BIRDCLAW_6551_TARGET_TWEETS",
+			"BIRDCLAW_6551_FAILOVER_MODE",
+			"BIRDCLAW_6551_PAID_FALLBACK_FAILURE_THRESHOLD",
+			"TWITTER_TOKEN",
+		];
+		const before = Object.fromEntries(
+			keys.map((key) => [key, process.env[key]]),
+		);
+		const fetchMock = vi.fn<typeof fetch>(async (input) => {
+			const url = String(input);
+			if (url.startsWith("https://ai.6551.io/")) {
+				throw new Error("paid network must not be called");
+			}
+			return Response.json(
+				{ code: 404, message: "Fx unavailable" },
+				{ status: 404 },
+			);
+		});
+		try {
+			await stopTwitter6551WorkerManager();
+			process.env.BIRDCLAW_FXTWITTER_ENABLED = "1";
+			process.env.BIRDCLAW_FXTWITTER_BACKFILL_MINUTES = "30";
+			process.env.BIRDCLAW_6551_ENABLED = "1";
+			process.env.BIRDCLAW_6551_ACCOUNT_ID = "acct_manual_free_guard";
+			process.env.BIRDCLAW_6551_WATCH_USERS = "manual_free_guard";
+			process.env.BIRDCLAW_6551_TARGET_TWEETS = "";
+			process.env.BIRDCLAW_6551_FAILOVER_MODE = "0";
+			process.env.BIRDCLAW_6551_PAID_FALLBACK_FAILURE_THRESHOLD = "3";
+			process.env.TWITTER_TOKEN = "secret-token";
+			vi.stubGlobal("fetch", fetchMock);
+
+			const scope = JSON.stringify({
+				provider: "fxtwitter",
+				accountId: "acct_manual_free_guard",
+				watchUsers: ["manual_free_guard"],
+				targetTweetIds: [],
+			});
+			for (let index = 0; index < 3; index += 1) {
+				recordTwitter6551FxRecovery(
+					getHome().db,
+					"acct_manual_free_guard",
+					scope,
+					"total_failure",
+					new Date(Date.now() + index),
+				);
+			}
+
+			await runTwitter6551Backfill();
+			await runTwitter6551Backfill();
+
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			expect(
+				fetchMock.mock.calls.every(([input]) =>
+					String(input).startsWith("https://api.fxtwitter.com/"),
+				),
+			).toBe(true);
+			expect(
+				readTwitter6551FallbackState(
+					getHome().db,
+					"acct_manual_free_guard",
+					scope,
+				),
+			).toMatchObject({ consecutiveFxTotalFailures: 3 });
+			expect(readTwitter6551DailyBudget(getHome().db, 24).attempts).toBe(0);
 		} finally {
 			await stopTwitter6551WorkerManager();
 			vi.unstubAllGlobals();

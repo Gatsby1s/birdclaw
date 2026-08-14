@@ -111,7 +111,7 @@ describe("Twillot history queue", () => {
 			now: new Date("2026-08-10T01:01:00.000Z"),
 		});
 
-		expect(Number(db.pragma("user_version", { simple: true }))).toBe(17);
+		expect(Number(db.pragma("user_version", { simple: true }))).toBe(18);
 		expect(second.id).toBe(first.id);
 		expect(second.handle).toBe("first-renamed");
 		expect(second.state).toBe("queued");
