@@ -175,27 +175,41 @@ function getTwitter6551StatusEffect(): Effect.Effect<
 			Boolean(runtime.lastBackfillAt && runtime.state !== "error");
 		return {
 			source: "twitter6551" as const,
-			label: "6551 Twitter API",
+			label: "Twitter recovery",
 			works,
 			installed: true,
-			status: (works
-				? "ok"
-				: runtime.state === "error"
-					? "error"
-					: "warning") as "ok" | "warning" | "error",
+			status: (runtime.state === "error"
+				? "error"
+				: runtime.state === "degraded"
+					? "warning"
+					: works
+						? "ok"
+						: "warning") as "ok" | "warning" | "error",
 			detail:
 				runtime.activeSource === "local"
-					? `local bridge online; 6551 is standing by`
-					: runtime.connected
-						? `6551 realtime connected; ${String(runtime.watchUsers.length)} watched account${runtime.watchUsers.length === 1 ? "" : "s"}`
-						: runtime.activeSource === "waiting"
-							? "waiting for the local bridge before 6551 takeover"
-							: runtime.lastBackfillAt
-								? `6551 recovery polling active; last sync ${runtime.lastBackfillAt}`
-								: config.tokenDetected
-									? (runtime.lastError ??
-										"token detected; worker is not connected")
-									: `${config.tokenEnv} not detected`,
+					? runtime.provider === "fxtwitter"
+						? "local bridge online; free FxTwitter recovery is standing by"
+						: "local bridge online; 6551 is standing by"
+					: runtime.activeSource === "fxtwitter"
+						? (runtime.lastError ??
+							(runtime.lastBackfillAt
+								? `free FxTwitter targeted recovery active; last sync ${runtime.lastBackfillAt}`
+								: "free FxTwitter targeted recovery is starting"))
+						: runtime.connected
+							? `6551 realtime connected; ${String(runtime.watchUsers.length)} watched account${runtime.watchUsers.length === 1 ? "" : "s"}`
+							: runtime.activeSource === "waiting"
+								? runtime.provider === "fxtwitter"
+									? "waiting for the local bridge before free FxTwitter recovery"
+									: "waiting for the local bridge before 6551 takeover"
+								: runtime.lastBackfillAt
+									? `6551 recovery polling active; last sync ${runtime.lastBackfillAt}`
+									: runtime.provider === "fxtwitter"
+										? (runtime.lastError ??
+											"free FxTwitter recovery is not active")
+										: config.tokenDetected
+											? (runtime.lastError ??
+												"token detected; worker is not connected")
+											: `${config.tokenEnv} not detected`,
 			accounts: [],
 		};
 	});

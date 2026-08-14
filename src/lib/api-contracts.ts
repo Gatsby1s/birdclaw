@@ -678,6 +678,7 @@ export type ProfileAnalysisSourceSetting = z.infer<
 
 export const twitter6551RuntimeStatusSchema = z.object({
 	enabled: z.boolean(),
+	provider: z.enum(["disabled", "fxtwitter", "6551"]).default("disabled"),
 	state: z.enum([
 		"disabled",
 		"starting",
@@ -691,7 +692,7 @@ export const twitter6551RuntimeStatusSchema = z.object({
 	]),
 	connected: z.boolean(),
 	failoverMode: z.boolean(),
-	activeSource: z.enum(["disabled", "waiting", "local", "6551"]),
+	activeSource: z.enum(["disabled", "waiting", "local", "fxtwitter", "6551"]),
 	watchUsers: z.array(z.string()),
 	targetTweetIds: z.array(z.string()),
 	lastConnectedAt: z.string().nullable(),
@@ -812,8 +813,11 @@ export const birdclawSettingsSchema = z.object({
 			watchUsers: z.array(z.string()).default([]),
 			targetTweetIds: z.array(z.string()).default([]),
 			backfillMinutes: z.number().default(120),
+			paidEnabled: z.boolean().default(false),
+			fxtwitterEnabled: z.boolean().default(false),
 			runtime: twitter6551RuntimeStatusSchema.default({
 				enabled: false,
+				provider: "disabled",
 				state: "disabled",
 				connected: false,
 				failoverMode: false,

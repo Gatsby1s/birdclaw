@@ -90,6 +90,8 @@ See [Backup](backup.md). When `autoSync` is enabled, read commands pull + merge 
 | `BIRDCLAW_WEB_TOKEN`                        | App-level token for remote login; browsers receive a signed HttpOnly session, while API clients may send `x-birdclaw-token`                          |
 | `BIRDCLAW_ALLOW_REMOTE_WEB`                 | Set to `1` to allow remote access through a trusted private proxy                                                                                    |
 | `BIRDCLAW_DISABLE_LIVE_WRITES`              | Set to `1` to block any live mutation (used by tests and CI)                                                                                         |
+| `BIRDCLAW_FXTWITTER_ENABLED`                | Set to `1` to use the free public FxTwitter API instead of paid 6551 for watched-account and target-thread recovery                                 |
+| `BIRDCLAW_FXTWITTER_BACKFILL_MINUTES`       | Minutes between free FxTwitter targeted recovery polls; defaults to the configured recovery interval                                                |
 | `BIRDCLAW_6551_ENABLED`                     | Set to `1` to run the 6551 realtime worker in the production web process                                                                             |
 | `BIRDCLAW_6551_ACCOUNT_ID`                  | BirdClaw account scope used by 6551; set it to the same account ID uploaded by the local bridge                                                      |
 | `BIRDCLAW_6551_WATCH_USERS`                 | Comma-separated X handles to monitor and recovery-sync                                                                                               |
@@ -97,7 +99,7 @@ See [Backup](backup.md). When `autoSync` is enabled, read commands pull + merge 
 | `BIRDCLAW_6551_BACKFILL_MINUTES`            | Minutes between latest-100 recovery polls; defaults to `120`                                                                                         |
 | `BIRDCLAW_6551_REST_ONLY`                   | Set to `1` to skip Watch/WebSocket entirely and run only periodic REST recovery polling                                                              |
 | `BIRDCLAW_6551_FAILOVER_MODE`               | Set to `1` to keep 6551 on standby while an authenticated local bridge heartbeat is fresh                                                            |
-| `BIRDCLAW_LOCAL_STALE_SECONDS`              | Seconds without a local heartbeat before 6551 takes over; defaults to `180`                                                                          |
+| `BIRDCLAW_LOCAL_STALE_SECONDS`              | Seconds without a local heartbeat before the configured Twitter recovery source takes over; defaults to `180`                                        |
 | `BIRDCLAW_LOCAL_BRIDGE_TOKEN`               | Cloud-side secret accepted only by the local bridge ingest endpoint                                                                                  |
 | `BIRDCLAW_CLOUD_BRIDGE_URL`                 | Local Mac destination URL for heartbeat and incremental timeline upload                                                                              |
 | `BIRDCLAW_CLOUD_BRIDGE_TOKEN`               | Local Mac copy of the cloud bridge secret                                                                                                            |

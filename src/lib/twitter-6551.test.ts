@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { useTestHome } from "../test/test-home";
+import { ingestTweetPayload } from "./tweet-repository";
 import {
 	ensureTwitter6551Account,
 	ingestTwitter6551Tweets,
@@ -18,6 +19,28 @@ import {
 	twitter6551TweetsToPayload,
 	twitter6551UserToXurl,
 } from "./twitter-6551";
+
+function fxTestStatus(id: string, overrides: Record<string, unknown> = {}) {
+	return {
+		type: "status",
+		id,
+		url: `https://x.com/free_recovery/status/${id}`,
+		text: `free recovery ${id}`,
+		created_at: "2026-08-15T00:00:00Z",
+		likes: 1,
+		reposts: 2,
+		quotes: 3,
+		replies: 4,
+		author: {
+			type: "profile",
+			id: "fx-user-id",
+			name: "Free Recovery",
+			screen_name: "free_recovery",
+		},
+		raw_text: { text: `free recovery ${id}`, facets: [] },
+		...overrides,
+	};
+}
 
 describe("6551 Twitter adapter", () => {
 	const getHome = useTestHome({ prefix: "birdclaw-6551-" });
@@ -654,6 +677,8 @@ describe("6551 Twitter adapter", () => {
 			"BIRDCLAW_6551_REST_ONLY",
 			"BIRDCLAW_6551_FAILOVER_MODE",
 			"BIRDCLAW_LOCAL_STALE_SECONDS",
+			"BIRDCLAW_FXTWITTER_ENABLED",
+			"BIRDCLAW_FXTWITTER_BACKFILL_MINUTES",
 		];
 		const before = Object.fromEntries(
 			keys.map((key) => [key, process.env[key]]),
@@ -669,15 +694,32 @@ describe("6551 Twitter adapter", () => {
 			process.env.BIRDCLAW_6551_REST_ONLY = "1";
 			process.env.BIRDCLAW_6551_FAILOVER_MODE = "1";
 			process.env.BIRDCLAW_LOCAL_STALE_SECONDS = "90";
+			delete process.env.BIRDCLAW_FXTWITTER_ENABLED;
 			expect(getTwitter6551RuntimeConfig()).toMatchObject({
 				token: "fallback-token",
 				enabled: true,
+				paidEnabled: true,
+				fxtwitterEnabled: false,
+				provider: "6551",
 				accountId: "custom",
 				watchUsers: ["alice", "bob"],
 				targetTweetIds: ["10", "20"],
 				restOnly: true,
 				failoverMode: true,
 				localStaleSeconds: 90,
+			});
+
+			process.env.BIRDCLAW_6551_ENABLED = "0";
+			delete process.env.OPENNEWS_TOKEN;
+			process.env.BIRDCLAW_FXTWITTER_ENABLED = "1";
+			process.env.BIRDCLAW_FXTWITTER_BACKFILL_MINUTES = "30";
+			expect(getTwitter6551RuntimeConfig()).toMatchObject({
+				enabled: true,
+				paidEnabled: false,
+				fxtwitterEnabled: true,
+				provider: "fxtwitter",
+				backfillMinutes: 30,
+				restOnly: true,
 			});
 			process.env.BIRDCLAW_6551_WATCH_USERS = "";
 			process.env.BIRDCLAW_6551_TARGET_TWEETS = "";
@@ -747,6 +789,168 @@ describe("6551 Twitter adapter", () => {
 			await worker.stop();
 			vi.unstubAllGlobals();
 			vi.useRealTimers();
+		}
+	});
+
+	it("uses free FxTwitter targeted recovery without any paid 6551 or WebSocket calls", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-15T00:00:00.000Z"));
+		const WebSocketMock = vi.fn();
+		vi.stubGlobal("WebSocket", WebSocketMock);
+		const paidClient = {
+			addWatch: vi.fn(),
+			getUserTweets: vi.fn(),
+			getTweet: vi.fn(),
+			searchTweets: vi.fn(),
+			getQuoteTweets: vi.fn(),
+		};
+		const fxtwitter = {
+			getProfileStatuses: vi.fn().mockResolvedValue({
+				code: 200,
+				results: [fxTestStatus("fx-watch")],
+				cursor: null,
+			}),
+			getStatus: vi.fn().mockResolvedValue({
+				code: 200,
+				status: fxTestStatus("fx-target"),
+				thread: [],
+			}),
+			getConversation: vi.fn().mockResolvedValue({
+				code: 200,
+				status: fxTestStatus("fx-target"),
+				thread: [],
+				replies: [fxTestStatus("fx-reply", { conversation_id: "fx-target" })],
+				cursor: null,
+			}),
+			getQuotes: vi.fn().mockResolvedValue({
+				code: 200,
+				results: [fxTestStatus("fx-quote")],
+				cursor: null,
+			}),
+		};
+		const worker = new Twitter6551Worker(
+			{
+				baseUrl: "https://ai.6551.io",
+				tokenEnv: "TWITTER_TOKEN",
+				tokenDetected: false,
+				token: "",
+				enabled: true,
+				accountId: "acct_fx_recovery",
+				watchUsers: ["free_recovery"],
+				targetTweetIds: ["fx-target"],
+				backfillMinutes: 30,
+				restOnly: true,
+				paidEnabled: false,
+				fxtwitterEnabled: true,
+				provider: "fxtwitter",
+				failoverMode: false,
+				localStaleSeconds: 180,
+			},
+			paidClient as never,
+			fxtwitter as never,
+		);
+		try {
+			await worker.start();
+			expect(fxtwitter.getProfileStatuses).toHaveBeenCalledWith(
+				"free_recovery",
+				{ count: 100, withReplies: true },
+			);
+			expect(fxtwitter.getStatus).toHaveBeenCalledWith("fx-target");
+			expect(fxtwitter.getConversation).toHaveBeenCalledWith("fx-target", {
+				rankingMode: "recency",
+			});
+			expect(fxtwitter.getQuotes).toHaveBeenCalledWith("fx-target", {
+				count: 100,
+			});
+			for (const method of Object.values(paidClient)) {
+				expect(method).not.toHaveBeenCalled();
+			}
+			expect(WebSocketMock).not.toHaveBeenCalled();
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				provider: "fxtwitter",
+				activeSource: "fxtwitter",
+				state: "polling",
+				lastError: null,
+			});
+			expect(
+				getHome()
+					.db.prepare(
+						"select tweet_id, source from tweet_account_edges where account_id = ? order by tweet_id",
+					)
+					.all("acct_fx_recovery"),
+			).toEqual([
+				{ tweet_id: "fx-quote", source: "fxtwitter" },
+				{ tweet_id: "fx-reply", source: "fxtwitter" },
+				{ tweet_id: "fx-target", source: "fxtwitter" },
+				{ tweet_id: "fx-watch", source: "fxtwitter" },
+			]);
+			expect(
+				getHome()
+					.db.prepare("select name, transport from accounts where id = ?")
+					.get("acct_fx_recovery"),
+			).toEqual({ name: "FxTwitter Recovery", transport: "fxtwitter" });
+		} finally {
+			await worker.stop();
+			vi.unstubAllGlobals();
+			vi.useRealTimers();
+		}
+	});
+
+	it("ingests successful FxTwitter targets when another target fails", async () => {
+		const paidClient = {
+			addWatch: vi.fn(),
+			getUserTweets: vi.fn(),
+		};
+		const fxtwitter = {
+			getProfileStatuses: vi.fn(async (handle: string) => {
+				if (handle === "broken") throw new Error("profile unavailable");
+				return {
+					code: 200,
+					results: [fxTestStatus("fx-partial")],
+					cursor: null,
+				};
+			}),
+		};
+		const worker = new Twitter6551Worker(
+			{
+				baseUrl: "https://ai.6551.io",
+				tokenEnv: "TWITTER_TOKEN",
+				tokenDetected: false,
+				token: "",
+				enabled: true,
+				accountId: "acct_fx_partial",
+				watchUsers: ["healthy", "broken"],
+				targetTweetIds: [],
+				backfillMinutes: 30,
+				restOnly: true,
+				paidEnabled: false,
+				fxtwitterEnabled: true,
+				provider: "fxtwitter",
+				failoverMode: false,
+				localStaleSeconds: 180,
+			},
+			paidClient as never,
+			fxtwitter as never,
+		);
+		try {
+			await worker.start();
+			expect(fxtwitter.getProfileStatuses).toHaveBeenCalledTimes(2);
+			expect(
+				getHome()
+					.db.prepare(
+						"select source from tweet_account_edges where account_id = ? and tweet_id = ?",
+					)
+					.get("acct_fx_partial", "fx-partial"),
+			).toEqual({ source: "fxtwitter" });
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				provider: "fxtwitter",
+				state: "degraded",
+				lastError: expect.stringContaining("@broken: profile unavailable"),
+			});
+			expect(getTwitter6551RuntimeStatus().lastBackfillAt).not.toBeNull();
+			expect(paidClient.getUserTweets).not.toHaveBeenCalled();
+		} finally {
+			await worker.stop();
 		}
 	});
 
@@ -914,6 +1118,128 @@ describe("6551 Twitter adapter", () => {
 				state: "polling",
 				lastError: null,
 			});
+		} finally {
+			await stopTwitter6551WorkerManager();
+			vi.unstubAllGlobals();
+			for (const key of keys) {
+				const value = before[key];
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	});
+
+	it("allows one free manual FxTwitter sync while the authenticated local bridge is fresh", async () => {
+		const keys = [
+			"BIRDCLAW_FXTWITTER_ENABLED",
+			"BIRDCLAW_FXTWITTER_BACKFILL_MINUTES",
+			"BIRDCLAW_6551_ENABLED",
+			"BIRDCLAW_6551_ACCOUNT_ID",
+			"BIRDCLAW_6551_WATCH_USERS",
+			"BIRDCLAW_6551_TARGET_TWEETS",
+			"BIRDCLAW_6551_FAILOVER_MODE",
+			"BIRDCLAW_LOCAL_STALE_SECONDS",
+			"TWITTER_TOKEN",
+			"OPENNEWS_TOKEN",
+		];
+		const before = Object.fromEntries(
+			keys.map((key) => [key, process.env[key]]),
+		);
+		const fetchMock = vi.fn<typeof fetch>(async () =>
+			Response.json({
+				code: 200,
+				results: [fxTestStatus("fx-manual")],
+				cursor: null,
+			}),
+		);
+		try {
+			await stopTwitter6551WorkerManager();
+			process.env.BIRDCLAW_FXTWITTER_ENABLED = "1";
+			process.env.BIRDCLAW_FXTWITTER_BACKFILL_MINUTES = "30";
+			process.env.BIRDCLAW_6551_ENABLED = "0";
+			process.env.BIRDCLAW_6551_ACCOUNT_ID = "acct_fx_manual";
+			process.env.BIRDCLAW_6551_WATCH_USERS = "free_recovery";
+			process.env.BIRDCLAW_6551_TARGET_TWEETS = "";
+			process.env.BIRDCLAW_6551_FAILOVER_MODE = "1";
+			process.env.BIRDCLAW_LOCAL_STALE_SECONDS = "180";
+			delete process.env.TWITTER_TOKEN;
+			delete process.env.OPENNEWS_TOKEN;
+			vi.stubGlobal("fetch", fetchMock);
+			const home = getHome();
+			ensureTwitter6551Account(home.db, "acct_fx_manual");
+			home.db
+				.prepare(
+					"update accounts set name = 'Primary', transport = 'bird' where id = ?",
+				)
+				.run("acct_fx_manual");
+			ingestTweetPayload(home.db, {
+				accountId: "acct_fx_manual",
+				payload: {
+					data: [
+						{
+							id: "fx-manual",
+							author_id: "bird-user-id",
+							text: "authenticated bird text",
+							created_at: "2026-08-14T12:00:00.000Z",
+							public_metrics: { like_count: 99 },
+							entities: { urls: [], mentions: [], hashtags: [] },
+						},
+					],
+					includes: {
+						users: [
+							{
+								id: "bird-user-id",
+								name: "Authenticated Bird",
+								username: "authenticated_bird",
+							},
+						],
+					},
+					meta: { result_count: 1 },
+				},
+				source: "bird",
+				edgeKind: "home",
+			});
+
+			await recordTwitter6551LocalHeartbeat(0, new Date());
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				provider: "fxtwitter",
+				activeSource: "local",
+			});
+
+			await runTwitter6551Backfill();
+
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+				"https://api.fxtwitter.com/2/profile/free_recovery/statuses?count=100&with_replies=true",
+			);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				provider: "fxtwitter",
+				activeSource: "fxtwitter",
+				state: "polling",
+				lastError: null,
+			});
+			expect(
+				home.db
+					.prepare(
+						`select t.text, t.created_at as createdAt, t.like_count as likeCount,
+							e.source, e.raw_json as rawJson
+						from tweets t
+						join tweet_account_edges e on e.tweet_id = t.id
+						where t.id = ? and e.account_id = ? and e.kind = 'home'`,
+					)
+					.get("fx-manual", "acct_fx_manual"),
+			).toEqual({
+				text: "authenticated bird text",
+				createdAt: "2026-08-14T12:00:00.000Z",
+				likeCount: 99,
+				source: "bird",
+				rawJson: expect.stringContaining("authenticated bird text"),
+			});
+			expect(
+				home.db
+					.prepare("select name, transport from accounts where id = ?")
+					.get("acct_fx_manual"),
+			).toEqual({ name: "Primary", transport: "bird" });
 		} finally {
 			await stopTwitter6551WorkerManager();
 			vi.unstubAllGlobals();
