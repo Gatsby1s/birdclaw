@@ -16,6 +16,11 @@ export interface IngestTweetPayloadOptions {
 	edgeKind?: TweetAccountEdgeKind;
 	collectionKind?: "likes" | "bookmarks";
 	markRepliesAsReplied?: boolean;
+	/**
+	 * Fill missing canonical rows and edges without replacing data already written
+	 * by an authenticated or archival source.
+	 */
+	preserveExistingCanonical?: boolean;
 }
 
 function getReferencedTweetId(tweet: XurlMentionData, type: string) {
@@ -41,6 +46,7 @@ export function ingestTweetPayload(
 		edgeKind,
 		collectionKind,
 		markRepliesAsReplied = false,
+		preserveExistingCanonical = false,
 	}: IngestTweetPayloadOptions,
 ) {
 	const usersById = new Map(
@@ -78,10 +84,19 @@ export function ingestTweetPayload(
       `)
 		: undefined;
 	const tweetIds: string[] = [];
+	const hasTweet = preserveExistingCanonical
+		? db.prepare("select 1 from tweets where id = ? limit 1")
+		: undefined;
+	const hasEdge = preserveExistingCanonical
+		? db.prepare(
+				"select 1 from tweet_account_edges where account_id = ? and tweet_id = ? and kind = ? limit 1",
+			)
+		: undefined;
 
 	db.transaction(() => {
 		const observedAt = new Date().toISOString();
 		for (const includedTweet of payload.includes?.tweets ?? []) {
+			if (hasTweet?.get(includedTweet.id)) continue;
 			const author = usersById.get(includedTweet.author_id);
 			const profile = author
 				? upsertProfileFromXUser(db, author)
@@ -104,26 +119,33 @@ export function ingestTweetPayload(
 			replaceTweetFts(db, includedTweet.id, includedTweet.text);
 		}
 		for (const tweet of payload.data) {
-			const author = usersById.get(tweet.author_id);
-			const profile = author
-				? upsertProfileFromXUser(db, author)
-				: ensureStubProfileForXUser(db, tweet.author_id);
-			const replyToId = getReferencedTweetId(tweet, "replied_to");
-			const quotedTweetId = getReferencedTweetId(tweet, "quoted");
-			upsertTweet.run(
-				tweet.id,
-				profile.profile.id,
-				tweet.text,
-				normalizeTimestampToIso(tweet.created_at),
-				markRepliesAsReplied && replyToId ? 1 : 0,
-				replyToId,
-				Number(tweet.public_metrics?.like_count ?? 0),
-				countTweetMedia(tweet),
-				JSON.stringify(tweetEntitiesFromXurl(tweet.entities)),
-				buildMediaJsonFromIncludes(tweet, payload.includes?.media),
-				quotedTweetId,
+			const tweetExists = Boolean(hasTweet?.get(tweet.id));
+			if (!tweetExists) {
+				const author = usersById.get(tweet.author_id);
+				const profile = author
+					? upsertProfileFromXUser(db, author)
+					: ensureStubProfileForXUser(db, tweet.author_id);
+				const replyToId = getReferencedTweetId(tweet, "replied_to");
+				const quotedTweetId = getReferencedTweetId(tweet, "quoted");
+				upsertTweet.run(
+					tweet.id,
+					profile.profile.id,
+					tweet.text,
+					normalizeTimestampToIso(tweet.created_at),
+					markRepliesAsReplied && replyToId ? 1 : 0,
+					replyToId,
+					Number(tweet.public_metrics?.like_count ?? 0),
+					countTweetMedia(tweet),
+					JSON.stringify(tweetEntitiesFromXurl(tweet.entities)),
+					buildMediaJsonFromIncludes(tweet, payload.includes?.media),
+					quotedTweetId,
+				);
+				replaceTweetFts(db, tweet.id, tweet.text);
+			}
+			const edgeExists = Boolean(
+				edgeKind && hasEdge?.get(accountId, tweet.id, edgeKind),
 			);
-			if (edgeKind) {
+			if (edgeKind && !edgeExists) {
 				upsertTweetAccountEdge(db, {
 					accountId,
 					tweetId: tweet.id,
@@ -141,8 +163,7 @@ export function ingestTweetPayload(
 				JSON.stringify(tweet),
 				observedAt,
 			);
-			replaceTweetFts(db, tweet.id, tweet.text);
-			tweetIds.push(tweet.id);
+			if (!tweetExists || !edgeExists) tweetIds.push(tweet.id);
 		}
 	})();
 

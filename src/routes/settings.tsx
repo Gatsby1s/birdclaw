@@ -139,7 +139,7 @@ async function syncTwitter6551() {
 		"/api/integrations/twitter6551",
 		{ method: "POST" },
 		twitter6551RuntimeStatusSchema,
-		"6551 sync failed",
+		"Twitter recovery sync failed",
 	);
 }
 
@@ -402,7 +402,7 @@ function SettingsRoute() {
 				<div className={errorCopyClass}>
 					{twitter6551Mutation.error instanceof Error
 						? twitter6551Mutation.error.message
-						: "6551 sync failed"}
+						: "Twitter recovery sync failed"}
 				</div>
 			) : null}
 			{twillotMutation.error ? (
@@ -834,11 +834,19 @@ function SettingsRoute() {
 							<div className="min-w-0">
 								<div className="flex items-center gap-2 text-[16px] font-bold text-[var(--ink)]">
 									<KeyRound className="size-4.5" strokeWidth={1.9} />
-									<span>6551 Twitter API</span>
+									<span>Twitter recovery</span>
 								</div>
 								<p className="mt-1 break-all text-[13px] text-[var(--ink-soft)]">
-									{twitter6551?.baseUrl} · {twitter6551?.tokenEnv}
+									{twitter6551?.fxtwitterEnabled
+										? "api.fxtwitter.com · free public recovery"
+										: `${twitter6551?.baseUrl} · ${twitter6551?.tokenEnv}`}
 								</p>
+								{twitter6551?.fxtwitterEnabled ? (
+									<p className="mt-1 text-[12px] text-[var(--ink-soft)]">
+										Public watched-account and thread recovery; not a complete
+										Following Home replacement.
+									</p>
+								) : null}
 								<p className="mt-1 text-[13px] text-[var(--ink-soft)]">
 									{twitter6551Runtime?.activeSource ?? "disabled"} ·{" "}
 									{String(twitter6551?.watchUsers.length ?? 0)} watched accounts
@@ -879,10 +887,13 @@ function SettingsRoute() {
 								>
 									<CheckCircle2 className="size-4" strokeWidth={2} />
 									{twitter6551Runtime?.activeSource === "local"
-										? "Local · 6551 standby"
+										? twitter6551?.fxtwitterEnabled
+											? "Local · FX standby"
+											: "Local · 6551 standby"
 										: twitter6551Runtime?.connected
 											? "Live"
-											: !twitter6551?.tokenDetected
+											: !twitter6551?.fxtwitterEnabled &&
+												  !twitter6551?.tokenDetected
 												? "No token"
 												: !twitter6551Runtime?.enabled
 													? "Disabled"
@@ -894,7 +905,8 @@ function SettingsRoute() {
 									className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1 text-[13px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)] disabled:opacity-55"
 									disabled={
 										!twitter6551Runtime?.enabled ||
-										twitter6551Runtime?.activeSource === "local" ||
+										(twitter6551Runtime?.activeSource === "local" &&
+											!twitter6551?.fxtwitterEnabled) ||
 										twitter6551Mutation.isPending
 									}
 									onClick={() => twitter6551Mutation.mutate()}
@@ -907,7 +919,7 @@ function SettingsRoute() {
 										)}
 										strokeWidth={2}
 									/>
-									Sync now
+									{twitter6551?.fxtwitterEnabled ? "Sync free" : "Sync now"}
 								</button>
 							</div>
 						</div>

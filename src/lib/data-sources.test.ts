@@ -38,6 +38,7 @@ import { getLiveDataSourcesEffect } from "./data-sources";
 
 function runtime(overrides: Record<string, unknown> = {}) {
 	return {
+		provider: "6551",
 		activeSource: "none",
 		connected: false,
 		lastBackfillAt: null,
@@ -151,6 +152,23 @@ describe("live data source status", () => {
 			"ok",
 		],
 		[
+			"local",
+			runtime({ activeSource: "local", provider: "fxtwitter" }),
+			"local bridge online; free FxTwitter recovery is standing by",
+			"ok",
+		],
+		[
+			"local",
+			runtime({
+				activeSource: "fxtwitter",
+				provider: "fxtwitter",
+				lastBackfillAt: "2026-08-15T00:00:00.000Z",
+				state: "polling",
+			}),
+			"free FxTwitter targeted recovery active; last sync 2026-08-15T00:00:00.000Z",
+			"ok",
+		],
+		[
 			"xurl",
 			runtime({ connected: true, watchUsers: ["one"] }),
 			"6551 realtime connected; 1 watched account",
@@ -166,6 +184,12 @@ describe("live data source status", () => {
 			"local",
 			runtime({ activeSource: "waiting" }),
 			"waiting for the local bridge before 6551 takeover",
+			"warning",
+		],
+		[
+			"local",
+			runtime({ activeSource: "waiting", provider: "fxtwitter" }),
+			"waiting for the local bridge before free FxTwitter recovery",
 			"warning",
 		],
 	] as const)(
@@ -190,10 +214,23 @@ describe("live data source status", () => {
 
 	it("describes recovery, token errors, and missing-token 6551 states", async () => {
 		mocks.twitterRuntime = runtime({
+			provider: "fxtwitter",
+			activeSource: "fxtwitter",
+			state: "degraded",
+			lastBackfillAt: "2026-08-15T00:00:00.000Z",
+			lastError: "FxTwitter partial recovery: @broken: unavailable",
+		});
+		let result = await Effect.runPromise(getLiveDataSourcesEffect());
+		expect(result.sources[3]).toMatchObject({
+			works: true,
+			status: "warning",
+			detail: "FxTwitter partial recovery: @broken: unavailable",
+		});
+		mocks.twitterRuntime = runtime({
 			lastBackfillAt: "2026-08-10T00:00:00.000Z",
 			state: "error",
 		});
-		let result = await Effect.runPromise(getLiveDataSourcesEffect());
+		result = await Effect.runPromise(getLiveDataSourcesEffect());
 		expect(result.sources[3]).toMatchObject({
 			works: false,
 			status: "error",

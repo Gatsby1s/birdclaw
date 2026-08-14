@@ -1,7 +1,7 @@
-# BirdClaw cloud deployment with 6551
+# BirdClaw cloud deployment with free FxTwitter recovery and 6551 reserve
 
 BirdClaw can run as one persistent Railway service. The web server and the
-6551 realtime worker intentionally share one process and one SQLite database.
+Twitter recovery worker intentionally share one process and one SQLite database.
 Keep the service at one replica.
 
 ## Railway setup
@@ -17,16 +17,18 @@ BIRDCLAW_HOST=0.0.0.0
 BIRDCLAW_ALLOW_REMOTE_WEB=1
 BIRDCLAW_WEB_TOKEN=<a unique web login passphrase>
 BIRDCLAW_DISABLE_LIVE_WRITES=1
-BIRDCLAW_6551_ENABLED=1
+BIRDCLAW_FXTWITTER_ENABLED=1
+BIRDCLAW_FXTWITTER_BACKFILL_MINUTES=30
+BIRDCLAW_6551_ENABLED=0
 BIRDCLAW_6551_ACCOUNT_ID=acct_primary
 BIRDCLAW_6551_WATCH_USERS=TingHu888
 BIRDCLAW_6551_TARGET_TWEETS=2082353480547660173
-BIRDCLAW_6551_BACKFILL_MINUTES=120
+BIRDCLAW_6551_BACKFILL_MINUTES=240
 BIRDCLAW_6551_REST_ONLY=1
 BIRDCLAW_6551_FAILOVER_MODE=1
 BIRDCLAW_LOCAL_STALE_SECONDS=180
 BIRDCLAW_LOCAL_BRIDGE_TOKEN=<a separate random bridge token>
-TWITTER_TOKEN=<the 6551 API token>
+TWITTER_TOKEN=<optional 6551 API token kept only for explicit paid recovery>
 DEEPSEEK_API_KEY=<the DeepSeek API key used only for translation>
 BIRDCLAW_TRANSLATION_MODEL=deepseek-v4-flash
 ```
@@ -59,20 +61,36 @@ browser tab. Normalized timeline increments continue uploading when a
 supplemental target fails, so one partial failure cannot freeze the cloud Home
 feed. The cloud accepts a heartbeat when it carries a fresh successful full
 timeline attestation; supplemental watched-account or target failures stay
-visible without forcing a 6551 takeover. A watched-account-only success cannot
-keep 6551 on standby when the full timeline is stale. After 180 seconds without
-a healthy heartbeat, 6551 takes over. A returning Mac replays the last 24 hours
-idempotently before the cloud process returns 6551 to standby.
+visible without forcing a recovery takeover. A watched-account-only success
+cannot keep recovery on standby when the full timeline is stale. After the
+configured stale window without a healthy heartbeat, free FxTwitter recovery
+refreshes only the configured watched accounts and target threads. It does not
+claim to rebuild the complete Following Home. A returning Mac replays the last
+24 hours idempotently before the cloud process returns FxTwitter to standby.
+Paid 6551 remains disabled unless an operator explicitly chooses it instead.
 
 ## Recovery behavior
 
-- Local and 6551 writes share tweet IDs, so handoff overlap is deduplicated.
+- Local, FxTwitter, and 6551 writes share canonical tweet IDs, so handoff overlap
+  is deduplicated.
 - WebSocket events are written to `twitter6551_events` before processing.
 - Duplicate events and tweets are idempotent.
-- BirdClaw fetches the latest 100 tweets for each watched account every 120
-  minutes and after reconnecting.
+- When `BIRDCLAW_FXTWITTER_ENABLED=1`, BirdClaw uses the public, no-key
+  FxTwitter v2 API instead of paid 6551. It identifies itself with a BirdClaw
+  User-Agent and performs no Watch or WebSocket calls.
+- BirdClaw fetches the latest 100 public tweets for each watched account at the
+  configured recovery interval and after reconnecting.
 - Target posts, best-effort conversation search results, and quote tweets are
   also refreshed.
+- Free recovery is fill-only: existing canonical tweets and Home edges from
+  authenticated bird or archives are never overwritten by public FxTwitter
+  data.
+- Each watched account and target endpoint is isolated. Successful results are
+  ingested when another target fails, and runtime status reports the partial
+  failure as degraded.
+- Native repost rows are skipped because the public API does not expose their
+  wrapper ID or repost timestamp; treating the original post as the repost
+  would create a false author and Home position.
 - With `BIRDCLAW_6551_REST_ONLY=1`, BirdClaw never adds Watch entries or opens
   WebSocket connections. Settings reports healthy recovery polling after a
   successful REST sync and reserves error state for an actual REST failure.
@@ -80,9 +98,11 @@ idempotently before the cloud process returns 6551 to standby.
   keeps the original next recovery due time instead of repeating the full REST
   poll immediately.
 
-6551 monitors account activity; it does not guarantee every third-party reply
-to a particular post. The public REST API also exposes no complete reply cursor,
-so BirdClaw must not describe this feed as a full conversation archive.
+FxTwitter targeted recovery does not provide an authenticated Following Home,
+protected-account content, or lossless native-retweet events. It must never
+renew `homeTimelineSyncedAt` or be described as a complete Home feed. 6551 also
+does not guarantee every third-party reply to a particular post, so neither
+recovery source is a full conversation archive.
 
 ## Private RAG MCP
 

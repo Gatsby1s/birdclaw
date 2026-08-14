@@ -1397,7 +1397,7 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 					`
 					select id
 					from accounts
-					where transport = 'twitter6551' and id <> ?
+						where transport in ('twitter6551', 'fxtwitter') and id <> ?
 					`,
 				)
 				.all(canonicalAccountId) as Array<{ id: string }>;
@@ -1450,7 +1450,7 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 					accountId,
 				);
 				db.prepare(
-					"delete from accounts where id = ? and transport = 'twitter6551'",
+					"delete from accounts where id = ? and transport in ('twitter6551', 'fxtwitter')",
 				).run(accountId);
 			}
 		}

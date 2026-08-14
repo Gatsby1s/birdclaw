@@ -2,6 +2,16 @@ import type { Database } from "./sqlite";
 import { getTwitter6551Config } from "./config";
 import { enqueueDatabaseWrite } from "./database-writer";
 import { getNativeDb } from "./db";
+import {
+	FxTwitterClient,
+	type FxTwitterConversationEnvelope,
+	type FxTwitterSearchEnvelope,
+	type FxTwitterStatusEnvelope,
+	type FxTwitterTweet,
+	fxTwitterTweetsToPayload,
+	normalizeFxTwitterTweet,
+	normalizeFxTwitterTweets,
+} from "./fxtwitter";
 import { ingestTweetPayload } from "./tweet-repository";
 import type {
 	XurlMedia,
@@ -11,6 +21,7 @@ import type {
 } from "./types";
 
 const SOURCE = "twitter6551";
+const FXTWITTER_SOURCE = "fxtwitter";
 const DEFAULT_ACCOUNT_ID = "acct_6551";
 const DEFAULT_BACKFILL_MINUTES = 120;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -70,6 +81,7 @@ export interface Twitter6551Tweet {
 
 export interface Twitter6551RuntimeStatus {
 	enabled: boolean;
+	provider: "disabled" | "fxtwitter" | "6551";
 	state:
 		| "disabled"
 		| "starting"
@@ -82,7 +94,7 @@ export interface Twitter6551RuntimeStatus {
 		| "stopped";
 	connected: boolean;
 	failoverMode: boolean;
-	activeSource: "disabled" | "waiting" | "local" | "6551";
+	activeSource: "disabled" | "waiting" | "local" | "fxtwitter" | "6551";
 	watchUsers: string[];
 	targetTweetIds: string[];
 	lastConnectedAt: string | null;
@@ -477,21 +489,29 @@ export function twitter6551TweetsToPayload(
 export function ensureTwitter6551Account(
 	db: Database,
 	accountId = DEFAULT_ACCOUNT_ID,
+	provider: "fxtwitter" | "6551" = "6551",
 ) {
 	const now = new Date().toISOString();
 	const handle =
 		accountId === DEFAULT_ACCOUNT_ID
-			? "@6551_watch"
+			? provider === "fxtwitter"
+				? "@fxtwitter_recovery"
+				: "@6551_watch"
 			: `@${accountId.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 40)}`;
+	const name = provider === "fxtwitter" ? "FxTwitter Recovery" : "6551 Watch";
+	const transport = provider === "fxtwitter" ? "fxtwitter" : "twitter6551";
 	db.prepare(
 		`
 		insert into accounts (
 			id, name, handle, external_user_id, transport, is_default, created_at
-		) values (?, '6551 Watch', ?, null, 'twitter6551',
+		) values (?, ?, ?, null, ?,
 			case when exists(select 1 from accounts) then 0 else 1 end, ?)
-		on conflict(id) do update set transport = excluded.transport
+		on conflict(id) do update set transport = case
+			when accounts.transport in ('twitter6551', 'fxtwitter') then excluded.transport
+			else accounts.transport
+		end
 		`,
-	).run(accountId, handle, now);
+	).run(accountId, name, handle, transport, now);
 	return accountId;
 }
 
@@ -725,12 +745,22 @@ export function getTwitter6551RuntimeConfig() {
 	const targetTweetIds = listEnv(
 		process.env.BIRDCLAW_6551_TARGET_TWEETS ?? base.targetTweetIds.join(","),
 	);
+	const paidEnabled =
+		process.env.BIRDCLAW_6551_ENABLED === "1" && Boolean(token);
+	const fxtwitterEnabled = process.env.BIRDCLAW_FXTWITTER_ENABLED === "1";
+	const provider = fxtwitterEnabled
+		? ("fxtwitter" as const)
+		: paidEnabled
+			? ("6551" as const)
+			: ("disabled" as const);
 	return {
 		...base,
 		token,
+		paidEnabled,
+		fxtwitterEnabled,
+		provider,
 		enabled:
-			process.env.BIRDCLAW_6551_ENABLED === "1" &&
-			Boolean(token) &&
+			(paidEnabled || fxtwitterEnabled) &&
 			(watchUsers.length > 0 || targetTweetIds.length > 0),
 		accountId:
 			process.env.BIRDCLAW_6551_ACCOUNT_ID?.trim() ||
@@ -738,11 +768,16 @@ export function getTwitter6551RuntimeConfig() {
 			DEFAULT_ACCOUNT_ID,
 		watchUsers,
 		targetTweetIds,
-		backfillMinutes: positiveEnvNumber(
-			"BIRDCLAW_6551_BACKFILL_MINUTES",
-			base.backfillMinutes || DEFAULT_BACKFILL_MINUTES,
-		),
-		restOnly: process.env.BIRDCLAW_6551_REST_ONLY === "1",
+		backfillMinutes: fxtwitterEnabled
+			? positiveEnvNumber(
+					"BIRDCLAW_FXTWITTER_BACKFILL_MINUTES",
+					base.backfillMinutes || DEFAULT_BACKFILL_MINUTES,
+				)
+			: positiveEnvNumber(
+					"BIRDCLAW_6551_BACKFILL_MINUTES",
+					base.backfillMinutes || DEFAULT_BACKFILL_MINUTES,
+				),
+		restOnly: fxtwitterEnabled || process.env.BIRDCLAW_6551_REST_ONLY === "1",
 		failoverMode: process.env.BIRDCLAW_6551_FAILOVER_MODE === "1",
 		localStaleSeconds: positiveEnvNumber(
 			"BIRDCLAW_LOCAL_STALE_SECONDS",
@@ -758,6 +793,7 @@ function emptyStatus(): Twitter6551RuntimeStatus {
 	const config = getTwitter6551RuntimeConfig();
 	return {
 		enabled: config.enabled,
+		provider: config.enabled ? config.provider : "disabled",
 		state: config.enabled
 			? config.failoverMode
 				? "standby"
@@ -768,7 +804,7 @@ function emptyStatus(): Twitter6551RuntimeStatus {
 		activeSource: config.enabled
 			? config.failoverMode
 				? "waiting"
-				: "6551"
+				: config.provider
 			: "disabled",
 		watchUsers: config.watchUsers,
 		targetTweetIds: config.targetTweetIds,
@@ -788,6 +824,7 @@ function emptyStatus(): Twitter6551RuntimeStatus {
 
 const INITIAL_RUNTIME_STATUS: Twitter6551RuntimeStatus = {
 	enabled: false,
+	provider: "disabled",
 	state: "disabled",
 	connected: false,
 	failoverMode: false,
@@ -810,7 +847,7 @@ const RECOVERY_ATTEMPTS_KEY = Symbol.for(
 );
 type RecoveryAttempt = {
 	attemptedAt: number;
-	outcome: "running" | "success" | "failed";
+	outcome: "running" | "success" | "partial" | "failed";
 	error: string | null;
 	lastBackfillAt: string | null;
 };
@@ -858,17 +895,60 @@ export class Twitter6551Worker {
 	private watchUnavailable = false;
 	private hasSubscribedOnce = false;
 	private readonly inFlight = new Set<Promise<unknown>>();
+	private readonly config: Omit<
+		ReturnType<typeof getTwitter6551RuntimeConfig>,
+		"restOnly" | "paidEnabled" | "fxtwitterEnabled" | "provider"
+	> & {
+		restOnly?: boolean;
+		paidEnabled?: boolean;
+		fxtwitterEnabled?: boolean;
+		provider?: "disabled" | "fxtwitter" | "6551";
+	};
+	private readonly client: Twitter6551Client | null;
+	private readonly fxtwitter: FxTwitterClient;
 
 	constructor(
-		private readonly config: Omit<
+		config: Omit<
 			ReturnType<typeof getTwitter6551RuntimeConfig>,
-			"restOnly"
-		> & { restOnly?: boolean } = getTwitter6551RuntimeConfig(),
-		private readonly client = new Twitter6551Client({
-			token: config.token,
-			baseUrl: config.baseUrl,
-		}),
-	) {}
+			"restOnly" | "paidEnabled" | "fxtwitterEnabled" | "provider"
+		> & {
+			restOnly?: boolean;
+			paidEnabled?: boolean;
+			fxtwitterEnabled?: boolean;
+			provider?: "disabled" | "fxtwitter" | "6551";
+		} = getTwitter6551RuntimeConfig(),
+		client?: Twitter6551Client,
+		fxtwitter = new FxTwitterClient(),
+	) {
+		this.config = config;
+		this.client =
+			client ??
+			(this.recoveryProvider() === "6551"
+				? new Twitter6551Client({
+						token: config.token,
+						baseUrl: config.baseUrl,
+					})
+				: null);
+		this.fxtwitter = fxtwitter;
+	}
+
+	private recoveryProvider() {
+		if (this.config.fxtwitterEnabled) return "fxtwitter" as const;
+		return "6551" as const;
+	}
+
+	private paidClient() {
+		if (!this.client) {
+			throw new Twitter6551Error("6551 paid recovery is disabled");
+		}
+		return this.client;
+	}
+
+	private isRestOnly() {
+		return (
+			this.recoveryProvider() === "fxtwitter" || Boolean(this.config.restOnly)
+		);
+	}
 
 	async start(options: { forceBackfill?: boolean } = {}) {
 		if (!this.config.enabled || this.stopped) return;
@@ -876,32 +956,43 @@ export class Twitter6551Worker {
 		assignRuntimeStatus({
 			...emptyStatus(),
 			enabled: true,
+			provider: this.recoveryProvider(),
 			state: "starting",
-			activeSource: "6551",
+			activeSource: this.recoveryProvider(),
 			lastBackfillAt: previousRecovery?.lastBackfillAt ?? null,
 		});
 		await enqueueDatabaseWrite((db) => {
 			ensureTwitter6551Tables(db);
-			ensureTwitter6551Account(db, this.config.accountId);
+			ensureTwitter6551Account(
+				db,
+				this.config.accountId,
+				this.recoveryProvider(),
+			);
 		});
 		if (this.stopped) return;
 		await this.replayPendingEvents();
 		if (this.stopped) return;
-		if (!this.config.restOnly) await this.prepareWatches();
+		if (!this.isRestOnly()) await this.prepareWatches();
 		if (this.stopped) return;
 		const recoveryResult = options.forceBackfill
 			? await this.runBackfill()
 			: await this.runBackfillIfDue();
 		if (this.stopped) return;
-		if (this.config.restOnly) {
+		if (this.isRestOnly()) {
 			if (recoveryResult === "skipped") {
 				const previousAttempt = recoveryAttempts.get(this.recoveryScope());
 				assignRuntimeStatus({
 					...runtimeStatus,
-					state: previousAttempt?.outcome === "failed" ? "error" : "polling",
+					state:
+						previousAttempt?.outcome === "failed"
+							? "error"
+							: previousAttempt?.outcome === "partial"
+								? "degraded"
+								: "polling",
 					connected: false,
 					lastError:
-						previousAttempt?.outcome === "failed"
+						previousAttempt?.outcome === "failed" ||
+						previousAttempt?.outcome === "partial"
 							? previousAttempt.error
 							: null,
 				});
@@ -953,6 +1044,138 @@ export class Twitter6551Worker {
 		if (timeout) clearTimeout(timeout);
 	}
 
+	private async fetchTwitter6551Tweets() {
+		const client = this.paidClient();
+		const batches: Twitter6551Tweet[][] = [];
+		for (const username of this.config.watchUsers) {
+			batches.push(await client.getUserTweets(username, 100));
+		}
+		for (const tweetId of this.config.targetTweetIds) {
+			const target = await client.getTweet(tweetId);
+			batches.push([target]);
+			try {
+				batches.push(
+					await client.searchTweets(`conversation_id:${tweetId}`, 100),
+				);
+			} catch (error) {
+				if (
+					!(
+						error instanceof Twitter6551Error &&
+						(error.status === 400 || error.status === 403)
+					)
+				) {
+					throw error;
+				}
+			}
+			try {
+				batches.push(await client.getQuoteTweets(tweetId, 100));
+			} catch (error) {
+				if (!(error instanceof Twitter6551Error && error.status === 403)) {
+					throw error;
+				}
+			}
+		}
+		return [
+			...new Map(batches.flat().map((tweet) => [tweet.id, tweet])).values(),
+		];
+	}
+
+	private tweetsFromStatusEnvelope(envelope: FxTwitterStatusEnvelope) {
+		const status = normalizeFxTwitterTweet(envelope.status);
+		return [
+			...(status ? [status] : []),
+			...normalizeFxTwitterTweets(envelope.thread),
+		];
+	}
+
+	private tweetsFromConversationEnvelope(
+		envelope: FxTwitterConversationEnvelope,
+	) {
+		return [
+			...this.tweetsFromStatusEnvelope(envelope),
+			...normalizeFxTwitterTweets(envelope.replies),
+		];
+	}
+
+	private tweetsFromSearchEnvelope(envelope: FxTwitterSearchEnvelope) {
+		return normalizeFxTwitterTweets(envelope.results);
+	}
+
+	private async fetchFxTwitterTweets() {
+		const batches: FxTwitterTweet[][] = [];
+		const failures: string[] = [];
+		let completedRequests = 0;
+		const capture = async <T>(
+			label: string,
+			request: () => Promise<T>,
+			normalize: (value: T) => FxTwitterTweet[],
+		) => {
+			try {
+				batches.push(normalize(await request()));
+				completedRequests += 1;
+			} catch (error) {
+				failures.push(`${label}: ${errorMessage(error)}`);
+			}
+		};
+		for (const username of this.config.watchUsers) {
+			await capture(
+				`@${username}`,
+				() =>
+					this.fxtwitter.getProfileStatuses(username, {
+						count: 100,
+						withReplies: true,
+					}),
+				(value) => this.tweetsFromSearchEnvelope(value),
+			);
+		}
+		for (const tweetId of this.config.targetTweetIds) {
+			await capture(
+				`status ${tweetId}`,
+				() => this.fxtwitter.getStatus(tweetId),
+				(value) => this.tweetsFromStatusEnvelope(value),
+			);
+			await capture(
+				`conversation ${tweetId}`,
+				() =>
+					this.fxtwitter.getConversation(tweetId, {
+						rankingMode: "recency",
+					}),
+				(value) => this.tweetsFromConversationEnvelope(value),
+			);
+			await capture(
+				`quotes ${tweetId}`,
+				() => this.fxtwitter.getQuotes(tweetId, { count: 100 }),
+				(value) => this.tweetsFromSearchEnvelope(value),
+			);
+		}
+		if (completedRequests === 0 && failures.length > 0) {
+			throw new Twitter6551Error(
+				`FxTwitter recovery failed: ${failures.join("; ")}`,
+			);
+		}
+		return {
+			tweets: [
+				...new Map(batches.flat().map((tweet) => [tweet.id, tweet])).values(),
+			],
+			failures,
+		};
+	}
+
+	private async ingestFxTwitterTweets(tweets: FxTwitterTweet[]) {
+		if (tweets.length === 0) return [];
+		return enqueueDatabaseWrite((db) => {
+			ensureTwitter6551Account(db, this.config.accountId, "fxtwitter");
+			return ingestTweetPayload(db, {
+				accountId: this.config.accountId,
+				payload: fxTwitterTweetsToPayload(tweets),
+				source: FXTWITTER_SOURCE,
+				edgeKind: "home",
+				markRepliesAsReplied: false,
+				preserveExistingCanonical: true,
+			});
+		});
+	}
+
 	async runBackfill() {
 		if (this.backfillRunning || this.stopped) return "skipped" as const;
 		this.backfillRunning = true;
@@ -965,61 +1188,49 @@ export class Twitter6551Worker {
 			lastBackfillAt: runtimeStatus.lastBackfillAt,
 		});
 		try {
-			const batches: Twitter6551Tweet[][] = [];
-			for (const username of this.config.watchUsers) {
-				batches.push(await this.client.getUserTweets(username, 100));
+			const provider = this.recoveryProvider();
+			let ingested: string[];
+			let partialFailures: string[] = [];
+			if (provider === "fxtwitter") {
+				const result = await this.fetchFxTwitterTweets();
+				partialFailures = result.failures;
+				ingested = await this.ingestFxTwitterTweets(result.tweets);
+			} else {
+				const tweets = await this.fetchTwitter6551Tweets();
+				ingested = await enqueueDatabaseWrite((db) =>
+					ingestTwitter6551Tweets(db, this.config.accountId, tweets, "home"),
+				);
 			}
-			for (const tweetId of this.config.targetTweetIds) {
-				const target = await this.client.getTweet(tweetId);
-				batches.push([target]);
-				try {
-					batches.push(
-						await this.client.searchTweets(`conversation_id:${tweetId}`, 100),
-					);
-				} catch (error) {
-					if (
-						!(
-							error instanceof Twitter6551Error &&
-							(error.status === 400 || error.status === 403)
-						)
-					) {
-						throw error;
-					}
-				}
-				try {
-					batches.push(await this.client.getQuoteTweets(tweetId, 100));
-				} catch (error) {
-					if (!(error instanceof Twitter6551Error && error.status === 403)) {
-						throw error;
-					}
-				}
-			}
-			const tweets = [
-				...new Map(batches.flat().map((tweet) => [tweet.id, tweet])).values(),
-			];
-			const ingested = await enqueueDatabaseWrite((db) =>
-				ingestTwitter6551Tweets(db, this.config.accountId, tweets, "home"),
-			);
 			assignRuntimeStatus({
 				...runtimeStatus,
-				state: this.config.restOnly
-					? "polling"
-					: runtimeStatus.connected && !this.watchUnavailable
-						? "connected"
-						: "degraded",
+				provider,
+				activeSource: provider,
+				state:
+					partialFailures.length > 0
+						? "degraded"
+						: this.isRestOnly()
+							? "polling"
+							: runtimeStatus.connected && !this.watchUnavailable
+								? "connected"
+								: "degraded",
 				lastBackfillAt: new Date().toISOString(),
-				lastError: this.watchUnavailable
-					? "6551 watch access is unavailable; REST recovery remains active"
-					: null,
+				lastError:
+					partialFailures.length > 0
+						? `FxTwitter partial recovery: ${partialFailures.slice(0, 3).join("; ")}${partialFailures.length > 3 ? `; and ${String(partialFailures.length - 3)} more` : ""}`
+						: this.watchUnavailable
+							? "6551 watch access is unavailable; REST recovery remains active"
+							: null,
 				ingestedCount: runtimeStatus.ingestedCount + ingested.length,
 			});
 			recoveryAttempts.set(scope, {
 				attemptedAt,
-				outcome: "success",
-				error: null,
+				outcome: partialFailures.length > 0 ? "partial" : "success",
+				error: runtimeStatus.lastError,
 				lastBackfillAt: runtimeStatus.lastBackfillAt,
 			});
-			return "success" as const;
+			return partialFailures.length > 0
+				? ("partial" as const)
+				: ("success" as const);
 		} catch (error) {
 			assignRuntimeStatus({
 				...runtimeStatus,
@@ -1040,6 +1251,7 @@ export class Twitter6551Worker {
 
 	private recoveryScope() {
 		return JSON.stringify({
+			provider: this.recoveryProvider(),
 			accountId: this.config.accountId,
 			watchUsers: [...this.config.watchUsers].sort(),
 			targetTweetIds: [...this.config.targetTweetIds].sort(),
@@ -1076,17 +1288,18 @@ export class Twitter6551Worker {
 	}
 
 	private async runRecoveryCycle() {
-		if (!this.config.restOnly) await this.prepareWatches();
+		if (!this.isRestOnly()) await this.prepareWatches();
 		await this.runBackfillIfDue();
 		this.scheduleRecovery();
 	}
 
 	private async prepareWatches() {
+		const client = this.paidClient();
 		let unavailable = false;
 		let lastError: string | null = null;
 		for (const username of this.config.watchUsers) {
 			try {
-				await this.client.addWatch(username);
+				await client.addWatch(username);
 			} catch (error) {
 				if (
 					error instanceof Twitter6551Error &&
@@ -1433,7 +1646,10 @@ export async function startTwitter6551Worker(
 		assignRuntimeStatus(emptyStatus());
 		return null;
 	}
-	if (localBridgeIsFresh(config)) {
+	if (
+		localBridgeIsFresh(config) &&
+		!(options.forceBackfill && config.fxtwitterEnabled)
+	) {
 		assignRuntimeStatus({
 			...runtimeStatus,
 			...emptyStatus(),
@@ -1500,6 +1716,7 @@ async function reconcileTwitter6551Failover() {
 			assignRuntimeStatus({
 				...runtimeStatus,
 				enabled: true,
+				provider: config.provider,
 				state: "standby",
 				connected: false,
 				failoverMode: true,
@@ -1568,14 +1785,15 @@ export async function stopTwitter6551WorkerManager() {
 }
 
 export async function runTwitter6551Backfill() {
-	if (localBridgeIsFresh()) {
+	const config = getTwitter6551RuntimeConfig();
+	if (localBridgeIsFresh(config) && !config.fxtwitterEnabled) {
 		throw new Twitter6551Error(
-			"6551 is standing by while the local BirdClaw bridge is online",
+			"Twitter recovery is standing by while the local BirdClaw bridge is online",
 		);
 	}
 	if (!activeWorker) {
 		const worker = await startTwitter6551Worker({ forceBackfill: true });
-		if (!worker) throw new Twitter6551Error("6551 worker is disabled");
+		if (!worker) throw new Twitter6551Error("Twitter recovery is disabled");
 		return getTwitter6551RuntimeStatus();
 	}
 	await activeWorker.runBackfill();

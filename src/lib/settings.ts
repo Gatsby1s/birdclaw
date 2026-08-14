@@ -41,6 +41,8 @@ export function getBirdclawSettings(): BirdclawSettings {
 				watchUsers: runtimeConfig.watchUsers,
 				targetTweetIds: runtimeConfig.targetTweetIds,
 				backfillMinutes: runtimeConfig.backfillMinutes,
+				paidEnabled: runtimeConfig.paidEnabled,
+				fxtwitterEnabled: runtimeConfig.fxtwitterEnabled,
 				runtime: getTwitter6551RuntimeStatus(),
 			},
 		},
