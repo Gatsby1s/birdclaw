@@ -46,6 +46,10 @@ export interface BirdclawConfig {
 			primary?: SummaryModelProvider;
 			backup?: SummaryModelProvider;
 		};
+		translationModels?: {
+			primary?: SummaryModelProvider;
+			backup?: SummaryModelProvider;
+		};
 	};
 	providers?: {
 		openai?: {
@@ -203,6 +207,34 @@ export function getSummaryModelConfig() {
 	};
 }
 
+export function getTranslationModelConfig() {
+	const config = getBirdclawConfig();
+	const configuredPrimary = config.analysis?.translationModels?.primary;
+	const primary = isSummaryModelProvider(configuredPrimary)
+		? configuredPrimary
+		: "deepseek";
+	const configuredBackup = config.analysis?.translationModels?.backup;
+	const backup =
+		isSummaryModelProvider(configuredBackup) && configuredBackup !== primary
+			? configuredBackup
+			: primary === "openai"
+				? "deepseek"
+				: "openai";
+	const summary = getSummaryModelConfig();
+	return {
+		primary,
+		backup,
+		openai: summary.openai,
+		deepseek: {
+			...summary.deepseek,
+			model:
+				process.env.BIRDCLAW_TRANSLATION_DEEPSEEK_MODEL?.trim() ||
+				process.env.BIRDCLAW_TRANSLATION_MODEL?.trim() ||
+				summary.deepseek.model,
+		},
+	};
+}
+
 export function getDeepSeekApiKey() {
 	return (
 		process.env.DEEPSEEK_API_KEY?.trim() ||
@@ -252,6 +284,28 @@ export function setSummaryModelConfig(input: {
 	};
 	const configPath = writeBirdclawConfig(nextConfig);
 	return { configPath, primary, backup };
+}
+
+export function setTranslationModelConfig(input: {
+	primary: SummaryModelProvider;
+	backup: SummaryModelProvider;
+}) {
+	if (input.primary === input.backup) {
+		throw new Error("Primary and backup translation models must be different");
+	}
+	const config = parseConfigFile(getConfigPath());
+	const nextConfig: BirdclawConfig = {
+		...config,
+		analysis: {
+			...config.analysis,
+			translationModels: {
+				primary: input.primary,
+				backup: input.backup,
+			},
+		},
+	};
+	const configPath = writeBirdclawConfig(nextConfig);
+	return { configPath, ...input };
 }
 
 export function setActionsTransport(transport: ActionsTransport) {

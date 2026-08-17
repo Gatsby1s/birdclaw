@@ -100,13 +100,20 @@ export OPENAI_API_KEY="sk-..."
 
 Add it to `~/.profile` or your shell rc to persist. The inbox uses OpenAI for low-signal scoring; without the key, `inbox --score` is a no-op and the heuristic ranker still works.
 
-## Optional: DeepSeek translation
+## Optional: dual-model tweet translation
 
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
+export OPENAI_API_KEY="sk-..."
+export OPENAI_BASE_URL="https://your-openai-compatible-gateway.example/v1"
 ```
 
-BirdClaw uses the dedicated DeepSeek Chat Completions API and `deepseek-v4-flash` for automatic tweet translation. `BIRDCLAW_TRANSLATION_MODEL` and `DEEPSEEK_BASE_URL` are optional translation-only overrides; they do not change the OpenAI model used by digests, discussions, profile analysis, or inbox scoring.
+Automatic tweet translation uses a configurable primary and backup provider. The
+default order is DeepSeek first and the OpenAI-compatible provider second; change
+the order from Settings. The backup runs only when the primary cannot return a
+valid translation. `BIRDCLAW_TRANSLATION_DEEPSEEK_MODEL`,
+`BIRDCLAW_TRANSLATION_OPENAI_MODEL`, and the legacy
+`BIRDCLAW_TRANSLATION_MODEL` are optional translation-only model overrides.
 
 ## Updating
 

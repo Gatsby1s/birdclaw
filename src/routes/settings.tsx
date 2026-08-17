@@ -134,6 +134,26 @@ async function updateSummaryModels(input: {
 	);
 }
 
+async function updateTranslationModels(input: {
+	primary: SummaryProvider;
+	backup: SummaryProvider;
+}): Promise<BirdclawSettings> {
+	return fetchJson(
+		"/api/settings",
+		{
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				analysis: {
+					translationModels: input,
+				},
+			}),
+		},
+		birdclawSettingsSchema,
+		"Translation model settings update failed",
+	);
+}
+
 async function syncTwitter6551() {
 	return fetchJson(
 		"/api/integrations/twitter6551",
@@ -263,6 +283,10 @@ function SettingsRoute() {
 	const settings = settingsQuery.data ?? null;
 	const [primaryModel, setPrimaryModel] = useState<SummaryProvider>("openai");
 	const [backupModel, setBackupModel] = useState<SummaryProvider>("deepseek");
+	const [translationPrimary, setTranslationPrimary] =
+		useState<SummaryProvider>("deepseek");
+	const [translationBackup, setTranslationBackup] =
+		useState<SummaryProvider>("openai");
 	const [deepSeekApiKey, setDeepSeekApiKey] = useState("");
 	const [twillotPairing, setTwillotPairing] = useState<{
 		token: string;
@@ -282,10 +306,18 @@ function SettingsRoute() {
 			setDeepSeekApiKey("");
 		},
 	});
+	const translationMutation = useMutation({
+		mutationFn: updateTranslationModels,
+		onSuccess: (data) => {
+			queryClient.setQueryData(queryKeys.settings, data);
+		},
+	});
 	useEffect(() => {
 		if (!settings) return;
 		setPrimaryModel(settings.analysis.summaryModels.primary);
 		setBackupModel(settings.analysis.summaryModels.backup);
+		setTranslationPrimary(settings.analysis.translationModels.primary);
+		setTranslationBackup(settings.analysis.translationModels.backup);
 	}, [settings]);
 	const xRemarkMutation = useMutation({
 		mutationFn: importXRemarkBackup,
@@ -350,6 +382,11 @@ function SettingsRoute() {
 			backupModel !== settings.analysis.summaryModels.backup ||
 			deepSeekApiKey.trim()),
 	);
+	const translationChanged = Boolean(
+		settings &&
+		(translationPrimary !== settings.analysis.translationModels.primary ||
+			translationBackup !== settings.analysis.translationModels.backup),
+	);
 
 	return (
 		<section className="flex min-h-screen flex-col">
@@ -382,6 +419,13 @@ function SettingsRoute() {
 					{summaryMutation.error instanceof Error
 						? summaryMutation.error.message
 						: "Summary model settings update failed"}
+				</div>
+			) : null}
+			{translationMutation.error ? (
+				<div className={errorCopyClass}>
+					{translationMutation.error instanceof Error
+						? translationMutation.error.message
+						: "Translation model settings update failed"}
 				</div>
 			) : null}
 			{xRemarkMutation.error ? (
@@ -514,7 +558,101 @@ function SettingsRoute() {
 							{primaryModel === "openai" ? "ChatGPT" : "DeepSeek V4 / Flash"} ·
 							Backup:{" "}
 							{backupModel === "openai" ? "ChatGPT" : "DeepSeek V4 / Flash"}.
-							Tokens are stored only in this Mac’s private BirdClaw config.
+							Provider secrets stay in BirdClaw’s private server configuration
+							and are never returned by the settings API.
+						</p>
+					</section>
+					<section className="border-b border-[var(--line)] px-4 py-5">
+						<div className="flex items-center gap-2 text-[16px] font-bold text-[var(--ink)]">
+							<Bot className="size-4.5" strokeWidth={1.9} />
+							<span>Tweet Translation Models</span>
+						</div>
+						<p className="mt-1 text-[13px] text-[var(--ink-soft)]">
+							Foreign-language tweets use the primary model first. BirdClaw
+							switches to the backup when the primary credential, service, or
+							response is unavailable.
+						</p>
+						<div className="mt-4 grid gap-3 min-[760px]:grid-cols-2">
+							<label className="grid gap-1.5 text-[12px] font-semibold text-[var(--ink-soft)]">
+								<span>Primary translation model</span>
+								<select
+									className="min-h-11 rounded-xl border border-[var(--line-strong)] bg-[var(--bg)] px-3 text-[14px] font-semibold text-[var(--ink)] outline-none focus:border-[var(--accent)]"
+									value={translationPrimary}
+									onChange={(event) => {
+										const next = event.currentTarget.value as SummaryProvider;
+										setTranslationPrimary(next);
+										setTranslationBackup(
+											next === "openai" ? "deepseek" : "openai",
+										);
+									}}
+								>
+									<option value="openai">OpenAI-compatible (Sub2API)</option>
+									<option value="deepseek">DeepSeek</option>
+								</select>
+							</label>
+							<label className="grid gap-1.5 text-[12px] font-semibold text-[var(--ink-soft)]">
+								<span>Backup translation model</span>
+								<select
+									className="min-h-11 rounded-xl border border-[var(--line-strong)] bg-[var(--bg)] px-3 text-[14px] font-semibold text-[var(--ink)] outline-none focus:border-[var(--accent)]"
+									value={translationBackup}
+									onChange={(event) => {
+										const next = event.currentTarget.value as SummaryProvider;
+										setTranslationBackup(next);
+										setTranslationPrimary(
+											next === "openai" ? "deepseek" : "openai",
+										);
+									}}
+								>
+									<option value="openai">OpenAI-compatible (Sub2API)</option>
+									<option value="deepseek">DeepSeek</option>
+								</select>
+							</label>
+						</div>
+						<div className="mt-3 flex flex-col gap-3 min-[760px]:flex-row min-[760px]:items-center min-[760px]:justify-between">
+							<p className="text-[12px] leading-5 text-[var(--ink-soft)]">
+								OpenAI-compatible credential:{" "}
+								<strong>
+									{summaryProviders?.openai.tokenConfigured
+										? "Configured"
+										: "Not configured"}
+								</strong>
+								{" · "}DeepSeek credential:{" "}
+								<strong>
+									{summaryProviders?.deepseek.tokenConfigured
+										? "Configured"
+										: "Not configured"}
+								</strong>
+							</p>
+							<button
+								className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-full bg-[var(--accent)] px-4 text-[13px] font-bold text-[var(--accent-text)] disabled:opacity-50"
+								disabled={!translationChanged || translationMutation.isPending}
+								onClick={() =>
+									translationMutation.mutate({
+										primary: translationPrimary,
+										backup: translationBackup,
+									})
+								}
+								type="button"
+							>
+								{translationMutation.isPending
+									? "Saving"
+									: "Save translation models"}
+							</button>
+						</div>
+						<p
+							className="mt-2 text-[11px] text-[var(--ink-soft)]"
+							aria-live="polite"
+						>
+							Primary:{" "}
+							{translationPrimary === "openai"
+								? "OpenAI-compatible"
+								: "DeepSeek"}
+							{" · "}Backup:{" "}
+							{translationBackup === "openai"
+								? "OpenAI-compatible"
+								: "DeepSeek"}
+							. Provider secrets stay in BirdClaw&apos;s private server
+							configuration and are never shown here.
 						</p>
 					</section>
 					<section className="border-b border-[var(--line)] px-4 py-4">

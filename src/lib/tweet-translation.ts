@@ -5,7 +5,13 @@ import {
 	extractDeepSeekChatCompletionText,
 	requestDeepSeekChatCompletionEffect,
 } from "./deepseek-chat-runtime";
+import {
+	getDeepSeekApiKey,
+	getTranslationModelConfig,
+	type SummaryModelProvider,
+} from "./config";
 import { tryPromise } from "./effect-runtime";
+import { requestOpenAIResponseEffect } from "./openai-response-runtime";
 import {
 	defaultRuntimeServices,
 	type RuntimeServices,
@@ -13,9 +19,10 @@ import {
 import { readSyncCache, writeSyncCache } from "./sync-cache";
 import { shouldAutoTranslateTweetText } from "./tweet-language";
 
-const TRANSLATION_CACHE_VERSION = "v1";
+const TRANSLATION_CACHE_VERSION = "v2";
 const TARGET_LANGUAGE = "zh-CN" as const;
-const DEFAULT_TRANSLATION_MODEL = "deepseek-v4-flash";
+const DEFAULT_OPENAI_TRANSLATION_MODEL = "gpt-5.5";
+const DEFAULT_DEEPSEEK_TRANSLATION_MODEL = "deepseek-v4-flash";
 const MAX_TRANSLATION_INPUT_CHARS = 20_000;
 const MAX_CONCURRENT_TRANSLATIONS = 3;
 let activeTranslations = 0;
@@ -48,6 +55,13 @@ export interface TweetTranslationOptions {
 	runtime?: RuntimeServices;
 	readCache?: typeof readSyncCache;
 	writeCache?: typeof writeSyncCache;
+}
+
+interface TranslationTarget {
+	provider: SummaryModelProvider;
+	model: string;
+	apiKey?: string;
+	baseUrl?: string;
 }
 
 function toError(error: unknown) {
@@ -143,9 +157,77 @@ function acquireTranslationKey(key: string, signal?: AbortSignal) {
 	});
 }
 
-function cacheKey(text: string, model: string) {
+function cacheKey(text: string, plan: string) {
 	const hash = createHash("sha256").update(text).digest("hex");
-	return `tweet-translation:${TRANSLATION_CACHE_VERSION}:${model}:${TARGET_LANGUAGE}:${hash}`;
+	return `tweet-translation:${TRANSLATION_CACHE_VERSION}:${plan}:${TARGET_LANGUAGE}:${hash}`;
+}
+
+function translationProvider(value: string | undefined) {
+	return value === "openai" || value === "deepseek" ? value : undefined;
+}
+
+function translationTargets(runtime: RuntimeServices): TranslationTarget[] {
+	const useLocalConfig = runtime === defaultRuntimeServices;
+	const configured = useLocalConfig
+		? getTranslationModelConfig()
+		: {
+				primary: "deepseek" as const,
+				backup: undefined,
+				openai: {
+					model: DEFAULT_OPENAI_TRANSLATION_MODEL,
+					tokenConfigured: false,
+				},
+				deepseek: {
+					baseUrl: "https://api.deepseek.com",
+					model: DEFAULT_DEEPSEEK_TRANSLATION_MODEL,
+					tokenConfigured: false,
+				},
+			};
+	const primary =
+		translationProvider(
+			runtime.env("BIRDCLAW_TRANSLATION_PRIMARY_PROVIDER")?.trim(),
+		) ?? configured.primary;
+	const configuredBackup =
+		translationProvider(
+			runtime.env("BIRDCLAW_TRANSLATION_BACKUP_PROVIDER")?.trim(),
+		) ?? configured.backup;
+	const providers = [
+		primary,
+		...(configuredBackup && configuredBackup !== primary
+			? [configuredBackup]
+			: []),
+	];
+	return providers.map((provider) => {
+		if (provider === "openai") {
+			return {
+				provider,
+				model:
+					runtime.env("BIRDCLAW_TRANSLATION_OPENAI_MODEL")?.trim() ||
+					runtime.env("BIRDCLAW_AI_MODEL")?.trim() ||
+					configured.openai.model,
+				apiKey: runtime.env("OPENAI_API_KEY")?.trim(),
+				baseUrl: runtime.env("OPENAI_BASE_URL")?.trim(),
+			};
+		}
+		return {
+			provider,
+			model:
+				runtime.env("BIRDCLAW_TRANSLATION_DEEPSEEK_MODEL")?.trim() ||
+				runtime.env("BIRDCLAW_TRANSLATION_MODEL")?.trim() ||
+				configured.deepseek.model,
+			apiKey:
+				runtime.env("DEEPSEEK_API_KEY")?.trim() ||
+				(useLocalConfig ? getDeepSeekApiKey() : undefined),
+			baseUrl:
+				runtime.env("DEEPSEEK_BASE_URL")?.trim() || configured.deepseek.baseUrl,
+		};
+	});
+}
+
+function translationPlan(targets: TranslationTarget[]) {
+	return targets
+		.map((target) => `${target.provider}-${target.model}`)
+		.join("-then-");
 }
 
 function extractJsonObject(rawText: string) {
@@ -185,6 +267,106 @@ function parseModelTranslation(text: string, rawText: string) {
 	};
 }
 
+function isAbortError(error: Error, signal?: AbortSignal) {
+	return signal?.aborted || error.name === "AbortError";
+}
+
+function requestTranslationTargetEffect(
+	target: TranslationTarget,
+	text: string,
+	runtime: RuntimeServices,
+	signal?: AbortSignal,
+) {
+	if (!target.apiKey) {
+		return Effect.fail(
+			new Error(
+				target.provider === "openai"
+					? "OPENAI_API_KEY is not set"
+					: "DEEPSEEK_API_KEY is not set",
+			),
+		);
+	}
+	const body = {
+		model: target.model,
+		messages: [
+			{
+				role: "system",
+				content:
+					"You are a faithful translation engine. Return only the requested JSON object.",
+			},
+			{ role: "user", content: translationPrompt(text) },
+		],
+		response_format: { type: "json_object" },
+		stream: false,
+		max_tokens: Math.min(4_000, Math.max(256, Math.ceil(text.length * 1.8))),
+	};
+	const request =
+		target.provider === "openai"
+			? requestOpenAIResponseEffect({
+					body,
+					signal,
+					runtime,
+					apiKey: target.apiKey,
+					baseUrl: target.baseUrl,
+					path: "/v1/chat/completions",
+					providerLabel: "OpenAI-compatible translation",
+				})
+			: requestDeepSeekChatCompletionEffect({
+					body: { ...body, thinking: { type: "disabled" } },
+					signal,
+					runtime,
+					apiKey: target.apiKey,
+					baseUrl: target.baseUrl,
+				});
+	return request.pipe(
+		Effect.flatMap((response) =>
+			tryPromise(() => response.json()).pipe(Effect.mapError(toError)),
+		),
+		Effect.flatMap((payload) => {
+			const rawText = extractDeepSeekChatCompletionText(payload);
+			if (!rawText) {
+				return Effect.fail(
+					new Error(`${target.provider} returned no translation`),
+				);
+			}
+			return Effect.try({
+				try: () => parseModelTranslation(text, rawText),
+				catch: toError,
+			});
+		}),
+	);
+}
+
+function translateWithFailoverEffect(
+	targets: TranslationTarget[],
+	text: string,
+	runtime: RuntimeServices,
+	signal?: AbortSignal,
+) {
+	return Effect.gen(function* () {
+		let lastError = new Error("No translation provider is configured");
+		for (const target of targets) {
+			const attempt = yield* requestTranslationTargetEffect(
+				target,
+				text,
+				runtime,
+				signal,
+			).pipe(
+				Effect.map((value) => ({ ok: true as const, value })),
+				Effect.catchAll((error) =>
+					Effect.succeed({ ok: false as const, error }),
+				),
+			);
+			if (attempt.ok) return attempt.value;
+			lastError = attempt.error;
+			if (isAbortError(lastError, signal)) {
+				return yield* Effect.fail(lastError);
+			}
+		}
+		return yield* Effect.fail(lastError);
+	});
+}
+
 export function translateTweetTextEffect(
 	text: string,
 	options: TweetTranslationOptions = {},
@@ -211,10 +393,8 @@ export function translateTweetTextEffect(
 		}
 
 		const runtime = options.runtime ?? defaultRuntimeServices;
-		const model =
-			runtime.env("BIRDCLAW_TRANSLATION_MODEL")?.trim() ||
-			DEFAULT_TRANSLATION_MODEL;
-		const resolvedCacheKey = cacheKey(normalizedText, model);
+		const targets = translationTargets(runtime);
+		const resolvedCacheKey = cacheKey(normalizedText, translationPlan(targets));
 		const readCache = options.readCache ?? readSyncCache;
 		const writeCache = options.writeCache ?? writeSyncCache;
 		const cached = yield* Effect.try({
@@ -252,41 +432,12 @@ export function translateTweetTextEffect(
 			const releaseSlot = yield* tryPromise(() =>
 				acquireTranslationSlot(options.signal),
 			).pipe(Effect.mapError(toError));
-			const response = yield* requestDeepSeekChatCompletionEffect({
-				body: {
-					model,
-					messages: [
-						{
-							role: "system",
-							content:
-								"You are a faithful translation engine. Return only the requested JSON object.",
-						},
-						{ role: "user", content: translationPrompt(normalizedText) },
-					],
-					response_format: { type: "json_object" },
-					thinking: { type: "disabled" },
-					stream: false,
-					max_tokens: Math.min(
-						4_000,
-						Math.max(256, Math.ceil(normalizedText.length * 1.8)),
-					),
-				},
-				signal: options.signal,
+			const translated = yield* translateWithFailoverEffect(
+				targets,
+				normalizedText,
 				runtime,
-			}).pipe(Effect.ensuring(Effect.sync(releaseSlot)));
-			const payload = (yield* tryPromise(() => response.json()).pipe(
-				Effect.mapError(toError),
-			)) as Record<string, unknown>;
-			const rawText = extractDeepSeekChatCompletionText(payload);
-			if (!rawText) {
-				return yield* Effect.fail(
-					new Error("DeepSeek returned no translation"),
-				);
-			}
-			const translated = yield* Effect.try({
-				try: () => parseModelTranslation(normalizedText, rawText),
-				catch: toError,
-			});
+				options.signal,
+			).pipe(Effect.ensuring(Effect.sync(releaseSlot)));
 			yield* Effect.try({
 				try: () => writeCache(resolvedCacheKey, translated),
 				catch: toError,
