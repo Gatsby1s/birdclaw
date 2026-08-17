@@ -12,6 +12,7 @@ function settingsPayload(profileSource: "local" | "xurl" | "6551") {
 		analysis: {
 			profileSource,
 			summaryModels: { primary: "openai", backup: "deepseek" },
+			translationModels: { primary: "deepseek", backup: "openai" },
 		},
 		providers: {
 			openai: {
@@ -91,6 +92,73 @@ afterEach(() => {
 });
 
 describe("settings route", () => {
+	it("saves independent primary and backup translation models", async () => {
+		const requests: Array<{ url: URL; init?: RequestInit }> = [];
+		const fetchMock = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), "http://localhost");
+				requests.push({ url, init });
+				if (url.pathname === "/api/twillot-history") {
+					return Response.json(twillotPayload());
+				}
+				if (url.pathname === "/api/xremark") {
+					return Response.json({
+						imported: false,
+						annotationCount: 0,
+						matchedProfileCount: 0,
+					});
+				}
+				if (url.pathname === "/api/integrations/xremark") {
+					return Response.json({
+						paired: false,
+						connected: false,
+						extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
+						endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+						lastSequence: 0,
+					});
+				}
+				const payload = settingsPayload("local");
+				if (init?.method === "POST") {
+					payload.analysis.translationModels = {
+						primary: "openai",
+						backup: "deepseek",
+					};
+				}
+				return Response.json(payload);
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<SettingsRoute />);
+
+		expect(await screen.findByText("Tweet Translation Models")).toBeVisible();
+		const primary = screen.getByLabelText("Primary translation model");
+		const backup = screen.getByLabelText("Backup translation model");
+		expect(primary).toHaveValue("deepseek");
+		expect(backup).toHaveValue("openai");
+		fireEvent.change(primary, { target: { value: "openai" } });
+		expect(backup).toHaveValue("deepseek");
+		fireEvent.click(
+			screen.getByRole("button", { name: "Save translation models" }),
+		);
+
+		await waitFor(() => {
+			const request = requests.find(
+				(item) =>
+					item.url.pathname === "/api/settings" && item.init?.method === "POST",
+			);
+			expect(request).toBeDefined();
+			expect(JSON.parse(String(request?.init?.body))).toEqual({
+				analysis: {
+					translationModels: {
+						primary: "openai",
+						backup: "deepseek",
+					},
+				},
+			});
+		});
+	});
+
 	it("updates the global profile analysis source", async () => {
 		const fetchMock = vi.fn(
 			async (input: RequestInfo | URL, init?: RequestInit) => {

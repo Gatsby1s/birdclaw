@@ -2,9 +2,11 @@ import type { BirdclawSettings, UpdateBirdclawSettings } from "./api-contracts";
 import {
 	getTwitter6551Config,
 	getSummaryModelConfig,
+	getTranslationModelConfig,
 	resolveProfileAnalysisSource,
 	setProfileAnalysisSource,
 	setSummaryModelConfig,
+	setTranslationModelConfig,
 } from "./config";
 import {
 	getTwitter6551RuntimeConfig,
@@ -14,6 +16,7 @@ import {
 export function getBirdclawSettings(): BirdclawSettings {
 	const twitter6551 = getTwitter6551Config();
 	const summaryModels = getSummaryModelConfig();
+	const translationModels = getTranslationModelConfig();
 	const runtimeConfig = getTwitter6551RuntimeConfig();
 	return {
 		analysis: {
@@ -21,6 +24,10 @@ export function getBirdclawSettings(): BirdclawSettings {
 			summaryModels: {
 				primary: summaryModels.primary,
 				backup: summaryModels.backup,
+			},
+			translationModels: {
+				primary: translationModels.primary,
+				backup: translationModels.backup,
 			},
 		},
 		providers: {
@@ -60,6 +67,9 @@ export function updateBirdclawSettings(
 			...input.analysis?.summaryModels,
 			deepSeekApiKey: input.providers?.deepseek?.apiKey,
 		});
+	}
+	if (input.analysis?.translationModels) {
+		setTranslationModelConfig(input.analysis.translationModels);
 	}
 	return getBirdclawSettings();
 }

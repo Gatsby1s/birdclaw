@@ -172,7 +172,9 @@ describe("tweet translation", () => {
 		const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
 		const body = JSON.parse(String(request.body)) as { model: string };
 		expect(body.model).toBe("deepseek-v4-pro");
-		expect(readCacheMock.mock.calls[0]?.[0]).toContain(":deepseek-v4-pro:");
+		expect(readCacheMock.mock.calls[0]?.[0]).toContain(
+			":deepseek-deepseek-v4-pro:",
+		);
 	});
 
 	it("does not call DeepSeek for an already-Chinese post", async () => {
@@ -327,5 +329,201 @@ describe("tweet translation", () => {
 			),
 		).rejects.toThrow("DEEPSEEK_API_KEY is not set");
 		expect(runtime.fetch).not.toHaveBeenCalled();
+	});
+
+	it("translates through an explicitly selected OpenAI-compatible primary", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			Response.json({
+				choices: [
+					{
+						message: {
+							content: JSON.stringify({
+								sourceLanguage: "English",
+								isChinese: false,
+								translatedText: "由 Sub2API 完成翻译。",
+							}),
+						},
+					},
+				],
+			}),
+		);
+		const runtime = createRuntimeServices({
+			env: (name) => {
+				if (name === "BIRDCLAW_TRANSLATION_PRIMARY_PROVIDER") return "openai";
+				if (name === "BIRDCLAW_TRANSLATION_BACKUP_PROVIDER") {
+					return "deepseek";
+				}
+				if (name === "BIRDCLAW_TRANSLATION_OPENAI_MODEL") return "gpt-5.6";
+				if (name === "OPENAI_API_KEY") return "openai-test-key";
+				if (name === "OPENAI_BASE_URL") return "http://sub2api.internal:8080";
+				if (name === "DEEPSEEK_API_KEY") return "deepseek-test-key";
+				return undefined;
+			},
+			fetch: fetchMock,
+		});
+
+		await expect(
+			Effect.runPromise(
+				translateTweetTextEffect("Translate through the gateway.", {
+					readCache: vi.fn(() => null) as unknown as typeof readSyncCache,
+					runtime,
+					writeCache: vi.fn(
+						() => "2026-08-17T00:00:00.000Z",
+					) as unknown as typeof writeSyncCache,
+				}),
+			),
+		).resolves.toMatchObject({
+			translated: true,
+			translatedText: "由 Sub2API 完成翻译。",
+		});
+
+		expect(fetchMock).toHaveBeenCalledOnce();
+		expect(fetchMock.mock.calls[0]?.[0]).toBe(
+			"http://sub2api.internal:8080/v1/chat/completions",
+		);
+		const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+		expect(request).toBeDefined();
+		const body = JSON.parse(String(request?.body)) as Record<string, unknown>;
+		expect(body.model).toBe("gpt-5.6");
+		expect(body).not.toHaveProperty("thinking");
+	});
+
+	it("falls back after malformed primary output and caches the backup result", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				Response.json({
+					choices: [{ message: { content: "not valid json" } }],
+				}),
+			)
+			.mockResolvedValueOnce(
+				Response.json({
+					choices: [
+						{
+							message: {
+								content: JSON.stringify({
+									sourceLanguage: "English",
+									isChinese: false,
+									translatedText: "备用模型接管成功。",
+								}),
+							},
+						},
+					],
+				}),
+			);
+		const runtime = createRuntimeServices({
+			env: (name) => {
+				if (name === "BIRDCLAW_TRANSLATION_PRIMARY_PROVIDER") {
+					return "deepseek";
+				}
+				if (name === "BIRDCLAW_TRANSLATION_BACKUP_PROVIDER") return "openai";
+				if (name === "DEEPSEEK_API_KEY") return "deepseek-test-key";
+				if (name === "OPENAI_API_KEY") return "openai-test-key";
+				if (name === "OPENAI_BASE_URL") return "https://gateway.example";
+				return undefined;
+			},
+			fetch: fetchMock,
+		});
+		const writeCacheMock = vi.fn(
+			(_key: string, _value: unknown) => "2026-08-17T00:00:00.000Z",
+		);
+		const writeCache = writeCacheMock as unknown as typeof writeSyncCache;
+
+		await expect(
+			Effect.runPromise(
+				translateTweetTextEffect("Use the backup if needed.", {
+					readCache: vi.fn(() => null) as unknown as typeof readSyncCache,
+					runtime,
+					writeCache,
+				}),
+			),
+		).resolves.toMatchObject({ translatedText: "备用模型接管成功。" });
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock.mock.calls[0]?.[0]).toBe(
+			"https://api.deepseek.com/chat/completions",
+		);
+		expect(fetchMock.mock.calls[1]?.[0]).toBe(
+			"https://gateway.example/v1/chat/completions",
+		);
+		expect(writeCacheMock).toHaveBeenCalledOnce();
+		expect(String(writeCacheMock.mock.calls[0]?.[0])).toContain(
+			"deepseek-deepseek-v4-flash-then-openai-gpt-5.5",
+		);
+	});
+
+	it("falls back when the primary credential is not configured", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			Response.json({
+				choices: [
+					{
+						message: {
+							content: JSON.stringify({
+								sourceLanguage: "English",
+								isChinese: false,
+								translatedText: "缺少主密钥时由备用模型翻译。",
+							}),
+						},
+					},
+				],
+			}),
+		);
+		const runtime = createRuntimeServices({
+			env: (name) => {
+				if (name === "BIRDCLAW_TRANSLATION_PRIMARY_PROVIDER") {
+					return "deepseek";
+				}
+				if (name === "BIRDCLAW_TRANSLATION_BACKUP_PROVIDER") return "openai";
+				if (name === "OPENAI_API_KEY") return "openai-test-key";
+				return undefined;
+			},
+			fetch: fetchMock,
+		});
+
+		await expect(
+			Effect.runPromise(
+				translateTweetTextEffect("Use backup without the primary key.", {
+					readCache: vi.fn(() => null) as unknown as typeof readSyncCache,
+					runtime,
+					writeCache: vi.fn(
+						() => "2026-08-17T00:00:00.000Z",
+					) as unknown as typeof writeSyncCache,
+				}),
+			),
+		).resolves.toMatchObject({
+			translatedText: "缺少主密钥时由备用模型翻译。",
+		});
+		expect(fetchMock).toHaveBeenCalledOnce();
+		expect(fetchMock.mock.calls[0]?.[0]).toBe(
+			"https://api.openai.com/v1/chat/completions",
+		);
+	});
+
+	it("does not start a backup request after cancellation", async () => {
+		const controller = new AbortController();
+		controller.abort(new DOMException("cancelled", "AbortError"));
+		const fetchMock = vi.fn();
+		const runtime = createRuntimeServices({
+			env: (name) => {
+				if (name === "BIRDCLAW_TRANSLATION_PRIMARY_PROVIDER") {
+					return "deepseek";
+				}
+				if (name === "BIRDCLAW_TRANSLATION_BACKUP_PROVIDER") return "openai";
+				if (name === "DEEPSEEK_API_KEY") return "deepseek-test-key";
+				if (name === "OPENAI_API_KEY") return "openai-test-key";
+				return undefined;
+			},
+			fetch: fetchMock,
+		});
+
+		await expect(
+			Effect.runPromise(
+				translateTweetTextEffect("Cancel this translation.", {
+					readCache: vi.fn(() => null) as unknown as typeof readSyncCache,
+					runtime,
+					signal: controller.signal,
+				}),
+			),
+		).rejects.toThrow("cancelled");
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });

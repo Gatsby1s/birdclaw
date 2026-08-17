@@ -118,10 +118,15 @@ See [Backup](backup.md). When `autoSync` is enabled, read commands pull + merge 
 | `TWITTER_TOKEN`                                  | 6551 Bearer token; `OPENNEWS_TOKEN` is accepted as a compatibility fallback                                                                          |
 | `BIRDCLAW_BACKUP_AUTO_SYNC`                      | Set to `0` to disable auto-sync for one process                                                                                                      |
 | `NO_COLOR`                                       | Disable ANSI color in human output                                                                                                                   |
-| `OPENAI_API_KEY`                                 | Enable inbox scoring and low-signal filtering                                                                                                        |
-| `DEEPSEEK_API_KEY`                               | Enable automatic tweet translation through the dedicated DeepSeek API                                                                                |
+| `OPENAI_API_KEY`                                 | Enable OpenAI-compatible analysis, scoring, and tweet translation                                                                                    |
+| `OPENAI_BASE_URL`                                | Optional OpenAI-compatible base URL used by analysis, scoring, and tweet translation                                                                 |
+| `DEEPSEEK_API_KEY`                               | Enable DeepSeek analysis and tweet translation                                                                                                       |
 | `DEEPSEEK_BASE_URL`                              | Optional DeepSeek-compatible base URL; defaults to `https://api.deepseek.com`                                                                        |
-| `BIRDCLAW_TRANSLATION_MODEL`                     | Automatic translation model; defaults to `deepseek-v4-flash`                                                                                         |
+| `BIRDCLAW_TRANSLATION_PRIMARY_PROVIDER`          | Translation primary provider override: `deepseek` or `openai`                                                                                        |
+| `BIRDCLAW_TRANSLATION_BACKUP_PROVIDER`           | Translation backup provider override: `openai` or `deepseek`                                                                                         |
+| `BIRDCLAW_TRANSLATION_OPENAI_MODEL`              | OpenAI-compatible translation model override                                                                                                         |
+| `BIRDCLAW_TRANSLATION_DEEPSEEK_MODEL`            | DeepSeek translation model override                                                                                                                  |
+| `BIRDCLAW_TRANSLATION_MODEL`                     | Legacy DeepSeek-only translation model override                                                                                                      |
 
 `BIRDCLAW_DISABLE_LIVE_WRITES=1` is set automatically in CI and Playwright runs so test code can never publish a tweet, send a DM, or block an account.
 

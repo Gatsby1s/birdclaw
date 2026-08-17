@@ -36,13 +36,47 @@ describe("api settings route", () => {
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toMatchObject({
-			analysis: { profileSource: "local" },
+			analysis: {
+				profileSource: "local",
+				translationModels: { primary: "deepseek", backup: "openai" },
+			},
 			providers: {
 				twitter6551: {
 					baseUrl: "https://ai.6551.io",
 					tokenEnv: "TWITTER_TOKEN",
 					tokenDetected: false,
 				},
+			},
+		});
+	});
+
+	it("stores translation primary and backup independently from summaries", async () => {
+		const response = await POST({
+			request: new Request("http://localhost/api/settings", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					analysis: {
+						translationModels: {
+							primary: "openai",
+							backup: "deepseek",
+						},
+					},
+				}),
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			analysis: {
+				summaryModels: { primary: "openai", backup: "deepseek" },
+				translationModels: { primary: "openai", backup: "deepseek" },
+			},
+		});
+		const configPath = path.join(process.env.BIRDCLAW_HOME!, "config.json");
+		expect(JSON.parse(readFileSync(configPath, "utf8"))).toMatchObject({
+			analysis: {
+				translationModels: { primary: "openai", backup: "deepseek" },
 			},
 		});
 	});

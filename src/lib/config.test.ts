@@ -14,6 +14,7 @@ import {
 	getBirdCommand,
 	getBirdclawConfig,
 	getBirdclawPaths,
+	getTranslationModelConfig,
 	getTwitter6551Config,
 	resetBirdclawPathsForTests,
 	resolveActionsTransport,
@@ -21,6 +22,7 @@ import {
 	resolveProfileAnalysisSource,
 	setActionsTransport,
 	setProfileAnalysisSource,
+	setTranslationModelConfig,
 } from "./config";
 
 const tempRoots: string[] = [];
@@ -39,6 +41,8 @@ afterEach(() => {
 	delete process.env.BIRDCLAW_BIRD_COMMAND;
 	delete process.env.BIRDCLAW_MENTIONS_DATA_SOURCE;
 	delete process.env.BIRDCLAW_PROFILE_ANALYSIS_SOURCE;
+	delete process.env.BIRDCLAW_TRANSLATION_MODEL;
+	delete process.env.BIRDCLAW_TRANSLATION_DEEPSEEK_MODEL;
 	delete process.env.BIRDCLAW_6551_TOKEN;
 	delete process.env.TWITTER_TOKEN;
 
@@ -201,6 +205,41 @@ describe("config", () => {
 			},
 		});
 		expect(resolveProfileAnalysisSource()).toBe("local");
+	});
+
+	it("configures independent primary and backup translation providers", () => {
+		const tempRoot = mkdtempSync(path.join(os.tmpdir(), "birdclaw-config-"));
+		tempRoots.push(tempRoot);
+		process.env.BIRDCLAW_HOME = tempRoot;
+
+		expect(getTranslationModelConfig()).toMatchObject({
+			primary: "deepseek",
+			backup: "openai",
+		});
+		expect(
+			setTranslationModelConfig({ primary: "openai", backup: "deepseek" }),
+		).toEqual({
+			configPath: path.join(tempRoot, "config.json"),
+			primary: "openai",
+			backup: "deepseek",
+		});
+		expect(getTranslationModelConfig()).toMatchObject({
+			primary: "openai",
+			backup: "deepseek",
+		});
+		expect(
+			JSON.parse(readFileSync(path.join(tempRoot, "config.json"), "utf8")),
+		).toMatchObject({
+			analysis: {
+				translationModels: {
+					primary: "openai",
+					backup: "deepseek",
+				},
+			},
+		});
+		expect(() =>
+			setTranslationModelConfig({ primary: "openai", backup: "openai" }),
+		).toThrow("must be different");
 	});
 
 	it("preserves config fields written after the in-process cache was loaded", () => {

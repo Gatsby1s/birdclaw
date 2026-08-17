@@ -800,6 +800,10 @@ export const birdclawSettingsSchema = z.object({
 			primary: z.enum(["openai", "deepseek"]),
 			backup: z.enum(["openai", "deepseek"]),
 		}),
+		translationModels: z.object({
+			primary: z.enum(["openai", "deepseek"]),
+			backup: z.enum(["openai", "deepseek"]),
+		}),
 	}),
 	providers: z.object({
 		openai: z.object({
@@ -860,6 +864,13 @@ export const updateBirdclawSettingsSchema = z.object({
 		.object({
 			profileSource: profileAnalysisSourceSchema.optional(),
 			summaryModels: z
+				.object({
+					primary: z.enum(["openai", "deepseek"]),
+					backup: z.enum(["openai", "deepseek"]),
+				})
+				.refine((value) => value.primary !== value.backup)
+				.optional(),
+			translationModels: z
 				.object({
 					primary: z.enum(["openai", "deepseek"]),
 					backup: z.enum(["openai", "deepseek"]),
