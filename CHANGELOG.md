@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.8.92 - 2026-08-17
+
+### Added
+
+- Add configurable primary and backup providers for automatic tweet translation, with DeepSeek and OpenAI-compatible/Sub2API support in Settings.
+- Fall back once when the primary translation provider is unavailable, misconfigured, or returns an invalid response, while keeping request cancellation final and isolating caches by provider, model, and priority order.
+
+### Changed
+
+- Keep provider credentials server-side, show only safe configured status in Settings, and preserve the legacy DeepSeek translation model environment variable.
+
 ## 0.8.91 - 2026-08-15
 
 ### Changed
