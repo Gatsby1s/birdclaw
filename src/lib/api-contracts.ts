@@ -1099,6 +1099,18 @@ export const feedResponseSchema = z.object({
 });
 export type FeedResponse = z.infer<typeof feedResponseSchema>;
 
+export const feedArticleContentResponseSchema = z.object({
+	ok: z.literal(true),
+	item: feedItemSchema,
+	content: z.string().min(1).max(200_000),
+	contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+	cached: z.boolean(),
+	fetchedAt: z.iso.datetime(),
+});
+export type FeedArticleContentResponse = z.infer<
+	typeof feedArticleContentResponseSchema
+>;
+
 export const feedSyncResponseSchema = z.object({
 	ok: z.literal(true),
 	results: z.array(

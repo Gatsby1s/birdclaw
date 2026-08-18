@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { FeedItem, FeedItemKind, FeedSyncStatus } from "./api-contracts";
 import { getNativeDb, getReadDb } from "./db";
 import type { Database } from "./sqlite";
+import { readSyncCache, writeSyncCache } from "./sync-cache";
 import { safeHttpUrl } from "./url-safety";
 
 const TIGER_SOURCE = "tiger";
@@ -10,6 +11,8 @@ const TIGER_FLASH_API_URL =
 	"https://stock-news.skytigris.cn/v2/live/timeline?edition=fundamental&onlyImportant=true&lang=zh_CN&type=us";
 const TIGER_ARTICLE_API_URL =
 	"https://stock-news.laohu8.com/v2/highlight/list?lang=zh_CN";
+const TIGER_ARTICLE_DETAIL_API_URL =
+	"https://stock-news.laohu8.com/v2/news?lang=zh_CN";
 const TIGER_FLASH_URL =
 	"https://www.laohu8.com/news/breaking?onlyImportant=true&market=us";
 const TIGER_ARTICLE_URL = "https://www.laohu8.com/news";
@@ -19,6 +22,11 @@ const MAX_HTML_BYTES = 2_000_000;
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_TITLE_LENGTH = 4_000;
 const MAX_SUMMARY_LENGTH = 500;
+const MAX_ARTICLE_CONTENT_LENGTH = 200_000;
+const MAX_ARTICLE_CONTENT_BYTES = 512 * 1_024;
+const ARTICLE_CONTENT_CACHE_PREFIX = "editorial-feed:article-content:v1:";
+const ARTICLE_CONTENT_CONCURRENCY = 4;
+const ARTICLE_HYDRATION_TIMEOUT_MS = 25_000;
 const FLASH_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1_000;
 const MAX_FLASH_PAGES = 40;
 const MAX_ARTICLE_PAGES = 10;
@@ -44,6 +52,31 @@ interface FeedItemRow extends Record<string, unknown> {
 	image_url: string | null;
 	is_important: number;
 	updated_at: string;
+}
+
+interface ArticleFeedItemRow extends FeedItemRow {
+	content_hash: string;
+}
+
+export interface FeedArticleContent {
+	itemId: string;
+	externalId: string;
+	content: string;
+	contentHash: string;
+	sourceHash: string;
+	fetchedAt: string;
+}
+
+export interface FeedArticleContentResult extends FeedArticleContent {
+	item: FeedItem;
+	cached: boolean;
+}
+
+export class FeedArticleNotFoundError extends Error {
+	constructor() {
+		super("Feed article was not found");
+		this.name = "FeedArticleNotFoundError";
+	}
 }
 
 interface FeedSyncRow extends Record<string, unknown> {
@@ -118,6 +151,35 @@ const tigerArticleApiSchema = z.looseObject({
 	code: z.union([z.string(), z.number()]),
 	status: z.union([z.string(), z.number()]),
 });
+
+const tigerArticleDetailSchema = z.looseObject({
+	code: z.literal(200_060_000),
+	status: z.literal(200),
+	data: z.looseObject({
+		code: z.literal("91000000"),
+		status: z.literal("200"),
+		id: z.string().regex(/^\d{1,20}$/),
+		article_id: z.string().regex(/^\d{1,20}$/),
+		content_text: z.string().max(MAX_ARTICLE_CONTENT_LENGTH),
+		need_auth: z.literal(false),
+		need_login_tip: z.literal(false),
+		rights: z.unknown().nullable(),
+	}),
+});
+
+const feedArticleContentSchema = z.object({
+	itemId: z.string(),
+	externalId: z.string(),
+	content: z.string().min(1).max(MAX_ARTICLE_CONTENT_LENGTH),
+	contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+	sourceHash: z.string(),
+	fetchedAt: z.iso.datetime(),
+});
+
+const inFlightArticleContents = new Map<
+	string,
+	Promise<FeedArticleContentResult>
+>();
 
 function parseJsonArray(value: string) {
 	try {
@@ -447,6 +509,246 @@ async function fetchFeedPayload(
 	return extractAppData(body);
 }
 
+function articleContentCacheKey(itemId: string) {
+	return `${ARTICLE_CONTENT_CACHE_PREFIX}${itemId}`;
+}
+
+function normalizeArticleContent(value: string) {
+	const content = value.replaceAll("\r\n", "\n").replaceAll("\r", "\n").trim();
+	if (!content) throw new Error("Tiger article did not include readable text");
+	if (
+		content.length > MAX_ARTICLE_CONTENT_LENGTH ||
+		Buffer.byteLength(content, "utf8") > MAX_ARTICLE_CONTENT_BYTES
+	) {
+		throw new Error("Tiger article text was too large");
+	}
+	return content;
+}
+
+function normalizeArticleDetail(payload: unknown, expectedExternalId: string) {
+	const parsed = tigerArticleDetailSchema.parse(payload);
+	if (
+		parsed.data.id !== expectedExternalId ||
+		parsed.data.article_id !== expectedExternalId
+	) {
+		throw new Error("Tiger article detail did not match the requested article");
+	}
+	return normalizeArticleContent(parsed.data.content_text);
+}
+
+function getArticleFeedItemRow(itemId: string, db: Database) {
+	return db
+		.prepare(
+			`select id, source, external_id, kind, title, summary, url, publisher,
+			        published_at, market, language, symbols_json, image_url,
+			        is_important, content_hash, updated_at
+			 from feed_items
+			 where id = ? and source = ? and kind = 'article'`,
+		)
+		.get(itemId, TIGER_SOURCE) as ArticleFeedItemRow | undefined;
+}
+
+export function getFeedArticleItem(
+	itemId: string,
+	db = getReadDb(),
+): FeedItem | null {
+	const row = getArticleFeedItemRow(itemId, db);
+	return row ? rowToFeedItem(row) : null;
+}
+
+export function readFeedArticleContent(
+	itemId: string,
+	db = getNativeDb(),
+): FeedArticleContent | null {
+	const row = getArticleFeedItemRow(itemId, db);
+	if (!row) return null;
+	const cached = readSyncCache<unknown>(articleContentCacheKey(itemId), db);
+	if (!cached) return null;
+	const parsed = feedArticleContentSchema.safeParse(cached.value);
+	if (
+		!parsed.success ||
+		parsed.data.itemId !== row.id ||
+		parsed.data.externalId !== row.external_id ||
+		parsed.data.sourceHash !== row.content_hash ||
+		Buffer.byteLength(parsed.data.content, "utf8") >
+			MAX_ARTICLE_CONTENT_BYTES ||
+		createHash("sha256").update(parsed.data.content).digest("hex") !==
+			parsed.data.contentHash
+	)
+		return null;
+	return parsed.data;
+}
+
+function retryDelay(attempt: number, signal?: AbortSignal) {
+	const delayMs = 150 * 2 ** attempt;
+	return new Promise<void>((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+			return;
+		}
+		const onAbort = () => {
+			clearTimeout(timeout);
+			reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+		};
+		const timeout = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, delayMs);
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
+}
+
+async function fetchTigerArticleContent(options: {
+	externalId: string;
+	fetchImpl: typeof fetch;
+	signal?: AbortSignal;
+}) {
+	if (!/^\d{1,20}$/.test(options.externalId)) {
+		throw new Error("Tiger article id was invalid");
+	}
+	const url = new URL(TIGER_ARTICLE_DETAIL_API_URL);
+	url.searchParams.set("id", options.externalId);
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const timeoutSignal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+		const response = await options.fetchImpl(url, {
+			headers: {
+				accept: "application/json",
+				"user-agent": "Mozilla/5.0 BirdClaw personal feed reader",
+			},
+			redirect: "error",
+			signal: options.signal
+				? AbortSignal.any([options.signal, timeoutSignal])
+				: timeoutSignal,
+		});
+		if ((response.status === 429 || response.status >= 500) && attempt < 2) {
+			await retryDelay(attempt, options.signal);
+			continue;
+		}
+		if (!response.ok) {
+			throw new Error(
+				`Tiger article request failed with HTTP ${String(response.status)}`,
+			);
+		}
+		const declaredLength = Number(response.headers.get("content-length"));
+		if (Number.isFinite(declaredLength) && declaredLength > MAX_HTML_BYTES) {
+			throw new Error("Tiger article response was too large");
+		}
+		const body = await response.text();
+		if (Buffer.byteLength(body, "utf8") > MAX_HTML_BYTES) {
+			throw new Error("Tiger article response was too large");
+		}
+		let payload: unknown;
+		try {
+			payload = JSON.parse(body) as unknown;
+		} catch {
+			throw new Error("Tiger article endpoint returned invalid JSON");
+		}
+		return normalizeArticleDetail(payload, options.externalId);
+	}
+	throw new Error("Tiger article request failed");
+}
+
+export async function getFeedArticleContent(
+	itemId: string,
+	options: {
+		fetchImpl?: typeof fetch;
+		signal?: AbortSignal;
+		refresh?: boolean;
+		now?: () => Date;
+	} = {},
+): Promise<FeedArticleContentResult> {
+	const db = getNativeDb();
+	const row = getArticleFeedItemRow(itemId, db);
+	if (!row) throw new FeedArticleNotFoundError();
+	if (!options.refresh) {
+		const cached = readFeedArticleContent(itemId, db);
+		if (cached) return { ...cached, item: rowToFeedItem(row), cached: true };
+	}
+	const existing = inFlightArticleContents.get(itemId);
+	if (existing) return existing;
+	const run = (async () => {
+		const content = await fetchTigerArticleContent({
+			externalId: row.external_id,
+			fetchImpl: options.fetchImpl ?? fetch,
+			...(options.signal ? { signal: options.signal } : {}),
+		});
+		const fetchedAt = (options.now ?? (() => new Date()))().toISOString();
+		const value = feedArticleContentSchema.parse({
+			itemId: row.id,
+			externalId: row.external_id,
+			content,
+			contentHash: createHash("sha256").update(content).digest("hex"),
+			sourceHash: row.content_hash,
+			fetchedAt,
+		});
+		writeSyncCache(articleContentCacheKey(itemId), value, db);
+		return { ...value, item: rowToFeedItem(row), cached: false };
+	})();
+	inFlightArticleContents.set(itemId, run);
+	const cleanup = () => {
+		if (inFlightArticleContents.get(itemId) === run) {
+			inFlightArticleContents.delete(itemId);
+		}
+	};
+	void run.then(cleanup, cleanup);
+	return run;
+}
+
+export async function hydrateFeedArticleContents(
+	items: FeedItem[],
+	options: {
+		fetchImpl?: typeof fetch;
+		signal?: AbortSignal;
+		timeoutMs?: number;
+	} = {},
+) {
+	const articleItems = [
+		...new Map(
+			items
+				.filter((item) => item.kind === "article")
+				.map((item) => [item.id, item]),
+		).values(),
+	];
+	let cursor = 0;
+	let hydrated = 0;
+	let failed = 0;
+	const timeoutSignal = AbortSignal.timeout(
+		Math.max(1, options.timeoutMs ?? ARTICLE_HYDRATION_TIMEOUT_MS),
+	);
+	const batchSignal = options.signal
+		? AbortSignal.any([options.signal, timeoutSignal])
+		: timeoutSignal;
+	const workers = Array.from(
+		{ length: Math.min(ARTICLE_CONTENT_CONCURRENCY, articleItems.length) },
+		async () => {
+			while (cursor < articleItems.length) {
+				if (options.signal?.aborted) {
+					throw (
+						options.signal.reason ?? new DOMException("Aborted", "AbortError")
+					);
+				}
+				if (timeoutSignal.aborted) break;
+				const item = articleItems[cursor];
+				cursor += 1;
+				if (!item) continue;
+				try {
+					await getFeedArticleContent(item.id, {
+						...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+						signal: batchSignal,
+					});
+					hydrated += 1;
+				} catch (error) {
+					if (options.signal?.aborted) throw error;
+					failed += 1;
+					if (timeoutSignal.aborted) break;
+				}
+			}
+		},
+	);
+	await Promise.all(workers);
+	return { attempted: articleItems.length, hydrated, failed };
+}
+
 function writeSyncState(
 	db: Database,
 	options: {
@@ -663,6 +965,15 @@ export function syncTigerFeed(
 				...new Map(items.map((item) => [item.id, item])).values(),
 			];
 			const changed = upsertFeedItems(uniqueItems, db);
+			if (kind === "article") {
+				await hydrateFeedArticleContents(
+					listFeedItems({ kind: "article", limit: 100 }, db),
+					{
+						fetchImpl,
+						...(options.signal ? { signal: options.signal } : {}),
+					},
+				);
+			}
 			const finishedAt = now().toISOString();
 			const lastItemAt = uniqueItems.reduce<string | null>(
 				(latest, item) =>
@@ -703,6 +1014,8 @@ export function syncTigerFeed(
 export const __test__ = {
 	decodeHtmlEntities,
 	extractAppData,
+	normalizeArticleContent,
+	normalizeArticleDetail,
 	normalizeArticleItems,
 	normalizeFlashItems,
 	rowToFeedItem,

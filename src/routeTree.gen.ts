@@ -52,6 +52,7 @@ import { Route as ApiLinkPreviewRouteImport } from './routes/api/link-preview'
 import { Route as ApiLinkInsightsRouteImport } from './routes/api/link-insights'
 import { Route as ApiInboxRouteImport } from './routes/api/inbox'
 import { Route as ApiFeedSyncRouteImport } from './routes/api/feed-sync'
+import { Route as ApiFeedArticleRouteImport } from './routes/api/feed-article'
 import { Route as ApiFeedRouteImport } from './routes/api/feed'
 import { Route as ApiDiscussionHistoryRouteImport } from './routes/api/discussion-history'
 import { Route as ApiDataSourcesRouteImport } from './routes/api/data-sources'
@@ -282,6 +283,11 @@ const ApiFeedSyncRoute = ApiFeedSyncRouteImport.update({
   path: '/api/feed-sync',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiFeedArticleRoute = ApiFeedArticleRouteImport.update({
+  id: '/api/feed-article',
+  path: '/api/feed-article',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiFeedRoute = ApiFeedRouteImport.update({
   id: '/api/feed',
   path: '/api/feed',
@@ -377,6 +383,7 @@ export interface FileRoutesByFullPath {
   '/api/data-sources': typeof ApiDataSourcesRoute
   '/api/discussion-history': typeof ApiDiscussionHistoryRoute
   '/api/feed': typeof ApiFeedRoute
+  '/api/feed-article': typeof ApiFeedArticleRoute
   '/api/feed-sync': typeof ApiFeedSyncRoute
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
@@ -435,6 +442,7 @@ export interface FileRoutesByTo {
   '/api/data-sources': typeof ApiDataSourcesRoute
   '/api/discussion-history': typeof ApiDiscussionHistoryRoute
   '/api/feed': typeof ApiFeedRoute
+  '/api/feed-article': typeof ApiFeedArticleRoute
   '/api/feed-sync': typeof ApiFeedSyncRoute
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
@@ -494,6 +502,7 @@ export interface FileRoutesById {
   '/api/data-sources': typeof ApiDataSourcesRoute
   '/api/discussion-history': typeof ApiDiscussionHistoryRoute
   '/api/feed': typeof ApiFeedRoute
+  '/api/feed-article': typeof ApiFeedArticleRoute
   '/api/feed-sync': typeof ApiFeedSyncRoute
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
@@ -554,6 +563,7 @@ export interface FileRouteTypes {
     | '/api/data-sources'
     | '/api/discussion-history'
     | '/api/feed'
+    | '/api/feed-article'
     | '/api/feed-sync'
     | '/api/inbox'
     | '/api/link-insights'
@@ -612,6 +622,7 @@ export interface FileRouteTypes {
     | '/api/data-sources'
     | '/api/discussion-history'
     | '/api/feed'
+    | '/api/feed-article'
     | '/api/feed-sync'
     | '/api/inbox'
     | '/api/link-insights'
@@ -670,6 +681,7 @@ export interface FileRouteTypes {
     | '/api/data-sources'
     | '/api/discussion-history'
     | '/api/feed'
+    | '/api/feed-article'
     | '/api/feed-sync'
     | '/api/inbox'
     | '/api/link-insights'
@@ -729,6 +741,7 @@ export interface RootRouteChildren {
   ApiDataSourcesRoute: typeof ApiDataSourcesRoute
   ApiDiscussionHistoryRoute: typeof ApiDiscussionHistoryRoute
   ApiFeedRoute: typeof ApiFeedRoute
+  ApiFeedArticleRoute: typeof ApiFeedArticleRoute
   ApiFeedSyncRoute: typeof ApiFeedSyncRoute
   ApiInboxRoute: typeof ApiInboxRoute
   ApiLinkInsightsRoute: typeof ApiLinkInsightsRoute
@@ -1064,6 +1077,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiFeedSyncRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/feed-article': {
+      id: '/api/feed-article'
+      path: '/api/feed-article'
+      fullPath: '/api/feed-article'
+      preLoaderRoute: typeof ApiFeedArticleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/feed': {
       id: '/api/feed'
       path: '/api/feed'
@@ -1199,6 +1219,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiDataSourcesRoute: ApiDataSourcesRoute,
   ApiDiscussionHistoryRoute: ApiDiscussionHistoryRoute,
   ApiFeedRoute: ApiFeedRoute,
+  ApiFeedArticleRoute: ApiFeedArticleRoute,
   ApiFeedSyncRoute: ApiFeedSyncRoute,
   ApiInboxRoute: ApiInboxRoute,
   ApiLinkInsightsRoute: ApiLinkInsightsRoute,

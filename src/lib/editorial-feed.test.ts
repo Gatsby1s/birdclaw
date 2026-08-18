@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,10 +9,14 @@ import { getNativeDb, resetDatabaseForTests } from "./db";
 import {
 	__test__,
 	countFeedItems,
+	getFeedArticleContent,
 	getFeedSyncStatus,
+	hydrateFeedArticleContents,
 	listFeedItems,
+	readFeedArticleContent,
 	syncTigerFeed,
 } from "./editorial-feed";
+import { writeSyncCache } from "./sync-cache";
 
 let temporaryHome = "";
 
@@ -29,6 +34,37 @@ function flashItem(id: string, publishedAt: string, important = true) {
 		pubTime: Date.parse(publishedAt),
 		media: "Tiger News",
 		symbols: ["AAPL"],
+	};
+}
+
+function articleItem(id: string) {
+	return {
+		id,
+		title: "A factual company update",
+		pubTimestamp: Date.parse("2026-08-18T08:00:00.000Z") / 1_000,
+		media: "Tiger News",
+		summary: "The company published a material update.",
+		news_tag: "company",
+		isHighRisk: false,
+		rights: null,
+		symbols: ["AAPL"],
+	};
+}
+
+function articleDetail(id: string, content: string) {
+	return {
+		code: 200_060_000,
+		status: 200,
+		data: {
+			code: "91000000",
+			status: "200",
+			id,
+			article_id: id,
+			content_text: content,
+			need_auth: false,
+			need_login_tip: false,
+			rights: null,
+		},
 	};
 }
 
@@ -274,5 +310,130 @@ describe("editorial feed", () => {
 		expect(uncertainRights?.summary).toBe("");
 		expect(uncertainRisk?.summary).toBe("");
 		expect(uncertainTag?.summary).toBe("");
+	});
+
+	it("fetches, preserves, and persistently caches the full article text", async () => {
+		const id = "1234567890";
+		const content = "First paragraph.\r\n\r\nLiteral <b>tag</b> and &amp;.";
+		let listRequests = 0;
+		let detailRequests = 0;
+		const detailIds: Array<string | null> = [];
+		const fetchImpl = async (input: string | URL | Request) => {
+			const url = new URL(String(input));
+			if (url.pathname === "/v2/news") {
+				detailRequests += 1;
+				detailIds.push(url.searchParams.get("id"));
+				return jsonResponse(articleDetail(id, content));
+			}
+			listRequests += 1;
+			return jsonResponse({
+				code: 91_000_000,
+				status: 200,
+				items: [articleItem(id)],
+			});
+		};
+
+		await syncTigerFeed("article", {
+			fetchImpl: fetchImpl as typeof fetch,
+			initialArticlePages: 1,
+			now: () => new Date("2026-08-18T12:00:00.000Z"),
+		});
+		expect(listRequests).toBe(1);
+		expect(detailRequests).toBe(1);
+		expect(detailIds).toEqual([id]);
+		expect(readFeedArticleContent(`tiger:article:${id}`)).toMatchObject({
+			externalId: id,
+			content: "First paragraph.\n\nLiteral <b>tag</b> and &amp;.",
+		});
+
+		await expect(
+			getFeedArticleContent(`tiger:article:${id}`, {
+				fetchImpl: fetchImpl as typeof fetch,
+			}),
+		).resolves.toMatchObject({
+			cached: true,
+			content: "First paragraph.\n\nLiteral <b>tag</b> and &amp;.",
+		});
+		expect(detailRequests).toBe(1);
+
+		getNativeDb()
+			.prepare("delete from sync_cache where cache_key = ?")
+			.run(`editorial-feed:article-content:v1:tiger:article:${id}`);
+		await Promise.all([
+			getFeedArticleContent(`tiger:article:${id}`, {
+				fetchImpl: fetchImpl as typeof fetch,
+			}),
+			getFeedArticleContent(`tiger:article:${id}`, {
+				fetchImpl: fetchImpl as typeof fetch,
+			}),
+		]);
+		expect(detailRequests).toBe(2);
+		expect(detailIds).toEqual([id, id]);
+
+		getNativeDb()
+			.prepare("delete from sync_cache where cache_key = ?")
+			.run(`editorial-feed:article-content:v1:tiger:article:${id}`);
+		const hangingFetch = (_input: string | URL | Request, init?: RequestInit) =>
+			new Promise<Response>((_resolve, reject) => {
+				init?.signal?.addEventListener(
+					"abort",
+					() => reject(new DOMException("Aborted", "AbortError")),
+					{ once: true },
+				);
+			});
+		await expect(
+			hydrateFeedArticleContents(listFeedItems({ kind: "article" }), {
+				fetchImpl: hangingFetch as typeof fetch,
+				timeoutMs: 20,
+			}),
+		).resolves.toEqual({ attempted: 1, hydrated: 0, failed: 1 });
+
+		const source = getNativeDb()
+			.prepare("select content_hash from feed_items where id = ?")
+			.get(`tiger:article:${id}`) as { content_hash: string };
+		const corruptContent = "Schema-valid but semantically corrupt body";
+		writeSyncCache(`editorial-feed:article-content:v1:tiger:article:${id}`, {
+			itemId: "tiger:article:wrong",
+			externalId: id,
+			content: corruptContent,
+			contentHash: createHash("sha256").update(corruptContent).digest("hex"),
+			sourceHash: source.content_hash,
+			fetchedAt: "2026-08-18T12:00:00.000Z",
+		});
+		expect(readFeedArticleContent(`tiger:article:${id}`)).toBeNull();
+		writeSyncCache(`editorial-feed:article-content:v1:tiger:article:${id}`, {
+			itemId: `tiger:article:${id}`,
+			externalId: id,
+			content: corruptContent,
+			contentHash: "a".repeat(64),
+			sourceHash: source.content_hash,
+			fetchedAt: "2026-08-18T12:00:00.000Z",
+		});
+		expect(readFeedArticleContent(`tiger:article:${id}`)).toBeNull();
+	});
+
+	it("rejects mismatched, gated, empty, and oversized article details", () => {
+		const valid = articleDetail("1234567890", "Readable body");
+		expect(() => __test__.normalizeArticleDetail(valid, "9999999999")).toThrow(
+			/match/,
+		);
+		expect(() =>
+			__test__.normalizeArticleDetail(
+				{
+					...valid,
+					data: { ...valid.data, need_auth: true },
+				},
+				"1234567890",
+			),
+		).toThrow(/need_auth/);
+		expect(() =>
+			__test__.normalizeArticleDetail(
+				{ ...valid, data: { ...valid.data, content_text: " \r\n " } },
+				"1234567890",
+			),
+		).toThrow(/readable text/);
+		expect(() =>
+			__test__.normalizeArticleContent("界".repeat(180_000)),
+		).toThrow(/too large/);
 	});
 });

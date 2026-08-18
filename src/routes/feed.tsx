@@ -1,10 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Bolt, ExternalLink, Newspaper, RefreshCw } from "lucide-react";
+import {
+	Bolt,
+	ChevronDown,
+	ChevronUp,
+	ExternalLink,
+	LoaderCircle,
+	Newspaper,
+	RefreshCw,
+} from "lucide-react";
 import { useState } from "react";
 import { FeedEmpty, FeedError, LinkSkeletonRows } from "#/components/FeedState";
 import { SmartTimestamp } from "#/components/SmartTimestamp";
 import {
+	feedArticleContentResponseSchema,
 	feedResponseSchema,
 	type FeedItem,
 	type FeedItemKind,
@@ -42,15 +51,33 @@ async function fetchFeed(kind: FeedItemKind) {
 	return feedResponseSchema.parse(await response.json());
 }
 
+async function fetchArticleContent(itemId: string) {
+	const url = new URL("/api/feed-article", window.location.origin);
+	url.searchParams.set("id", itemId);
+	const response = await fetch(url, { cache: "no-store" });
+	if (!response.ok)
+		throw new Error("Article content is temporarily unavailable");
+	return feedArticleContentResponseSchema.parse(await response.json());
+}
+
 function symbolLabel(symbols: string[]) {
 	if (symbols.length === 0) return null;
 	const visible = symbols.slice(0, 4);
 	return `${visible.join(" · ")}${symbols.length > visible.length ? ` +${String(symbols.length - visible.length)}` : ""}`;
 }
 
-function FeedItemCard({ item }: { item: FeedItem }) {
+export function FeedItemCard({ item }: { item: FeedItem }) {
 	const Icon = item.kind === "flash" ? Bolt : Newspaper;
 	const symbols = symbolLabel(item.symbols);
+	const [expanded, setExpanded] = useState(false);
+	const articleQuery = useQuery({
+		queryKey: ["editorial-feed-article", item.id],
+		queryFn: () => fetchArticleContent(item.id),
+		enabled: item.kind === "article" && expanded,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: 1,
+	});
+	const contentRegionId = `feed-article-content-${item.externalId}`;
 	return (
 		<article className="border-b border-[var(--line)] px-4 py-4 last:border-b-0">
 			<div className="flex min-w-0 gap-3">
@@ -80,27 +107,84 @@ function FeedItemCard({ item }: { item: FeedItem }) {
 							</>
 						) : null}
 					</div>
-					<a
-						className="group mt-2 block rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-						href={item.url}
-						rel="noreferrer"
-						target="_blank"
-					>
+					<div className="mt-2">
 						<h2 className="text-[15px] leading-[1.5] font-semibold text-[var(--ink)] [overflow-wrap:anywhere] group-hover:text-[var(--accent)]">
 							{item.title}
-							<ExternalLink className="ml-1 inline size-3.5 align-[-2px] opacity-60" />
 						</h2>
 						{item.summary ? (
 							<p className="mt-1.5 line-clamp-3 text-[13px] leading-[1.55] text-[var(--ink-soft)] [overflow-wrap:anywhere]">
 								{item.summary}
 							</p>
 						) : null}
-					</a>
+					</div>
 					{symbols ? (
 						<div className="mt-2 text-[12px] font-medium text-[var(--ink-soft)]">
 							{symbols}
 						</div>
 					) : null}
+					{item.kind === "article" ? (
+						<>
+							<div className="mt-3 flex flex-wrap items-center gap-2">
+								<button
+									aria-controls={contentRegionId}
+									aria-expanded={expanded}
+									className={cx(secondaryButtonClass, "min-h-11")}
+									onClick={() => setExpanded((value) => !value)}
+									type="button"
+								>
+									{expanded ? (
+										<ChevronUp className="size-4" aria-hidden="true" />
+									) : (
+										<ChevronDown className="size-4" aria-hidden="true" />
+									)}
+									{expanded ? "收起正文" : "阅读正文"}
+								</button>
+								<a
+									className={cx(secondaryButtonClass, "min-h-11")}
+									href={item.url}
+									rel="noreferrer"
+									target="_blank"
+								>
+									<ExternalLink className="size-4" aria-hidden="true" />
+									打开老虎原文
+								</a>
+							</div>
+							{expanded ? (
+								<div
+									className="mt-3 min-w-0 rounded-xl border border-[var(--line)] bg-[var(--bg-hover)] p-4"
+									id={contentRegionId}
+								>
+									{articleQuery.isLoading ? (
+										<div className="flex min-h-24 items-center justify-center gap-2 text-[13px] text-[var(--ink-soft)]">
+											<LoaderCircle
+												className="size-4 animate-spin"
+												aria-hidden="true"
+											/>
+											正在读取正文…
+										</div>
+									) : articleQuery.data ? (
+										<p className="whitespace-pre-wrap text-[14px] leading-7 text-[var(--ink)] [overflow-wrap:anywhere]">
+											{articleQuery.data.content}
+										</p>
+									) : (
+										<p className="text-[13px] leading-6 text-[var(--alert)]">
+											正文暂时读取失败，可先打开老虎原文查看。
+										</p>
+									)}
+								</div>
+							) : null}
+						</>
+					) : (
+						<a
+							className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg text-[13px] font-semibold text-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+							href={item.url}
+							rel="noreferrer"
+							target="_blank"
+						>
+							查看快讯来源
+							<ExternalLink className="size-3.5" aria-hidden="true" />
+						</a>
+					)}
 				</div>
 			</div>
 		</article>
