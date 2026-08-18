@@ -155,6 +155,10 @@ function digestResult(
 	};
 }
 
+function generateSummary() {
+	fireEvent.click(screen.getByRole("button", { name: "Generate summary" }));
+}
+
 describe("today route", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
@@ -186,7 +190,7 @@ describe("today route", () => {
 		vi.unstubAllGlobals();
 	});
 
-	it("streams a digest and reloads when controls change", async () => {
+	it("generates only on demand and reloads when controls change", async () => {
 		const urls: URL[] = [];
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const url = new URL(String(input));
@@ -221,6 +225,13 @@ describe("today route", () => {
 		vi.stubGlobal("fetch", fetchMock);
 
 		render(<TodayRoute />);
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(
+			screen.getByText(
+				"No summary yet. Choose a period, then generate only when you need it.",
+			),
+		).toBeInTheDocument();
+		generateSummary();
 
 		expect(
 			await screen.findByRole("heading", { name: "Today", level: 1 }),
@@ -275,6 +286,10 @@ describe("today route", () => {
 		);
 
 		fireEvent.click(screen.getByLabelText("Feed"));
+		expect(
+			urls.filter((url) => url.pathname === "/api/period-digest"),
+		).toHaveLength(1);
+		generateSummary();
 		await waitFor(() =>
 			expect(
 				urls.some((url) => url.searchParams.get("includeFeed") === "false"),
@@ -282,11 +297,13 @@ describe("today route", () => {
 		);
 
 		fireEvent.click(screen.getByRole("button", { name: "Week" }));
+		generateSummary();
 		expect(
 			await screen.findByRole("heading", { name: "Last 7 days", level: 1 }),
 		).toBeInTheDocument();
 
 		fireEvent.click(screen.getByLabelText("DMs"));
+		generateSummary();
 		expect(
 			await screen.findByRole("heading", { name: "With DMs", level: 1 }),
 		).toBeInTheDocument();
@@ -310,7 +327,7 @@ describe("today route", () => {
 		).toBe(true);
 	});
 
-	it("runs a digest only after applying a valid custom date-time range", async () => {
+	it("runs a digest only after explicit generation for a valid custom range", async () => {
 		const digestUrls: URL[] = [];
 		vi.stubGlobal(
 			"fetch",
@@ -330,7 +347,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
-		await waitFor(() => expect(digestUrls).toHaveLength(1));
+		expect(digestUrls).toHaveLength(0);
 		fireEvent.click(screen.getByRole("button", { name: "Custom" }));
 		expect(
 			screen.getByRole("group", { name: "Custom date range" }),
@@ -355,11 +372,13 @@ describe("today route", () => {
 		fireEvent.change(screen.getByLabelText("To"), {
 			target: { value: untilLocal },
 		});
-		expect(digestUrls).toHaveLength(1);
+		expect(digestUrls).toHaveLength(0);
 		fireEvent.click(screen.getByRole("button", { name: "Apply custom range" }));
+		expect(digestUrls).toHaveLength(0);
+		generateSummary();
 
-		await waitFor(() => expect(digestUrls).toHaveLength(2));
-		const customUrl = digestUrls[1];
+		await waitFor(() => expect(digestUrls).toHaveLength(1));
+		const customUrl = digestUrls[0];
 		expect(customUrl?.searchParams.get("period")).toBe("custom");
 		expect(customUrl?.searchParams.get("since")).toBe(
 			new Date(sinceLocal).toISOString(),
@@ -369,18 +388,20 @@ describe("today route", () => {
 		);
 
 		fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-		await waitFor(() => expect(digestUrls).toHaveLength(3));
-		expect(digestUrls[2]?.searchParams.get("since")).toBe(
+		await waitFor(() => expect(digestUrls).toHaveLength(2));
+		expect(digestUrls[1]?.searchParams.get("since")).toBe(
 			customUrl?.searchParams.get("since"),
 		);
-		expect(digestUrls[2]?.searchParams.get("until")).toBe(
+		expect(digestUrls[1]?.searchParams.get("until")).toBe(
 			customUrl?.searchParams.get("until"),
 		);
 
 		fireEvent.click(screen.getByRole("button", { name: "Today" }));
-		await waitFor(() => expect(digestUrls).toHaveLength(4));
-		expect(digestUrls[3]?.searchParams.has("since")).toBe(false);
-		expect(digestUrls[3]?.searchParams.has("until")).toBe(false);
+		expect(digestUrls).toHaveLength(2);
+		generateSummary();
+		await waitFor(() => expect(digestUrls).toHaveLength(3));
+		expect(digestUrls[2]?.searchParams.has("since")).toBe(false);
+		expect(digestUrls[2]?.searchParams.has("until")).toBe(false);
 	});
 
 	it("closes a restored custom picker when navigation returns to Today", () => {
@@ -440,6 +461,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		expect(
 			await screen.findByRole("heading", {
@@ -486,6 +508,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		expect(
 			await screen.findByRole("heading", { name: "Topic 1", level: 3 }),
@@ -516,6 +539,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		expect(
 			await screen.findAllByRole("heading", {
@@ -549,6 +573,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		await screen.findByRole("heading", { name: "Today", level: 1 });
 		const exportButton = screen.getByRole("button", { name: "Export PDF" });
@@ -836,6 +861,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		await screen.findByRole("heading", { name: "Today", level: 1 });
 		expect(digestRequests).toHaveLength(1);
@@ -886,6 +912,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 		await screen.findByRole("heading", { name: "Today", level: 1 });
 		fireEvent.click(screen.getByRole("button", { name: "导出完整 PDF" }));
 		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
@@ -911,6 +938,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		await screen.findByRole("heading", { name: "Today", level: 1 });
 		expect(
@@ -948,6 +976,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		await screen.findByRole("heading", { name: "Today", level: 1 });
 		const titleLink = screen.getByRole("link", {
@@ -981,6 +1010,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		expect(
 			await screen.findByText(
@@ -1117,6 +1147,83 @@ describe("today route", () => {
 		).toBe(false);
 	});
 
+	it("restores an 8-hour intraday overview without starting a model stream", async () => {
+		const saved = digestResult(
+			"2026-08-18 · 08:00–16:00",
+			"# Intraday overview\n\n## What people are talking about\n\n- Restored window (tweet_1)",
+		);
+		const metadata = {
+			id: "intraday_history_1",
+			kind: "intraday" as const,
+			date: "2026-08-18",
+			endDate: "2026-08-18",
+			archiveKey: "2026-08-18@16",
+			slotLabel: "08:00–16:00",
+			timezone: "Asia/Shanghai",
+			status: "ready" as const,
+			title: "Intraday overview",
+			summary: "Saved 8-hour report",
+			counts: saved.context.counts,
+			provider: "openai",
+			model: "gpt-5.5",
+			attemptCount: 1,
+			createdAt: saved.updatedAt,
+			updatedAt: saved.updatedAt,
+			finishedAt: saved.updatedAt,
+			pdfAvailable: false,
+		};
+		const requestedHistoryKinds: Array<string | null> = [];
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input), "http://localhost");
+			if (url.pathname === "/api/profile-hydrate") {
+				return Response.json({ ok: true, results: [] });
+			}
+			if (url.pathname === "/api/period-digest-history") {
+				if (url.searchParams.has("id")) {
+					return Response.json({ item: { metadata, result: saved } });
+				}
+				requestedHistoryKinds.push(url.searchParams.get("kind"));
+				return Response.json({ items: [metadata] });
+			}
+			throw new Error(`Unexpected request: ${url.pathname}`);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(
+			<TodayRoute
+				searchState={validateTodaySearch({
+					run: "intraday_history_1",
+					archive: "intraday",
+				})}
+				onSearchChange={vi.fn()}
+			/>,
+		);
+
+		expect(
+			await screen.findByText("Restored from intraday history · 0 token"),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Intraday overview", level: 1 }),
+		).toBeInTheDocument();
+		expect(screen.getAllByText(/08:00–16:00/).length).toBeGreaterThan(0);
+		expect(requestedHistoryKinds).toContain("intraday");
+		expect(
+			screen.getByRole("link", {
+				name: "Download 2026-08-18@16 PDF",
+			}),
+		).toHaveAttribute(
+			"href",
+			"/api/period-digest-history?id=intraday_history_1&pdf=1",
+		);
+		expect(
+			fetchMock.mock.calls.some(
+				([input]) =>
+					new URL(String(input), "http://localhost").pathname ===
+					"/api/period-digest",
+			),
+		).toBe(false);
+	});
+
 	it("clears daily rows while a delayed weekly archive is loading", async () => {
 		const live = digestResult("Today", "# Today\n\nFresh digest.");
 		const dailyMetadata = {
@@ -1204,6 +1311,7 @@ describe("today route", () => {
 		vi.stubGlobal("fetch", fetchMock);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		expect(
 			await screen.findByText(
@@ -1254,6 +1362,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		expect(
 			await screen.findAllByText("Fetching home timeline from X"),
@@ -1290,6 +1399,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		expect(await screen.findByText("model failed")).toBeInTheDocument();
 	});
@@ -1309,6 +1419,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		expect(
 			await screen.findByText(
@@ -1334,6 +1445,7 @@ describe("today route", () => {
 		);
 
 		render(<TodayRoute />);
+		generateSummary();
 
 		expect(
 			await screen.findByText(

@@ -6,12 +6,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetBirdclawPathsForTests } from "./config";
 import { getNativeDb, resetDatabaseForTests } from "./db";
 import {
+	claimIntradayDigestSlot,
 	claimPeriodDigestDate,
 	completePeriodDigestHistory,
 	failPeriodDigestHistory,
 	getPeriodDigestHistory,
+	latestCompletedIntradaySlotKey,
 	listPeriodDigestHistory,
 	localWindowForDateKey,
+	localWindowForIntradaySlotKey,
+	nextIntradaySlotKey,
+	previousIntradaySlotKey,
 } from "./period-digest-history";
 import type { PeriodDigestRunResult } from "./period-digest";
 
@@ -201,5 +206,60 @@ describe("daily period digest history", () => {
 			new Date(springForward.until).getTime() -
 				new Date(springForward.since).getTime(),
 		).toBe(23 * 60 * 60_000);
+	});
+
+	it("stores intraday windows beside daily history without mixing the lists", () => {
+		process.env.TZ = "Asia/Shanghai";
+		const daily = claimPeriodDigestDate("2026-08-17");
+		const intraday = claimIntradayDigestSlot("2026-08-18@16");
+		if (!daily.claimed || !intraday.claimed) {
+			throw new Error("Expected both history claims");
+		}
+		expect(
+			completePeriodDigestHistory(
+				daily.id,
+				daily.claimToken,
+				resultForDate("2026-08-17"),
+			),
+		).toBe(true);
+		expect(
+			completePeriodDigestHistory(
+				intraday.id,
+				intraday.claimToken,
+				resultForDate("2026-08-18"),
+			),
+		).toBe(true);
+
+		expect(listPeriodDigestHistory()).toHaveLength(1);
+		expect(listPeriodDigestHistory({ kind: "intraday" })).toEqual([
+			expect.objectContaining({
+				archiveKey: "2026-08-18@16",
+				date: "2026-08-18",
+				kind: "intraday",
+				slotLabel: "08:00–16:00",
+				status: "ready",
+			}),
+		]);
+		expect(getPeriodDigestHistory(intraday.id)?.result.context.window).toEqual({
+			label: "2026-08-18 · 08:00–16:00",
+			...localWindowForIntradaySlotKey("2026-08-18@16"),
+		});
+	});
+
+	it("resolves completed slots and advances across local midnight", () => {
+		process.env.TZ = "Asia/Shanghai";
+		expect(
+			latestCompletedIntradaySlotKey(new Date("2026-08-18T21:43:00+08:00")),
+		).toBe("2026-08-18@16");
+		expect(
+			latestCompletedIntradaySlotKey(new Date("2026-08-19T00:01:00+08:00")),
+		).toBe("2026-08-18@24");
+		expect(nextIntradaySlotKey("2026-08-18@16")).toBe("2026-08-18@24");
+		expect(nextIntradaySlotKey("2026-08-18@24")).toBe("2026-08-19@08");
+		expect(previousIntradaySlotKey("2026-08-19@08")).toBe("2026-08-18@24");
+		const window = localWindowForIntradaySlotKey("2026-08-18@24");
+		expect(
+			new Date(window.until).getTime() - new Date(window.since).getTime(),
+		).toBe(8 * 60 * 60_000);
 	});
 });

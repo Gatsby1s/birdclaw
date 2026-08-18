@@ -44,6 +44,10 @@ import {
 	stopPeriodDigestScheduler,
 } from "./period-digest-scheduler";
 import {
+	startIntradayDigestScheduler,
+	stopIntradayDigestScheduler,
+} from "./intraday-digest-scheduler";
+import {
 	startWeeklyDigestScheduler,
 	stopWeeklyDigestScheduler,
 } from "./weekly-digest-scheduler";
@@ -729,6 +733,7 @@ export async function startProductionServer({
 	server.once("close", () => {
 		stopEditorialFeedScheduler();
 		stopPeriodDigestScheduler();
+		stopIntradayDigestScheduler();
 		stopWeeklyDigestScheduler();
 		stopTwillotFollowScheduler();
 		stopLocalCloudBridgeClient();
@@ -743,6 +748,7 @@ export async function startProductionServer({
 	try {
 		startEditorialFeedScheduler();
 		startPeriodDigestScheduler();
+		startIntradayDigestScheduler();
 		startWeeklyDigestScheduler();
 		startTwillotFollowScheduler();
 		startLocalTwitterCollector();
@@ -779,6 +785,7 @@ export async function runProductionServer(options: ProductionServerOptions) {
 			removeHandlers();
 			stopEditorialFeedScheduler();
 			stopPeriodDigestScheduler();
+			stopIntradayDigestScheduler();
 			stopWeeklyDigestScheduler();
 			stopTwillotFollowScheduler();
 			stopLocalCloudBridgeClient();
