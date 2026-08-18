@@ -488,6 +488,42 @@ function getTimelineQualityReason(
 
 const RECENT_TIMELINE_EDGE_CANDIDATES = 5000;
 
+function getCjkSubstringSearchTerms(value: string) {
+	if (
+		!/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
+			value,
+		)
+	) {
+		return [];
+	}
+
+	return value.match(/[\p{L}\p{N}_]+/gu) ?? [];
+}
+
+function createSubstringSearchSnippet(text: string, terms: string[]) {
+	const match = terms
+		.map((term) => {
+			const result = new RegExp(
+				term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+				"iu",
+			).exec(text);
+			return result
+				? { index: result.index, matchedText: result[0] }
+				: undefined;
+		})
+		.filter(
+			(match): match is { index: number; matchedText: string } =>
+				match !== undefined,
+		)
+		.sort((left, right) => left.index - right.index)[0];
+	if (!match) return undefined;
+
+	const before = Array.from(text.slice(0, match.index));
+	const after = Array.from(text.slice(match.index + match.matchedText.length));
+	const contextLength = 48;
+	return `${before.length > contextLength ? "..." : ""}${before.slice(-contextLength).join("")}<mark>${match.matchedText}</mark>${after.slice(0, contextLength).join("")}${after.length > contextLength ? "..." : ""}`;
+}
+
 export function listTimelineItems({
 	resource,
 	account,
@@ -826,6 +862,7 @@ export function listTimelineItems({
 
 	const trimmedSearch = search?.trim() ?? "";
 	const ftsSearch = trimmedSearch ? toFtsSearchQuery(trimmedSearch) : "";
+	const cjkSubstringSearchTerms = getCjkSubstringSearchTerms(trimmedSearch);
 	let searchMatchesCte = "";
 	let searchJoin = "";
 	let includeTextMatches = false;
@@ -839,11 +876,21 @@ export function listTimelineItems({
 		const identityOnlySearch =
 			isHandleSearch || isNumericIdSearch || isProfileIdSearch;
 		includeTextMatches = !identityOnlySearch;
+		const substringTextMatchesSql =
+			includeTextMatches && cjkSubstringSearchTerms.length > 0
+				? `
+        union
+        select id as tweet_id
+        from tweets
+        where ${cjkSubstringSearchTerms.map(() => "instr(lower(text), lower(?)) > 0").join(" and ")}
+      `
+				: "";
 		const textMatchesSql = includeTextMatches
 			? `
         select tweet_id
         from tweets_fts
         where tweets_fts.text match ?
+				${substringTextMatchesSql}
         union
       `
 			: "";
@@ -880,6 +927,7 @@ export function listTimelineItems({
 					: [profileSearch, profileSearch, profileSearch, profileSearch];
 		const searchParams = [
 			...(includeTextMatches ? [ftsSearch] : []),
+			...(includeTextMatches ? cjkSubstringSearchTerms : []),
 			...profileMatchParams,
 		];
 		// search_matches is textually after timeline_edges but before the main
@@ -1056,6 +1104,17 @@ export function listTimelineItems({
 			) as Array<{ tweet_id: string; search_snippet: string }>;
 		for (const row of snippetRows) {
 			searchSnippets.set(row.tweet_id, row.search_snippet);
+		}
+		if (cjkSubstringSearchTerms.length > 0) {
+			for (const row of rows) {
+				const tweetId = String(row.id);
+				if (searchSnippets.has(tweetId)) continue;
+				const snippet = createSubstringSearchSnippet(
+					String(row.text),
+					cjkSubstringSearchTerms,
+				);
+				if (snippet) searchSnippets.set(tweetId, snippet);
+			}
 		}
 	}
 
