@@ -26,7 +26,7 @@ import {
 } from "./streaming-ingestion";
 import { runSubprocessEffect, SubprocessError } from "./subprocess";
 
-const BACKUP_SCHEMA_VERSION = 10;
+const BACKUP_SCHEMA_VERSION = 11;
 const MIN_SUPPORTED_BACKUP_SCHEMA_VERSION = 1;
 const MANIFEST_PATH = "manifest.json";
 const DATA_DIR = "data";

@@ -96,7 +96,9 @@ export class ImportRepository {
 
 	clearBackupImport() {
 		this.db.exec(`
-	  delete from tweet_quality_score_requests;
+		  delete from feed_sync_state;
+		  delete from feed_items;
+		  delete from tweet_quality_score_requests;
 	  delete from tweet_quality_scores;
 	  delete from twillot_history_batches;
 	  delete from twillot_history_daily_usage;
