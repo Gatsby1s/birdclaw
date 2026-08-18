@@ -636,7 +636,7 @@ function ReferenceFeedCard({ item }: { item: ReferenceFeedItem }) {
 				id={`reference-feed-${item.id}`}
 			>
 				<span className="today-reference-badge">
-					{item.kind === "flash" ? "快讯" : "文章"}
+					{item.kind === "flash" ? "美股快讯" : "文章"}
 				</span>
 				<strong className="today-reference-author">{item.publisher}</strong>
 				<time dateTime={item.publishedAt}>
