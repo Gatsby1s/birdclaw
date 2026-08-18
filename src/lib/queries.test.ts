@@ -662,6 +662,58 @@ describe("birdclaw queries", () => {
 		);
 	});
 
+	it("finds a Chinese phrase inside an unsegmented FTS token", () => {
+		setupTempHome();
+		const db = getNativeDb();
+		const text =
+			"İ 把房价指数加入到图表中，然后又绘制了一下印度的情况，有点不妙的感觉。";
+		insertTestTweet(db, {
+			id: "tweet_chinese_phrase_search",
+			text,
+			createdAt: "2026-08-18T08:00:00.000Z",
+		});
+		db.prepare("insert into tweets_fts (tweet_id, text) values (?, ?)").run(
+			"tweet_chinese_phrase_search",
+			text,
+		);
+		insertTestEdge(
+			db,
+			"tweet_chinese_phrase_search",
+			"2026-08-18T08:00:00.000Z",
+		);
+
+		for (const search of ["房价", "房价指数", "房价指数 印度"]) {
+			const items = listTimelineItems({
+				resource: "home",
+				search,
+				limit: 20,
+			});
+			const matchingItem = items.find(
+				(item) => item.id === "tweet_chinese_phrase_search",
+			);
+
+			expect(matchingItem?.searchSnippet).toContain(
+				`<mark>${search === "房价" ? "房价" : "房价指数"}</mark>`,
+			);
+		}
+		expect(
+			listTimelineItems({
+				resource: "home",
+				search: "房价指数 美国",
+				limit: 20,
+			}),
+		).toEqual([]);
+		expect(
+			listTimelineItems({
+				resource: "home",
+				search: "把房价指数加入到图表中",
+				limit: 20,
+			})
+				.map((item) => item.id)
+				.filter((id) => id === "tweet_chinese_phrase_search"),
+		).toEqual(["tweet_chinese_phrase_search"]);
+	});
+
 	it("hides replies to others while keeping self-thread replies", () => {
 		setupTempHome();
 		const db = getNativeDb();
