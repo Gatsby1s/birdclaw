@@ -520,38 +520,56 @@ describe("settings route", () => {
 		);
 	});
 
-	it("explains that remote Settings cannot manage the local Twillot executor", async () => {
+	it("manages the cloud Twillot queue and submits a target", async () => {
 		const remote = twillotPayload();
-		remote.managementAvailable = false;
-		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-			const url = new URL(String(input), "http://localhost");
-			if (url.pathname === "/api/settings")
-				return Response.json(settingsPayload("local"));
-			if (url.pathname === "/api/twillot-history") return Response.json(remote);
-			if (url.pathname === "/api/xremark")
+		remote.endpoint =
+			"https://birdclaw-production.up.railway.app/api/integrations/twillot-history";
+		remote.localQueueExecutor = false;
+		const actions: unknown[] = [];
+		const fetchMock = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/settings")
+					return Response.json(settingsPayload("local"));
+				if (url.pathname === "/api/twillot-history") {
+					if (init?.method === "POST")
+						actions.push(JSON.parse(String(init.body)));
+					return Response.json(remote);
+				}
+				if (url.pathname === "/api/xremark")
+					return Response.json({
+						imported: false,
+						annotationCount: 0,
+						matchedProfileCount: 0,
+					});
 				return Response.json({
-					imported: false,
-					annotationCount: 0,
-					matchedProfileCount: 0,
+					paired: false,
+					connected: false,
+					extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
+					endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+					lastSequence: 0,
 				});
-			return Response.json({
-				paired: false,
-				connected: false,
-				extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
-				endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
-				lastSequence: 0,
-			});
-		});
+			},
+		);
 		vi.stubGlobal("fetch", fetchMock);
 
 		render(<SettingsRoute />);
 		expect(
-			await screen.findByText(
-				"The capture queue runs beside Chrome. Open local BirdClaw at 127.0.0.1:3001 to manage it.",
-			),
+			await screen.findByRole("button", { name: "Pair companion" }),
 		).toBeVisible();
-		expect(
-			screen.queryByRole("button", { name: "Pair companion" }),
-		).not.toBeInTheDocument();
+		fireEvent.change(screen.getByPlaceholderText("@handle"), {
+			target: { value: "@TingHu888" },
+		});
+		fireEvent.change(screen.getByPlaceholderText("903691274770833408"), {
+			target: { value: "903691274770833408" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Queue history" }));
+		await waitFor(() =>
+			expect(actions).toContainEqual({
+				action: "enqueue",
+				handle: "@TingHu888",
+				externalUserId: "903691274770833408",
+			}),
+		);
 	});
 });

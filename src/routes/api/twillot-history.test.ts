@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetBirdclawPathsForTests } from "#/lib/config";
-import { resetDatabaseForTests } from "#/lib/db";
+import { getNativeDb, resetDatabaseForTests } from "#/lib/db";
 import { getRouteHandler } from "#/test/route-handlers";
 import { Route } from "./twillot-history";
 
@@ -70,26 +70,79 @@ describe("Twillot history management API", () => {
 		expect(JSON.stringify(body)).not.toContain(pairing.token);
 	});
 
-	it("keeps companion management on the Mac when Settings is opened remotely", async () => {
+	it("manages the canonical queue from cloud Settings", async () => {
 		const status = await GET({
-			request: new Request("https://birdclaw.example/api/twillot-history"),
+			request: new Request(
+				"https://birdclaw-production.up.railway.app/api/twillot-history",
+			),
 		});
 		expect(await status.json()).toMatchObject({
 			ok: true,
-			localQueueExecutor: true,
-			managementAvailable: false,
-			endpoint: "http://127.0.0.1:3001/api/integrations/twillot-history",
+			localQueueExecutor: false,
+			managementAvailable: true,
+			endpoint:
+				"https://birdclaw-production.up.railway.app/api/integrations/twillot-history",
 		});
 
 		const response = await POST({
-			request: new Request("https://birdclaw.example/api/twillot-history", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ action: "pair" }),
-			}),
+			request: new Request(
+				"https://birdclaw-production.up.railway.app/api/twillot-history",
+				{
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ action: "pair" }),
+				},
+			),
 		});
-		expect(response.status).toBe(409);
-		expect(await response.json()).toMatchObject({ ok: false });
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			ok: true,
+			status: { companion: { paired: true } },
+		});
+	});
+
+	it("queues a specific public profile from cloud Settings", async () => {
+		const db = getNativeDb({ seedDemoData: false });
+		db.prepare(
+			`insert into accounts (
+				id, name, handle, external_user_id, transport, is_default, created_at
+			) values ('acct', 'Owner', 'owner', '1', 'cloud', 1, ?)`,
+		).run("2026-08-18T00:00:00.000Z");
+		const response = await POST({
+			request: new Request(
+				"https://birdclaw-production.up.railway.app/api/twillot-history",
+				{
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						action: "enqueue",
+						handle: "@TingHu888",
+						externalUserId: "903691274770833408",
+					}),
+				},
+			),
+		});
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			ok: true,
+			status: {
+				queueCounts: { queued: 1 },
+				jobs: [
+					expect.objectContaining({
+						handle: "TingHu888",
+						captureStatus: "capture_requested",
+					}),
+				],
+			},
+		});
+		expect(
+			db
+				.prepare("select id, handle from profiles where id = ?")
+				.get("profile_user_903691274770833408"),
+		).toEqual({
+			id: "profile_user_903691274770833408",
+			handle: "TingHu888",
+		});
 	});
 
 	it("rejects invalid management requests", async () => {

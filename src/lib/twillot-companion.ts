@@ -9,7 +9,12 @@ import {
 	markTwillotHistoryCaptureStatus,
 	renewTwillotHistoryLease,
 } from "./twillot-history-queue";
-import type { XurlMedia, XurlMentionData, XurlMentionsResponse } from "./types";
+import type {
+	XurlMedia,
+	XurlMentionData,
+	XurlMentionsResponse,
+	XurlMentionUser,
+} from "./types";
 
 const CONNECTED_WINDOW_MS = 10 * 60_000;
 export const TWILLOT_COMPANION_MAX_BATCH_RECORDS = 500;
@@ -43,6 +48,34 @@ const twillotMediaItemSchema = z.strictObject({
 		.optional(),
 });
 
+const twillotQuotedPostSchema = z
+	.strictObject({
+		tweet_id: z.union([z.string(), z.number()]),
+		conversation_id: z.union([z.string(), z.number()]).optional(),
+		user_id: z.union([z.string(), z.number()]),
+		created_at: z.union([z.string(), z.number()]),
+		full_text: z.string().max(100_000),
+		screen_name: z.string().trim().min(1).max(128),
+		username: z.string().max(512).optional(),
+		avatar_url: z.string().max(4_096).optional(),
+		lang: z.string().max(64).optional(),
+		views_count: z.number().int().nonnegative().optional(),
+		bookmark_count: z.number().int().nonnegative().optional(),
+		favorite_count: z.number().int().nonnegative().optional(),
+		quote_count: z.number().int().nonnegative().optional(),
+		reply_count: z.number().int().nonnegative().optional(),
+		retweet_count: z.number().int().nonnegative().optional(),
+		is_reply: z.boolean().optional(),
+		is_quote: z.boolean().optional(),
+		reply_to_id: z.union([z.string(), z.number()]).optional(),
+		quoted_tweet_id: z.union([z.string(), z.number()]).optional(),
+		entities: z.record(z.string(), z.unknown()).optional(),
+		media_items: z.array(twillotMediaItemSchema).max(64).optional(),
+	})
+	.refine((record) => /^\d+$/.test(String(record.tweet_id).trim()), {
+		message: "Quoted Twillot post is missing a valid numeric tweet id",
+	});
+
 export const twillotPostRecordSchema = z
 	.strictObject({
 		id: z.union([z.string(), z.number()]),
@@ -70,6 +103,7 @@ export const twillotPostRecordSchema = z
 		quoted_tweet_id: z.union([z.string(), z.number()]).optional(),
 		entities: z.record(z.string(), z.unknown()).optional(),
 		media_items: z.array(twillotMediaItemSchema).max(64).optional(),
+		quoted_tweet: twillotQuotedPostSchema.optional(),
 	})
 	.refine(
 		(record) => /^\d+$/.test(String(record.tweet_id ?? record.id).trim()),
@@ -79,6 +113,7 @@ export const twillotPostRecordSchema = z
 	);
 
 export type TwillotPostRecord = z.infer<typeof twillotPostRecordSchema>;
+type TwillotQuotedPost = z.infer<typeof twillotQuotedPostSchema>;
 
 const submissionBaseSchema = z.object({
 	sourceId: z
@@ -306,14 +341,45 @@ function isoTimestamp(value: string | number) {
 	return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : value;
 }
 
-function mediaFromPost(post: TwillotPostRecord) {
+function mediaFromPost(
+	post: Pick<TwillotPostRecord, "id" | "tweet_id" | "media_items">,
+) {
 	const candidates = post.media_items ?? [];
+	const blockedVideoKeys = new Set<string>();
+	for (const candidate of candidates) {
+		const item = asRecord(candidate);
+		if (!item) continue;
+		const type = stringValue(item.type);
+		if (
+			type !== "video" &&
+			type !== "animated_gif" &&
+			(type === "photo" || !asRecord(item.video_info))
+		)
+			continue;
+		const key = stringValue(
+			item.media_key ??
+				item.id_str ??
+				item.id ??
+				item.url ??
+				item.preview_image_url ??
+				item.media_url_https ??
+				item.media_url,
+		);
+		if (key) blockedVideoKeys.add(key);
+	}
 	const seen = new Set<string>();
 	const media: XurlMedia[] = [];
 	for (const [index, candidate] of candidates.entries()) {
 		const item = asRecord(candidate);
 		if (!item) continue;
 		const videoInfo = asRecord(item.video_info);
+		const type = stringValue(item.type);
+		if (
+			type === "video" ||
+			type === "animated_gif" ||
+			(type !== "photo" && videoInfo)
+		)
+			continue;
 		const url = stringValue(
 			item.media_url_https ??
 				item.media_url ??
@@ -327,43 +393,33 @@ function mediaFromPost(post: TwillotPostRecord) {
 		const key =
 			stringValue(item.media_key ?? item.id_str ?? item.id) ??
 			`${String(post.tweet_id ?? post.id)}:${String(index)}`;
+		if (blockedVideoKeys.has(key)) continue;
 		if (seen.has(key)) continue;
 		seen.add(key);
-		const variants = Array.isArray(videoInfo?.variants)
-			? videoInfo.variants
-					.map(asRecord)
-					.filter((variant): variant is Record<string, unknown> =>
-						Boolean(variant),
-					)
-					.map((variant) => ({
-						url: stringValue(variant.url) ?? "",
-						content_type:
-							stringValue(variant.content_type ?? variant.contentType) ?? "",
-						...(countValue(variant.bitrate ?? variant.bit_rate) > 0
-							? { bit_rate: countValue(variant.bitrate ?? variant.bit_rate) }
-							: {}),
-					}))
-					.filter((variant) => variant.url && variant.content_type)
-			: [];
 		media.push({
 			media_key: key,
-			type: stringValue(item.type) ?? "photo",
+			type: type ?? "photo",
 			...(url ? { url } : {}),
 			...(preview ? { preview_image_url: preview } : {}),
 			...(countValue(item.width) > 0 ? { width: countValue(item.width) } : {}),
 			...(countValue(item.height) > 0
 				? { height: countValue(item.height) }
 				: {}),
-			...(variants.length > 0 ? { variants } : {}),
 		});
 	}
 	return media;
 }
 
-function postToTweet(post: TwillotPostRecord, media: XurlMedia[]) {
-	const tweetId = String(post.tweet_id ?? post.id);
+function postToTweet(
+	post: TwillotPostRecord | TwillotQuotedPost,
+	media: XurlMedia[],
+) {
+	const tweetId = String(post.tweet_id ?? ("id" in post ? post.id : undefined));
 	const replyTo = stringValue(post.reply_to_id);
-	const quoted = stringValue(post.quoted_tweet_id);
+	const quoted = stringValue(
+		post.quoted_tweet_id ??
+			("quoted_tweet" in post ? post.quoted_tweet?.tweet_id : undefined),
+	);
 	const references = [
 		...(replyTo ? [{ type: "replied_to", id: replyTo }] : []),
 		...(quoted ? [{ type: "quoted", id: quoted }] : []),
@@ -397,20 +453,35 @@ export function twillotRecordsToTweetPayload(
 	const first = records[0];
 	if (!first) return { data: [], includes: { users: [], media: [] } };
 	const mediaByTweet = records.map((record) => mediaFromPost(record));
-	const media = mediaByTweet.flat();
+	const quotedPosts = records
+		.map((record) => record.quoted_tweet)
+		.filter((record): record is TwillotQuotedPost => Boolean(record));
+	const quotedMediaByTweet = quotedPosts.map((record) =>
+		mediaFromPost({
+			id: record.tweet_id,
+			tweet_id: record.tweet_id,
+			media_items: record.media_items,
+		}),
+	);
+	const media = [...mediaByTweet.flat(), ...quotedMediaByTweet.flat()];
+	const users = new Map<string, XurlMentionUser>();
+	for (const record of [first, ...quotedPosts]) {
+		users.set(String(record.user_id), {
+			id: String(record.user_id),
+			name: record.username?.trim() || record.screen_name,
+			username: record.screen_name,
+			...(record.avatar_url ? { profile_image_url: record.avatar_url } : {}),
+		});
+	}
 	return {
 		data: records.map((record, index) =>
 			postToTweet(record, mediaByTweet[index] ?? []),
 		),
 		includes: {
-			users: [
-				{
-					id: String(first.user_id),
-					name: first.username?.trim() || first.screen_name,
-					username: first.screen_name,
-					...(first.avatar_url ? { profile_image_url: first.avatar_url } : {}),
-				},
-			],
+			users: [...users.values()],
+			tweets: quotedPosts.map((record, index) =>
+				postToTweet(record, quotedMediaByTweet[index] ?? []),
+			),
 			media,
 		},
 	};

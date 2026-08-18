@@ -36,6 +36,12 @@ test("manifest patch keeps the key and adds only the companion surfaces", () => 
 	assert.equal(patched.permissions.includes("cookies"), false);
 	assert.equal(patched.permissions.includes("alarms"), true);
 	assert.equal(patched.host_permissions.includes("http://127.0.0.1/*"), true);
+	assert.equal(
+		patched.host_permissions.includes(
+			"https://birdclaw-production.up.railway.app/*",
+		),
+		true,
+	);
 	assert.deepEqual(patched.options_ui, {
 		page: "birdclaw-twillot-options.html",
 		open_in_tab: true,

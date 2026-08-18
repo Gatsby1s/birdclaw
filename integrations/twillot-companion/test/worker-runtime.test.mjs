@@ -738,16 +738,36 @@ test("post projection emits only the strict server whitelist", async () => {
 				{
 					media_key: "m1",
 					id: "legacy-media-id",
-					type: "video",
+					type: "photo",
 					media_url_https: "https://example.com/media.jpg",
 					forbidden: "MEDIA_SENTINEL",
+				},
+				{
+					media_key: "video-1",
+					type: "video",
+					preview_image_url: "https://example.com/video.jpg",
+					video_info: {
+						variants: [
+							{
+								url: "https://video.twimg.com/video.mp4",
+								content_type: "video/mp4",
+							},
+						],
+					},
 				},
 			],
 			_data: {
 				forbidden: "PRIVATE_SENTINEL",
 				legacy: { quoted_tweet: { secret: true }, conversations: ["secret"] },
 			},
-			quoted_tweet: { forbidden: "QUOTE_SENTINEL" },
+			quoted_tweet: {
+				tweet_id: "6",
+				user_id: "900",
+				created_at: 1_699_999_999,
+				full_text: "Quoted context",
+				screen_name: "quoted_author",
+				forbidden: "QUOTE_SENTINEL",
+			},
 			conversations: ["CONVERSATION_SENTINEL"],
 			forbidden: "ROW_SENTINEL",
 		},
@@ -760,6 +780,9 @@ test("post projection emits only the strict server whitelist", async () => {
 	assert.equal(projected.entities.hashtags[0].tag, "BirdClaw");
 	assert.equal(projected.media_items[0].media_key, "m1");
 	assert.equal(projected.media_items[0].id, "legacy-media-id");
+	assert.equal(projected.media_items.length, 1);
+	assert.equal(projected.quoted_tweet.tweet_id, "6");
+	assert.equal(projected.quoted_tweet.full_text, "Quoted context");
 	const allowed = new Set([
 		"id",
 		"tweet_id",
@@ -786,6 +809,7 @@ test("post projection emits only the strict server whitelist", async () => {
 		"quoted_tweet_id",
 		"entities",
 		"media_items",
+		"quoted_tweet",
 	]);
 	assert.equal(
 		Object.keys(projected).every((key) => allowed.has(key)),
@@ -809,7 +833,6 @@ test("post projection emits only the strict server whitelist", async () => {
 		true,
 	);
 	assert.equal(Object.hasOwn(projected, "_data"), false);
-	assert.equal(Object.hasOwn(projected, "quoted_tweet"), false);
 	assert.equal(Object.hasOwn(projected, "conversations"), false);
 	const serialized = JSON.stringify(projected);
 	for (const forbidden of [
@@ -840,7 +863,7 @@ test("post projection emits only the strict server whitelist", async () => {
 	);
 });
 
-test("configuration rejects every non-loopback endpoint", async () => {
+test("configuration accepts only BirdClaw cloud or loopback endpoints", async () => {
 	const harness = await createHarness();
 	assert.throws(
 		() => harness.api.normalizeEndpoint("https://example.com/api"),
@@ -849,6 +872,12 @@ test("configuration rejects every non-loopback endpoint", async () => {
 	assert.throws(
 		() => harness.api.normalizeEndpoint("http://127.0.0.1:3001/api?token=x"),
 		/loopback/,
+	);
+	assert.equal(
+		harness.api.normalizeEndpoint(
+			"https://birdclaw-production.up.railway.app/api/integrations/twillot-history",
+		),
+		"https://birdclaw-production.up.railway.app/api/integrations/twillot-history",
 	);
 	assert.equal(
 		harness.api.normalizeEndpoint("http://localhost:3001/api/"),

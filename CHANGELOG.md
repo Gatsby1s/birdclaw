@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 0.9.4 - 2026-08-18
+
+### Added
+
+- Submit a specific public X profile to the canonical Railway Twillot history queue from Settings.
+- Preserve quoted-post text and author context alongside historical posts while retaining reply and quote references.
+
+### Changed
+
+- Pair the audited Twillot companion directly with BirdClaw Cloud instead of requiring a local BirdClaw web server.
+- Keep Mini's 20,000-record daily BirdClaw budget and next-day queue resumption on Railway.
+
+### Fixed
+
+- Exclude video and animated-GIF media, including duplicate preview records, while keeping post text and photo attachments.
+- Accept only the exact BirdClaw production companion endpoint, trusted Railway forwarding headers, or an uncredentialed loopback development endpoint.
+
 ## 0.9.3 - 2026-08-18
 
 ### Added

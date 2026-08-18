@@ -205,8 +205,10 @@ async function manageXRemarkLiveSync(
 }
 
 async function manageTwillotHistory(input: {
-	action: "pair" | "disconnect" | "verify" | "retry";
+	action: "pair" | "disconnect" | "verify" | "retry" | "enqueue";
 	jobId?: string;
+	handle?: string;
+	externalUserId?: string;
 }) {
 	return fetchJson(
 		"/api/twillot-history",
@@ -292,6 +294,8 @@ function SettingsRoute() {
 		token: string;
 		endpoint: string;
 	} | null>(null);
+	const [twillotHandle, setTwillotHandle] = useState("");
+	const [twillotExternalUserId, setTwillotExternalUserId] = useState("");
 	const mutation = useMutation({
 		mutationFn: updateProfileSource,
 		onSuccess: (data) => {
@@ -343,6 +347,10 @@ function SettingsRoute() {
 				setTwillotPairing({ token: data.token, endpoint: data.endpoint });
 			} else if (input.action === "disconnect") {
 				setTwillotPairing(null);
+			}
+			if (input.action === "enqueue") {
+				setTwillotHandle("");
+				setTwillotExternalUserId("");
 			}
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.twillotHistory,
@@ -664,11 +672,9 @@ function SettingsRoute() {
 										<span>Twillot History Queue</span>
 									</div>
 									<p className="mt-1 text-[13px] text-[var(--ink-soft)]">
-										{twillotQuery.data && !twillotManagementAvailable
-											? "The capture queue runs beside Chrome. Open local BirdClaw at 127.0.0.1:3001 to manage it."
-											: twillot
-												? `${twillot.capturedToday.toLocaleString()} / ${twillot.dailyLimit.toLocaleString()} processed today · ${twillot.remainingToday.toLocaleString()} remaining`
-												: "Preparing the Twillot history queue."}
+										{twillot
+											? `${twillot.capturedToday.toLocaleString()} / ${twillot.dailyLimit.toLocaleString()} processed today · ${twillot.remainingToday.toLocaleString()} remaining`
+											: "Preparing the Twillot history queue."}
 									</p>
 									{twillot && twillotManagementAvailable ? (
 										<p className="mt-1 text-[12px] text-[var(--ink-soft)]">
@@ -754,6 +760,50 @@ function SettingsRoute() {
 								</div>
 							) : null}
 
+							{twillotManagementAvailable ? (
+								<div className="grid gap-2 rounded-xl border border-[var(--line)] p-3 min-[720px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] min-[720px]:items-end">
+									<label className="grid gap-1 text-[11px] font-semibold text-[var(--ink-soft)]">
+										X handle
+										<input
+											className="min-h-11 rounded-lg border border-[var(--line-strong)] bg-transparent px-3 text-[13px] text-[var(--ink)] outline-none focus:border-[var(--ink-soft)]"
+											onChange={(event) => setTwillotHandle(event.target.value)}
+											placeholder="@handle"
+											value={twillotHandle}
+										/>
+									</label>
+									<label className="grid gap-1 text-[11px] font-semibold text-[var(--ink-soft)]">
+										X user ID
+										<input
+											className="min-h-11 rounded-lg border border-[var(--line-strong)] bg-transparent px-3 text-[13px] text-[var(--ink)] outline-none focus:border-[var(--ink-soft)]"
+											inputMode="numeric"
+											onChange={(event) =>
+												setTwillotExternalUserId(event.target.value)
+											}
+											placeholder="903691274770833408"
+											value={twillotExternalUserId}
+										/>
+									</label>
+									<button
+										className="min-h-11 rounded-full border border-[var(--line-strong)] px-4 text-[12px] font-bold text-[var(--ink)] hover:bg-[var(--bg-hover)] disabled:opacity-55"
+										disabled={
+											twillotMutation.isPending ||
+											!twillotHandle.trim() ||
+											!/^\d+$/.test(twillotExternalUserId.trim())
+										}
+										onClick={() =>
+											twillotMutation.mutate({
+												action: "enqueue",
+												handle: twillotHandle.trim(),
+												externalUserId: twillotExternalUserId.trim(),
+											})
+										}
+										type="button"
+									>
+										Queue history
+									</button>
+								</div>
+							) : null}
+
 							{twillotManagementAvailable && twillot?.jobs.length ? (
 								<div className="grid gap-2">
 									{twillot.jobs.slice(0, 8).map((job) => (
@@ -806,12 +856,12 @@ function SettingsRoute() {
 
 							<p className="text-[11px] leading-5 text-[var(--ink-soft)]">
 								Mini is treated as a 20,000-record daily soft budget. The queue
-								executes locally beside Chrome; imported canonical tweets are
-								forwarded to Railway by BirdClaw’s existing cloud bridge.
-								Twillot has no supported task API or remaining-quota endpoint,
-								so the bridge opens the official page and waits for you to start
-								the export. A finished capture remains unverified until its
-								history boundary is checked.
+								lives on Railway and the paired Chrome bridge reads
+								Twillot&apos;s local archive into the cloud queue. Video media
+								is excluded. Twillot has no supported task API or
+								remaining-quota endpoint, so the bridge opens the official page
+								and waits for a manual Sync Posts start. A finished capture
+								remains unverified until its history boundary is checked.
 							</p>
 						</div>
 					</section>
