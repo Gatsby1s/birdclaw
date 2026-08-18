@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 0.9.1 - 2026-08-18
+
+### Changed
+
+- Restrict important breaking-news ingestion, Feed display, Today summaries, and complete PDF source labels to Tiger's US-market channel.
+- Keep legacy global flash records out of user-visible queries while the first US sync safely reclassifies matching records and backfills the recent window.
+
+### Fixed
+
+- Reject fallback flash payloads unless they explicitly identify the US market and important-only mode.
+- Exclude article excerpts when rights, risk, or content-tag metadata is missing, and treat composite `analysis` tags as non-factual commentary.
+
 ## 0.9.0 - 2026-08-18
 
 ### Added
