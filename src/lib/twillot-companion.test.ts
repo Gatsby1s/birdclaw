@@ -211,7 +211,7 @@ describe("Twillot companion", () => {
 		const rich = record("300", {
 			conversation_id: "250",
 			reply_to_id: "249",
-			quoted_tweet_id: 248,
+			quoted_tweet_id: undefined,
 			created_at: 1_700_000_000,
 			favorite_count: "9",
 			retweet_count: -1,
