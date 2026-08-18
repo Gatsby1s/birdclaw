@@ -31,8 +31,10 @@ export const Route = createFileRoute("/api/period-digest-history")({
 						defaultValue: 90,
 						max: 366,
 					});
+					const kind =
+						url.searchParams.get("kind") === "intraday" ? "intraday" : "daily";
 					return jsonResponse({
-						items: listPeriodDigestHistory({ limit }),
+						items: listPeriodDigestHistory({ limit, kind }),
 					});
 				}
 				const item = getPeriodDigestHistory(id);
@@ -46,7 +48,7 @@ export const Route = createFileRoute("/api/period-digest-history")({
 					return new Response(pdf, {
 						headers: {
 							"content-type": "application/pdf",
-							"content-disposition": `attachment; filename="BirdClaw-${item.metadata.date}-digest.pdf"`,
+							"content-disposition": `attachment; filename="BirdClaw-${item.metadata.archiveKey.replace("@", "-")}-${item.metadata.kind === "intraday" ? "intraday-" : ""}digest.pdf"`,
 							"cache-control": "private, no-store",
 						},
 					});

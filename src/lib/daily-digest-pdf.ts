@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import {
 	dailyDigestPdfPath,
 	getPeriodDigestHistory,
+	intradayDigestPdfPath,
 	type PeriodDigestHistoryDetail,
 } from "./period-digest-history";
 import {
@@ -129,11 +130,18 @@ function markdownLines(markdown: string) {
 function dailyDigestHtml(detail: DigestHistoryDetail) {
 	const { metadata, result } = detail;
 	const weekly = metadata.kind === "weekly";
-	const archiveLabel = weekly ? "Weekly archive" : "Daily archive";
+	const intraday = metadata.kind === "intraday";
+	const archiveLabel = weekly
+		? "Weekly archive"
+		: intraday
+			? "Intraday overview"
+			: "Daily archive";
 	const dateLabel = weekly
 		? `${metadata.date} – ${metadata.endDate}`
-		: metadata.date;
-	const footerLabel = weekly ? "weekly" : "daily";
+		: intraday
+			? `${metadata.date} · ${metadata.slotLabel ?? "8-hour window"}`
+			: metadata.date;
+	const footerLabel = weekly ? "weekly" : intraday ? "intraday" : "daily";
 	return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${escapeHtml(metadata.title)}</title>
 <style>
@@ -177,7 +185,9 @@ async function renderDailyDigestPdf({
 	const target =
 		detail.metadata.kind === "weekly"
 			? weeklyDigestPdfPath(date)
-			: dailyDigestPdfPath(date);
+			: detail.metadata.kind === "intraday"
+				? intradayDigestPdfPath(detail.metadata.archiveKey)
+				: dailyDigestPdfPath(date);
 	if (await validCachedPdf(target, detail)) return target;
 	const profileDir = await fs.mkdtemp(
 		path.join(os.tmpdir(), "birdclaw-daily-pdf-profile-"),
@@ -225,12 +235,15 @@ async function renderDailyDigestPdf({
 export async function ensureDailyDigestPdf({ id }: { id: string }) {
 	const detail = getPeriodDigestHistory(id);
 	if (!detail) throw new Error("Daily digest history not found");
-	const target = dailyDigestPdfPath(detail.metadata.date);
+	const target =
+		detail.metadata.kind === "intraday"
+			? intradayDigestPdfPath(detail.metadata.archiveKey)
+			: dailyDigestPdfPath(detail.metadata.date);
 	if (await validCachedPdf(target, detail)) return target;
 	const existing = renders.get(id);
 	if (existing) return existing;
 	const render = renderDailyDigestPdf({
-		date: detail.metadata.date,
+		date: detail.metadata.archiveKey,
 		detail,
 	}).finally(() => renders.delete(id));
 	renders.set(id, render);

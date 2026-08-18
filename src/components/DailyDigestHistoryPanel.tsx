@@ -10,9 +10,11 @@ import { cx, searchFieldIconClass, searchFieldInputClass } from "#/lib/ui";
 
 export interface DailyDigestHistoryListItem {
 	id: string;
-	kind?: "daily" | "weekly";
+	kind?: "daily" | "intraday" | "weekly";
 	date: string;
 	endDate?: string;
+	archiveKey?: string;
+	slotLabel?: string;
 	timezone: string;
 	status: "pending" | "ready" | "failed";
 	title: string;
@@ -47,6 +49,9 @@ function displayDate(value: string) {
 }
 
 function displayRange(item: DailyDigestHistoryListItem) {
+	if (item.kind === "intraday") {
+		return `${displayDate(item.date)} · ${item.slotLabel ?? "8-hour window"}`;
+	}
 	if (item.kind !== "weekly" || !item.endDate) return displayDate(item.date);
 	return `${displayDate(item.date)} – ${displayDate(item.endDate)}`;
 }
@@ -123,12 +128,14 @@ function HistoryRow({
 			</button>
 			{ready ? (
 				<a
-					aria-label={`Download ${item.date} PDF`}
+					aria-label={`Download ${item.archiveKey ?? item.date} PDF`}
 					className="absolute right-2 top-2 grid size-8 place-items-center rounded-full text-[var(--ink-soft)] hover:bg-[var(--bg-active)] hover:text-[var(--accent)]"
 					download={
 						item.kind === "weekly"
 							? `BirdClaw-${item.date}-weekly-digest.pdf`
-							: `BirdClaw-${item.date}-digest.pdf`
+							: item.kind === "intraday"
+								? `BirdClaw-${(item.archiveKey ?? item.date).replace("@", "-")}-intraday-digest.pdf`
+								: `BirdClaw-${item.date}-digest.pdf`
 					}
 					href={`${item.kind === "weekly" ? "/api/weekly-digest-history" : "/api/period-digest-history"}?id=${encodeURIComponent(item.id)}&pdf=1`}
 				>
@@ -166,9 +173,9 @@ export function DailyDigestHistoryPanel({
 	loading: boolean;
 	error: string | null;
 	filter: string;
-	kind: "daily" | "weekly";
+	kind: "daily" | "intraday" | "weekly";
 	onFilterChange: (value: string) => void;
-	onKindChange: (kind: "daily" | "weekly") => void;
+	onKindChange: (kind: "daily" | "intraday" | "weekly") => void;
 	onSelect: (id: string) => void;
 	onClose?: () => void;
 }) {
@@ -194,12 +201,18 @@ export function DailyDigestHistoryPanel({
 					/>
 					<div className="min-w-0 flex-1">
 						<h2 className="text-[15px] font-bold text-[var(--ink)]">
-							{kind === "daily" ? "Daily archive" : "Weekly archive"}
+							{kind === "daily"
+								? "Daily archive"
+								: kind === "intraday"
+									? "Intraday overview"
+									: "Weekly archive"}
 						</h2>
 						<p className="text-[10px] text-[var(--ink-soft)]">
 							{kind === "daily"
 								? "Previous day generated at 00:00 local"
-								: "Previous Monday–Sunday generated after week close"}
+								: kind === "intraday"
+									? "Closed 8-hour windows generated at 00:00, 08:00, and 16:00 local"
+									: "Previous Monday–Sunday generated after week close"}
 						</p>
 					</div>
 					<span className="text-[11px] text-[var(--ink-soft)]">
@@ -218,9 +231,9 @@ export function DailyDigestHistoryPanel({
 				</div>
 				<div
 					aria-label="Archive period"
-					className="mt-3 grid grid-cols-2 rounded-full bg-[var(--bg-active)] p-1"
+					className="mt-3 grid grid-cols-3 rounded-full bg-[var(--bg-active)] p-1"
 				>
-					{(["daily", "weekly"] as const).map((value) => (
+					{(["daily", "intraday", "weekly"] as const).map((value) => (
 						<button
 							aria-pressed={kind === value}
 							className={cx(
@@ -242,7 +255,11 @@ export function DailyDigestHistoryPanel({
 						aria-label={`Search ${kind} history`}
 						className={searchFieldInputClass}
 						placeholder={
-							kind === "daily" ? "Search saved days" : "Search saved weeks"
+							kind === "daily"
+								? "Search saved days"
+								: kind === "intraday"
+									? "Search 8-hour windows"
+									: "Search saved weeks"
 						}
 						value={filter}
 						onChange={(event) => onFilterChange(event.currentTarget.value)}
@@ -266,7 +283,9 @@ export function DailyDigestHistoryPanel({
 							{items.length === 0
 								? kind === "daily"
 									? "Yesterday’s report appears here after the next midnight run."
-									: "The previous Monday–Sunday report appears after the week closes."
+									: kind === "intraday"
+										? "The latest closed 8-hour window appears after the next 00:00, 08:00, or 16:00 run."
+										: "The previous Monday–Sunday report appears after the week closes."
 								: "Try another date or report keyword."}
 						</p>
 					</div>

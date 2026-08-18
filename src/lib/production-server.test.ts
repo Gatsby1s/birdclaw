@@ -20,6 +20,8 @@ import { getTwitter6551RuntimeStatus } from "./twitter-6551";
 const schedulerMocks = vi.hoisted(() => ({
 	startDaily: vi.fn(),
 	stopDaily: vi.fn(),
+	startIntraday: vi.fn(),
+	stopIntraday: vi.fn(),
 	startWeekly: vi.fn(),
 	stopWeekly: vi.fn(),
 	startFeed: vi.fn(),
@@ -33,6 +35,11 @@ const localTwitterCollectorMocks = vi.hoisted(() => ({
 vi.mock("./period-digest-scheduler", () => ({
 	startPeriodDigestScheduler: schedulerMocks.startDaily,
 	stopPeriodDigestScheduler: schedulerMocks.stopDaily,
+}));
+
+vi.mock("./intraday-digest-scheduler", () => ({
+	startIntradayDigestScheduler: schedulerMocks.startIntraday,
+	stopIntradayDigestScheduler: schedulerMocks.stopIntraday,
 }));
 
 vi.mock("./weekly-digest-scheduler", () => ({
@@ -103,6 +110,7 @@ describe("production server", () => {
 			port: 0,
 		});
 		expect(schedulerMocks.startDaily).toHaveBeenCalledTimes(1);
+		expect(schedulerMocks.startIntraday).toHaveBeenCalledTimes(1);
 		expect(schedulerMocks.startWeekly).toHaveBeenCalledTimes(1);
 		expect(schedulerMocks.startFeed).toHaveBeenCalledTimes(1);
 		expect(localTwitterCollectorMocks.start).toHaveBeenCalledTimes(1);
@@ -134,6 +142,7 @@ describe("production server", () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
 		expect(schedulerMocks.stopDaily).toHaveBeenCalledTimes(1);
+		expect(schedulerMocks.stopIntraday).toHaveBeenCalledTimes(1);
 		expect(schedulerMocks.stopWeekly).toHaveBeenCalledTimes(1);
 		expect(schedulerMocks.stopFeed).toHaveBeenCalledTimes(1);
 		expect(localTwitterCollectorMocks.stop).toHaveBeenCalledTimes(1);

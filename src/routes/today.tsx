@@ -171,7 +171,8 @@ function digestStreamError(cause: unknown, phase: string) {
 }
 
 function formatCounts(context: PeriodDigestContext | null) {
-	if (!context) return "Local Twitter memory, summarized as it streams.";
+	if (!context)
+		return "Local Twitter memory. Generate a summary only when needed.";
 	const counts = context.counts;
 	return [
 		`${String(counts.home)} home`,
@@ -1051,14 +1052,13 @@ function useDigestStream(
 	includeFeed: boolean,
 	since: string,
 	until: string,
-	enabled = true,
 ) {
 	const queryClient = useQueryClient();
 	const [markdown, setMarkdown] = useState("");
 	const [context, setContext] = useState<PeriodDigestContext | null>(null);
 	const [result, setResult] = useState<PeriodDigestRunResult | null>(null);
-	const [status, setStatus] = useState("Starting digest");
-	const latestStatusRef = useRef("Starting digest");
+	const [status, setStatus] = useState("Ready to generate");
+	const latestStatusRef = useRef("Ready to generate");
 
 	const onStart = useCallback(() => {
 		setMarkdown("");
@@ -1120,11 +1120,6 @@ function useDigestStream(
 		formatError,
 		statusMessages: DIGEST_STATUS_MESSAGES,
 	});
-
-	useEffect(() => {
-		if (enabled) run(false);
-		else cancel();
-	}, [cancel, enabled, run]);
 
 	useEffect(() => {
 		if (!result) return;
@@ -1197,7 +1192,8 @@ function useDigestStream(
 		setContext(null);
 		setMarkdown("");
 		setResult(null);
-		setStatus("Starting digest");
+		setStatus("Ready to generate");
+		latestStatusRef.current = "Ready to generate";
 	}, [cancel, setError]);
 
 	return {
@@ -1297,14 +1293,7 @@ export function TodayRouteView({
 		restore,
 		run,
 		status,
-	} = useDigestStream(
-		period,
-		includeDms,
-		includeFeed,
-		since,
-		until,
-		!activeHistoryId,
-	);
+	} = useDigestStream(period, includeDms, includeFeed, since, until);
 	const loadHistory = useCallback(async () => {
 		if (!historyEnabled) return;
 		const sequence = ++historyLoadSequence.current;
@@ -1314,7 +1303,7 @@ export function TodayRouteView({
 			const historyEndpoint =
 				historyKind === "weekly"
 					? "/api/weekly-digest-history?limit=260"
-					: "/api/period-digest-history?limit=366";
+					: `/api/period-digest-history?limit=366&kind=${historyKind}`;
 			const response = await fetch(historyEndpoint, {
 				cache: "no-store",
 			});
@@ -1405,7 +1394,7 @@ export function TodayRouteView({
 		updateSearch({ ...searchState, archive: historyKind, run: id });
 	}
 
-	function changeHistoryKind(kind: "daily" | "weekly") {
+	function changeHistoryKind(kind: "daily" | "intraday" | "weekly") {
 		if (kind === historyKind) return;
 		historyLoadSequence.current += 1;
 		setHistoryItems([]);
@@ -1540,8 +1529,8 @@ export function TodayRouteView({
 			updateSearch({ ...searchState, run: "" });
 			return;
 		}
-		run(true);
-	}, [activeHistoryId, clear, run, searchState, updateSearch]);
+		run(Boolean(result));
+	}, [activeHistoryId, clear, result, run, searchState, updateSearch]);
 
 	useEffect(() => {
 		if (activeHistoryId || !refreshAfterHistoryRef.current) return;
@@ -1601,11 +1590,15 @@ export function TodayRouteView({
 								onClick={handleRefreshDigest}
 								disabled={loading || historyRestoreLoading}
 							>
-								<RefreshCw
-									className={cx("size-4", loading && "animate-spin")}
-									aria-hidden="true"
-								/>
-								Refresh
+								{result || activeHistoryId ? (
+									<RefreshCw
+										className={cx("size-4", loading && "animate-spin")}
+										aria-hidden="true"
+									/>
+								) : (
+									<Sparkles className="size-4" aria-hidden="true" />
+								)}
+								{result || activeHistoryId ? "Refresh" : "Generate summary"}
 							</button>
 						</div>
 					</div>
@@ -1742,7 +1735,7 @@ export function TodayRouteView({
 										? `${result.cached ? "Cached" : "Ready"} · ${result.context.window.label}`
 										: error
 											? "Digest failed"
-											: "Ready"}
+											: "On demand · 0 tokens used"}
 					</span>
 				</div>
 
@@ -1769,7 +1762,7 @@ export function TodayRouteView({
 							? status
 							: error
 								? "No digest was generated. Retry to start a new run."
-								: "Waiting for the first tokens..."}
+								: "No summary yet. Choose a period, then generate only when you need it."}
 					</div>
 				)}
 			</section>

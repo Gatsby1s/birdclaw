@@ -14,9 +14,11 @@ export type PeriodDigestHistoryStatus = "pending" | "ready" | "failed";
 
 export interface PeriodDigestHistoryMetadata {
 	id: string;
-	kind: "daily";
+	kind: "daily" | "intraday";
 	date: string;
 	endDate: string;
+	archiveKey: string;
+	slotLabel?: string;
 	timezone: string;
 	status: PeriodDigestHistoryStatus;
 	title: string;
@@ -101,21 +103,51 @@ export function dailyDigestPdfPath(date: string) {
 	);
 }
 
+export function intradayDigestPdfPath(slotKey: string) {
+	return path.join(
+		getBirdclawPaths().rootDir,
+		"reports",
+		"intraday",
+		`BirdClaw-${slotKey.replace("@", "-")}-intraday-digest.pdf`,
+	);
+}
+
+const INTRADAY_SLOT_PATTERN = /^(\d{4}-\d{2}-\d{2})@(08|16|24)$/;
+
+export function parseIntradaySlotKey(slotKey: string) {
+	const match = INTRADAY_SLOT_PATTERN.exec(slotKey);
+	if (!match?.[1] || !match[2]) return null;
+	const date = match[1];
+	const endHour = Number(match[2]);
+	return {
+		date,
+		endHour,
+		slotLabel: `${String(endHour - 8).padStart(2, "0")}:00–${String(endHour).padStart(2, "0")}:00`,
+	};
+}
+
 function metadataFromRow(
 	row: PeriodDigestHistoryRow,
 ): PeriodDigestHistoryMetadata {
+	const intraday = parseIntradaySlotKey(row.digest_date);
 	const digest = parseJson<PeriodDigestRunResult["digest"] | null>(
 		row.digest_json,
 		null,
 	);
 	return {
 		id: row.id,
-		kind: "daily",
-		date: row.digest_date,
-		endDate: row.digest_date,
+		kind: intraday ? "intraday" : "daily",
+		date: intraday?.date ?? row.digest_date,
+		endDate: intraday?.date ?? row.digest_date,
+		archiveKey: row.digest_date,
+		...(intraday ? { slotLabel: intraday.slotLabel } : {}),
 		timezone: row.timezone,
 		status: statusFromRow(row.status),
-		title: digest?.title ?? `Daily digest · ${row.digest_date}`,
+		title:
+			digest?.title ??
+			(intraday
+				? `Intraday overview · ${intraday.date} · ${intraday.slotLabel}`
+				: `Daily digest · ${row.digest_date}`),
 		summary:
 			digest?.summary ??
 			(row.status === "failed"
@@ -133,7 +165,12 @@ function metadataFromRow(
 		updatedAt: row.updated_at,
 		...(row.finished_at ? { finishedAt: row.finished_at } : {}),
 		pdfAvailable:
-			row.status === "ready" && existsSync(dailyDigestPdfPath(row.digest_date)),
+			row.status === "ready" &&
+			existsSync(
+				intraday
+					? intradayDigestPdfPath(row.digest_date)
+					: dailyDigestPdfPath(row.digest_date),
+			),
 	};
 }
 
@@ -152,7 +189,10 @@ function detailFromRow(
 		result: {
 			context: {
 				window: {
-					label: row.digest_date,
+					label:
+						metadata.kind === "intraday"
+							? `${metadata.date} · ${metadata.slotLabel ?? "Intraday"}`
+							: row.digest_date,
 					since: row.window_since,
 					until: row.window_until,
 				},
@@ -185,13 +225,16 @@ function rowById(id: string, db: Database) {
 }
 
 export function listPeriodDigestHistory(
-	options: { limit?: number } = {},
+	options: { limit?: number; kind?: "daily" | "intraday" } = {},
 	db = getReadDb(),
 ) {
 	const limit = Math.max(1, Math.min(366, Math.trunc(options.limit ?? 90)));
+	const kind = options.kind ?? "daily";
 	const rows = db
 		.prepare(
-			"select * from period_digest_history order by digest_date desc limit ?",
+			`select * from period_digest_history
+			 where digest_date ${kind === "intraday" ? "like" : "not like"} '%@%'
+			 order by digest_date desc limit ?`,
 		)
 		.all(limit) as PeriodDigestHistoryRow[];
 	return rows.map(metadataFromRow);
@@ -236,6 +279,72 @@ export function localWindowForDateKey(dateKey: string) {
 	return { since: since.toISOString(), until: until.toISOString() };
 }
 
+export function localWindowForIntradaySlotKey(slotKey: string) {
+	const slot = parseIntradaySlotKey(slotKey);
+	if (!slot) {
+		throw new Error("Intraday digest slot must use YYYY-MM-DD@(08|16|24)");
+	}
+	const dayWindow = localWindowForDateKey(slot.date);
+	const dayStart = new Date(dayWindow.since);
+	const since = new Date(
+		dayStart.getFullYear(),
+		dayStart.getMonth(),
+		dayStart.getDate(),
+		slot.endHour - 8,
+	);
+	const until = new Date(
+		dayStart.getFullYear(),
+		dayStart.getMonth(),
+		dayStart.getDate(),
+		slot.endHour,
+	);
+	return { since: since.toISOString(), until: until.toISOString() };
+}
+
+export function latestCompletedIntradaySlotKey(now = new Date()) {
+	const boundaryHour = Math.floor(now.getHours() / 8) * 8;
+	if (boundaryHour === 0) {
+		const previous = new Date(
+			now.getFullYear(),
+			now.getMonth(),
+			now.getDate() - 1,
+		);
+		return `${localDateKey(previous)}@24`;
+	}
+	return `${localDateKey(now)}@${String(boundaryHour).padStart(2, "0")}`;
+}
+
+export function nextIntradaySlotKey(slotKey: string) {
+	const window = localWindowForIntradaySlotKey(slotKey);
+	const nextBoundary = new Date(window.until);
+	nextBoundary.setHours(nextBoundary.getHours() + 8);
+	const hour = nextBoundary.getHours();
+	if (hour === 0) {
+		const previous = new Date(
+			nextBoundary.getFullYear(),
+			nextBoundary.getMonth(),
+			nextBoundary.getDate() - 1,
+		);
+		return `${localDateKey(previous)}@24`;
+	}
+	return `${localDateKey(nextBoundary)}@${String(hour).padStart(2, "0")}`;
+}
+
+export function previousIntradaySlotKey(slotKey: string) {
+	const window = localWindowForIntradaySlotKey(slotKey);
+	const boundary = new Date(window.since);
+	const hour = boundary.getHours();
+	if (hour === 0) {
+		const previous = new Date(
+			boundary.getFullYear(),
+			boundary.getMonth(),
+			boundary.getDate() - 1,
+		);
+		return `${localDateKey(previous)}@24`;
+	}
+	return `${localDateKey(boundary)}@${String(hour).padStart(2, "0")}`;
+}
+
 function compactContext(result: PeriodDigestRunResult) {
 	const referencedIds = new Set([
 		...result.digest.sourceTweetIds,
@@ -264,15 +373,18 @@ function compactContext(result: PeriodDigestRunResult) {
 	};
 }
 
-export function claimPeriodDigestDate(date: string, db = getNativeDb()) {
-	const { since, until } = localWindowForDateKey(date);
+function claimPeriodDigestWindow(
+	archiveKey: string,
+	{ since, until }: { since: string; until: string },
+	db = getNativeDb(),
+) {
 	const now = new Date().toISOString();
 	const staleBefore = new Date(Date.now() - CLAIM_STALE_MS).toISOString();
 	return db.transaction(() => {
 		const claimToken = randomUUID();
 		const existing = db
 			.prepare("select * from period_digest_history where digest_date = ?")
-			.get(date) as PeriodDigestHistoryRow | undefined;
+			.get(archiveKey) as PeriodDigestHistoryRow | undefined;
 		if (
 			existing?.status === "ready" ||
 			(existing?.status === "pending" && existing.updated_at > staleBefore)
@@ -308,7 +420,7 @@ export function claimPeriodDigestDate(date: string, db = getNativeDb()) {
 			) values (?, ?, ?, 'pending', ?, 1, ?, ?, ?, ?, ?)`,
 		).run(
 			id,
-			date,
+			archiveKey,
 			Intl.DateTimeFormat().resolvedOptions().timeZone || "local",
 			claimToken,
 			since,
@@ -319,6 +431,18 @@ export function claimPeriodDigestDate(date: string, db = getNativeDb()) {
 		);
 		return { claimed: true as const, id, claimToken, status: "pending" };
 	})();
+}
+
+export function claimPeriodDigestDate(date: string, db = getNativeDb()) {
+	return claimPeriodDigestWindow(date, localWindowForDateKey(date), db);
+}
+
+export function claimIntradayDigestSlot(slotKey: string, db = getNativeDb()) {
+	return claimPeriodDigestWindow(
+		slotKey,
+		localWindowForIntradaySlotKey(slotKey),
+		db,
+	);
 }
 
 export function completePeriodDigestHistory(
@@ -395,6 +519,45 @@ export async function archivePeriodDigestDate(
 	try {
 		const result = await streamPeriodDigest({
 			period: "yesterday",
+			since: window.since,
+			until: window.until,
+			includeDms: false,
+			includeFeed: true,
+			twitterScope: "home",
+			refresh: false,
+			maxTweets: 5_000,
+			maxLinks: 25,
+			liveSync: false,
+			signal,
+			bufferModelDeltasUntilSuccess: true,
+		});
+		const completed = completePeriodDigestHistory(
+			claim.id,
+			claim.claimToken,
+			result,
+		);
+		if (!completed) {
+			return { generated: false as const, id: claim.id, status: "superseded" };
+		}
+		return { generated: true as const, id: claim.id, status: "ready" as const };
+	} catch (error) {
+		failPeriodDigestHistory(claim.id, claim.claimToken, error);
+		throw error;
+	}
+}
+
+export async function archiveIntradayDigestSlot(
+	slotKey: string,
+	{ signal }: { signal?: AbortSignal } = {},
+) {
+	const claim = claimIntradayDigestSlot(slotKey);
+	if (!claim.claimed) {
+		return { generated: false as const, id: claim.id, status: claim.status };
+	}
+	const window = localWindowForIntradaySlotKey(slotKey);
+	try {
+		const result = await streamPeriodDigest({
+			period: "today",
 			since: window.since,
 			until: window.until,
 			includeDms: false,

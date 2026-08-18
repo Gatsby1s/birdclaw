@@ -171,7 +171,7 @@ export type PeriodRouteSearch =
 
 export interface TodayRouteSearch {
 	run: string;
-	archive: "daily" | "weekly";
+	archive: "daily" | "intraday" | "weekly";
 	period: PeriodRouteSearch;
 	since: string;
 	until: string;
@@ -193,7 +193,11 @@ export function validateTodaySearch(
 	);
 	return {
 		run: stringValue(search.run),
-		archive: enumValue(search.archive, ["daily", "weekly"], "daily"),
+		archive: enumValue(
+			search.archive,
+			["daily", "intraday", "weekly"],
+			"daily",
+		),
 		period:
 			requestedPeriod === "custom" && !customRange ? "today" : requestedPeriod,
 		since: customRange?.since ?? "",

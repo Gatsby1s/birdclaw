@@ -35,6 +35,9 @@ describe("route search schemas", () => {
 		expect(validateTodaySearch({ period: "bad" }).period).toBe("today");
 		expect(validateTodaySearch({ archive: "bad" }).archive).toBe("daily");
 		expect(validateTodaySearch({ archive: "weekly" }).archive).toBe("weekly");
+		expect(validateTodaySearch({ archive: "intraday" }).archive).toBe(
+			"intraday",
+		);
 		expect(validateNetworkMapSearch({ type: "bad" }).type).toBe("all");
 	});
 
