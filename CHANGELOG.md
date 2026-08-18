@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 0.9.0 - 2026-08-18
+
+### Added
+
+- Add a dedicated editorial Feed with important Tiger breaking news and article tabs, canonical source links, bounded background sync, and persistent cloud history.
+- Add a Today control for including or excluding Feed reports, with editorial source references carried through summaries, history, and complete PDF exports.
+
+### Changed
+
+- Define Today's Twitter source as Home posts, with Feed as an explicit optional second source, and isolate both choices in digest hashes and caches.
+- Put Feed beside Home in desktop and mobile navigation, and wrap Today actions for narrow mobile screens without horizontal clipping.
+
+### Fixed
+
+- Preserve Feed records and source-selection provenance through schema v20 migration, portable backup restore, daily history, and weekly history.
+- Prevent a stopped Feed synchronization run from scheduling work into a newly restarted scheduler lane.
+
 ## 0.8.93 - 2026-08-18
 
 ### Added
