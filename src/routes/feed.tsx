@@ -61,7 +61,7 @@ function FeedItemCard({ item }: { item: FeedItem }) {
 					<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-[var(--ink-soft)]">
 						{item.kind === "flash" ? (
 							<span className="rounded-full bg-[color:color-mix(in_srgb,var(--alert)_12%,transparent)] px-2 py-0.5 font-bold text-[var(--alert)]">
-								重要快讯
+								美股重要快讯
 							</span>
 						) : (
 							<span className="rounded-full bg-[var(--bg-hover)] px-2 py-0.5 font-semibold">
@@ -197,7 +197,7 @@ function FeedRoute() {
 							onClick={() => selectTab("flash")}
 							type="button"
 						>
-							快讯
+							美股快讯
 						</button>
 						<button
 							className={cx(
@@ -240,10 +240,10 @@ function FeedRoute() {
 				<FeedEmpty
 					detail={
 						search.tab === "flash"
-							? "Only Tiger items marked important appear here."
+							? "Only Tiger US-market items marked important appear here."
 							: "Articles will appear after the next successful sync."
 					}
-					label={search.tab === "flash" ? "暂无重要快讯" : "暂无文章资讯"}
+					label={search.tab === "flash" ? "暂无美股重要快讯" : "暂无文章资讯"}
 				/>
 			)}
 		</section>

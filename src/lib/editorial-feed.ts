@@ -7,11 +7,11 @@ import { safeHttpUrl } from "./url-safety";
 
 const TIGER_SOURCE = "tiger";
 const TIGER_FLASH_API_URL =
-	"https://stock-news.skytigris.cn/v2/live/timeline?edition=fundamental&onlyImportant=true&lang=zh_CN&type=all";
+	"https://stock-news.skytigris.cn/v2/live/timeline?edition=fundamental&onlyImportant=true&lang=zh_CN&type=us";
 const TIGER_ARTICLE_API_URL =
 	"https://stock-news.laohu8.com/v2/highlight/list?lang=zh_CN";
 const TIGER_FLASH_URL =
-	"https://www.laohu8.com/news/breaking?onlyImportant=true";
+	"https://www.laohu8.com/news/breaking?onlyImportant=true&market=us";
 const TIGER_ARTICLE_URL = "https://www.laohu8.com/news";
 const TIGER_FLASH_FALLBACK_URL = TIGER_FLASH_URL;
 const TIGER_ARTICLE_FALLBACK_URL = TIGER_ARTICLE_URL;
@@ -74,6 +74,8 @@ const tigerFlashPageSchema = z.looseObject({
 	data: z.looseObject({
 		breakingNews: z.looseObject({
 			listData: z.array(tigerFlashItemSchema),
+			market: z.literal("us"),
+			onlyImportant: z.literal(true),
 		}),
 	}),
 });
@@ -92,9 +94,9 @@ const tigerArticleItemSchema = z.looseObject({
 	symbols: z.array(z.string()).optional().default([]),
 	thumbnail: z.string().optional().default(""),
 	thumbnails: z.array(z.string()).optional().default([]),
-	news_tag: z.string().optional().default(""),
+	news_tag: z.string().optional(),
 	rights: z.unknown().nullable().optional(),
-	isHighRisk: z.boolean().optional().default(false),
+	isHighRisk: z.boolean().optional(),
 });
 
 const tigerArticlePageSchema = z.looseObject({
@@ -192,7 +194,9 @@ export function listFeedItems(
 	const offset = Math.max(0, Math.trunc(options.offset ?? 0));
 	const filters = ["kind = ?"];
 	const parameters: Array<string | number> = [options.kind];
-	if (options.kind === "flash") filters.push("is_important = 1");
+	if (options.kind === "flash") {
+		filters.push("is_important = 1", "lower(market) = 'us'");
+	}
 	if (options.since) {
 		filters.push("published_at >= ?");
 		parameters.push(options.since);
@@ -224,10 +228,16 @@ export function countFeedItems(
 		? (db
 				.prepare(
 					`select count(*) as count from feed_items
-					 where kind = ?${options.kind === "flash" ? " and is_important = 1" : ""}`,
+					 where kind = ?${options.kind === "flash" ? " and is_important = 1 and lower(market) = 'us'" : ""}`,
 				)
 				.get(options.kind) as { count: number })
-		: (db.prepare("select count(*) as count from feed_items").get() as {
+		: (db
+				.prepare(
+					`select count(*) as count from feed_items
+					 where kind != 'flash'
+					    or (is_important = 1 and lower(market) = 'us')`,
+				)
+				.get() as {
 				count: number;
 			});
 	return Number(row.count);
@@ -340,7 +350,7 @@ function normalizeFlashItems(appData: unknown, updatedAt: string) {
 				url: TIGER_FLASH_FALLBACK_URL,
 				publisher: cleanText(item.media, 200) || "老虎资讯",
 				publishedAt: timestampFrom(item.pubTime, "milliseconds"),
-				market: "all",
+				market: "us",
 				language: "zh-CN",
 				symbols: normalizedSymbols(item.symbols),
 				imageUrl: null,
@@ -371,9 +381,13 @@ function normalizeArticleItems(appData: unknown, updatedAt: string) {
 			kind: "article" as const,
 			title: cleanText(item.title, MAX_TITLE_LENGTH),
 			summary:
-				item.rights == null &&
-				!item.isHighRisk &&
-				item.news_tag.toLowerCase() !== "analysis"
+				item.rights === null &&
+				item.isHighRisk === false &&
+				typeof item.news_tag === "string" &&
+				!item.news_tag
+					.toLowerCase()
+					.split(",")
+					.some((tag) => tag.trim() === "analysis")
 					? cleanText(item.summary, MAX_SUMMARY_LENGTH)
 					: "",
 			url: safeHttpUrl(canonicalUrl) ?? TIGER_ARTICLE_FALLBACK_URL,
@@ -537,7 +551,9 @@ function knownExternalIds(kind: FeedItemKind, db: Database) {
 		(
 			db
 				.prepare(
-					"select external_id from feed_items where source = ? and kind = ?",
+					`select external_id from feed_items
+					 where source = ? and kind = ?
+					 ${kind === "flash" ? "and lower(market) = 'us'" : ""}`,
 				)
 				.all(TIGER_SOURCE, kind) as Array<{ external_id: string }>
 		).map((row) => row.external_id),
