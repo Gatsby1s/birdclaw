@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +16,7 @@ import {
 } from "./period-digest";
 import { setProfileSpecialFollow } from "./profile-priority";
 import { getTweetsByIds } from "./queries";
+import { writeSyncCache } from "./sync-cache";
 
 const tempRoots: string[] = [];
 
@@ -210,6 +212,72 @@ describe("period digest", () => {
 		expect(prompt).toContain(
 			"editorial reports, not as automatically verified truth",
 		);
+	});
+
+	it("uses cached full article text in the Today prompt and hash", () => {
+		const db = getNativeDb();
+		const itemId = "tiger:article:1234567890";
+		const sourceHash = "article-source-hash";
+		db.prepare(
+			`insert into feed_items (
+			 id, source, external_id, kind, title, summary, url, publisher,
+			 published_at, market, language, symbols_json, image_url, is_important,
+			 content_hash, first_seen_at, updated_at
+			) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, 0, ?, ?, ?)`,
+		).run(
+			itemId,
+			"tiger",
+			"1234567890",
+			"article",
+			"Full company filing",
+			"Short excerpt",
+			"https://www.laohu8.com/news/1234567890",
+			"Tiger News",
+			"2026-08-18T08:00:00.000Z",
+			"us",
+			"zh-CN",
+			"[]",
+			sourceHash,
+			"2026-08-18T08:00:00.000Z",
+			"2026-08-18T08:00:00.000Z",
+		);
+		const fullText = `Short excerpt\n\n${"Material filing detail ".repeat(80)}`;
+		writeSyncCache(`editorial-feed:article-content:v1:${itemId}`, {
+			itemId,
+			externalId: "1234567890",
+			content: fullText,
+			contentHash: createHash("sha256").update(fullText).digest("hex"),
+			sourceHash,
+			fetchedAt: "2026-08-18T09:00:00.000Z",
+		});
+
+		const context = collectPeriodDigestContext({
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			includeFeed: true,
+			twitterScope: "home",
+		});
+		const prompt = __test__.buildPrompt(context);
+		expect(prompt).toContain("Material filing detail");
+		expect(prompt).toContain('"contentSource":"full_text"');
+		expect(prompt).toContain("fetched article body");
+
+		const correctedText = `${fullText} corrected`;
+		writeSyncCache(`editorial-feed:article-content:v1:${itemId}`, {
+			itemId,
+			externalId: "1234567890",
+			content: correctedText,
+			contentHash: createHash("sha256").update(correctedText).digest("hex"),
+			sourceHash,
+			fetchedAt: "2026-08-18T10:00:00.000Z",
+		});
+		const corrected = collectPeriodDigestContext({
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			includeFeed: true,
+			twitterScope: "home",
+		});
+		expect(corrected.hash).not.toBe(context.hash);
 	});
 
 	it("keeps an older special-follow post ahead of newer posts at every cap", () => {
@@ -1097,7 +1165,7 @@ describe("period digest", () => {
 				`
 				update sync_cache
 				set updated_at = '2020-01-01T00:00:00.000Z'
-				where cache_key like 'period-digest:v5:%'
+				where cache_key like 'period-digest:v6:%'
 				`,
 			)
 			.run();

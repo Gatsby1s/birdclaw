@@ -11,7 +11,11 @@ import {
 import { maybeAutoSyncBackupEffect } from "./backup";
 import type { FeedItem } from "./api-contracts";
 import { runEffectPromise } from "./effect-runtime";
-import { listFeedItems } from "./editorial-feed";
+import {
+	hydrateFeedArticleContents,
+	listFeedItems,
+	readFeedArticleContent,
+} from "./editorial-feed";
 import { getLinkInsights } from "./link-insights";
 import { syncMentionThreadsEffect } from "./mention-threads-live";
 import { syncMentionsEffect } from "./mentions-live";
@@ -672,6 +676,7 @@ function contextHash(context: Omit<PeriodDigestContext, "hash">) {
 					item.symbols,
 					item.isImportant,
 					item.updatedAt,
+					readFeedArticleContent(item.id)?.contentHash ?? null,
 				]),
 			}),
 		)
@@ -1138,7 +1143,7 @@ function digestCacheKey(
 	options: PeriodDigestOptions,
 ) {
 	const parts = [
-		"period-digest:v5",
+		"period-digest:v6",
 		providerFromOptions(options),
 		modelFromOptions(options),
 		reasoningEffortFromOptions(options),
@@ -1187,7 +1192,7 @@ function latestDigestCacheKey(options: PeriodDigestOptions) {
 			options.prioritySnapshot?.fingerprint ??
 			createProfilePrioritySnapshot().fingerprint,
 	};
-	return `period-digest-latest:v4:${createHash("sha1")
+	return `period-digest-latest:v5:${createHash("sha1")
 		.update(JSON.stringify(identity))
 		.digest("hex")}`;
 }
@@ -1386,6 +1391,7 @@ function buildPrompt(
 		replyToId: tweet.replyToId,
 		replyToTweet: tweet.replyToTweet,
 	}));
+	let remainingArticleContentChars = weeklyDeepDive ? 240_000 : 500_000;
 	const promptFeedItems = [...(context.feedItems ?? [])]
 		.sort((left, right) => {
 			if (left.isImportant !== right.isImportant) {
@@ -1393,18 +1399,33 @@ function buildPrompt(
 			}
 			return right.publishedAt.localeCompare(left.publishedAt);
 		})
-		.map((item) => ({
-			id: item.id,
-			kind: item.kind,
-			title: item.title,
-			summary: item.summary,
-			url: item.url,
-			publisher: item.publisher,
-			publishedAt: item.publishedAt,
-			market: item.market,
-			symbols: item.symbols,
-			isImportant: item.isImportant,
-		}));
+		.map((item) => {
+			const cached =
+				item.kind === "article" && item.summary
+					? readFeedArticleContent(item.id)
+					: null;
+			const availableContent = cached?.content ?? item.summary;
+			const allowedLength = cached
+				? Math.min(24_000, remainingArticleContentChars)
+				: availableContent.length;
+			const content = availableContent.slice(0, allowedLength);
+			if (cached) remainingArticleContentChars -= content.length;
+			return {
+				id: item.id,
+				kind: item.kind,
+				title: item.title,
+				summary: item.summary,
+				url: item.url,
+				publisher: item.publisher,
+				publishedAt: item.publishedAt,
+				market: item.market,
+				symbols: item.symbols,
+				isImportant: item.isImportant,
+				content,
+				contentSource: cached ? "full_text" : "excerpt",
+				contentTruncated: content.length < availableContent.length,
+			};
+		});
 	const fitDataset = () => {
 		const maxPromptDataChars = weeklyDeepDive
 			? MAX_WEEKLY_PROMPT_DATA_CHARS
@@ -1536,7 +1557,7 @@ ${reportRequirements}
 - For tweets: cite every claim with inline tweet ids at the end of the relevant sentence or bullet, e.g. (tweet_123, tweet_456). These citations become hoverable source links.
 - For editorial feed items: cite the canonical source as a normal Markdown link and put the exact feed id into feedItemIds/sourceFeedItemIds in the JSON. Do not invent a separate citation syntax.
 - Treat important flashes and publisher articles as editorial reports, not as automatically verified truth. Distinguish reported facts, analysis, uncertainty, and social-media opinion. Never present a publisher's claim as independently confirmed unless the dataset contains corroboration.
-- Prefer important flashes for timely factual developments. Article summaries may be intentionally absent for restricted, high-risk, or analysis-tagged content; in that case use only the title, publisher, timestamp, and canonical link without inferring missing details.
+- Prefer important flashes for timely factual developments. For publisher articles, contentSource=full_text means content contains the fetched article body; read and synthesize that body instead of relying only on the title or excerpt. contentTruncated=true means the body was bounded for prompt size, so do not imply unseen details. Article content may be intentionally absent for restricted, high-risk, or analysis-tagged items; in that case use only the title, publisher, timestamp, and canonical link without inferring missing details.
 - For links: emit normal Markdown links with no space between the label and URL, e.g. [title](https://example.com), then cite the sharing tweet ids in the same bullet.
 - Prefer synthesis over chronology. Group repeated chatter into one bullet.
 - Mention handles when useful, but do not make the report a list of handles.
@@ -1769,6 +1790,30 @@ export function streamPeriodDigestEffect(
 		let context = yield* tryDigestSync(() =>
 			collectPeriodDigestContext(resolvedOptions),
 		);
+		if (resolvedOptions.includeFeed && context.feedItems?.length) {
+			const feedItems = context.feedItems;
+			emitDigestStatus(handlers, "Reading full editorial articles");
+			yield* Effect.tryPromise({
+				try: () =>
+					hydrateFeedArticleContents(
+						feedItems.filter(
+							(item) => item.kind === "article" && Boolean(item.summary),
+						),
+						resolvedOptions.signal ? { signal: resolvedOptions.signal } : {},
+					),
+				catch: (error) =>
+					error instanceof Error
+						? error
+						: new Error("Editorial article hydration failed"),
+			}).pipe(
+				Effect.catchAll((error) =>
+					resolvedOptions.signal?.aborted ? Effect.fail(error) : Effect.void,
+				),
+			);
+			context = yield* tryDigestSync(() =>
+				collectPeriodDigestContext(resolvedOptions),
+			);
+		}
 		let cacheKey = digestCacheKey(context, resolvedOptions);
 		const cached = resolvedOptions.refresh
 			? null
