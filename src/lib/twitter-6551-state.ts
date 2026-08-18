@@ -11,6 +11,7 @@ const FALLBACK_STATE_KIND = "fallback_state";
 const LEGACY_DAILY_BUDGET_TABLE = "twitter6551_paid_daily_usage";
 const LEGACY_FALLBACK_STATE_TABLE = "twitter6551_recovery_state";
 const LEGACY_SCHEMA_VERSION = 18;
+const CURRENT_SCHEMA_VERSION = 19;
 
 interface StoredStateEvent {
 	event_id: string;
@@ -179,7 +180,7 @@ function validateLegacyTableSchema(
 	if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 0) {
 		throw new Error("invalid database schema version");
 	}
-	if (schemaVersion > LEGACY_SCHEMA_VERSION) {
+	if (schemaVersion > CURRENT_SCHEMA_VERSION) {
 		throw new Error("unknown database schema version");
 	}
 	const table = db
@@ -189,7 +190,7 @@ function validateLegacyTableSchema(
 		)
 		.get(tableName) as { sql: string | null } | undefined;
 	if (!table) {
-		if (schemaVersion >= LEGACY_SCHEMA_VERSION) {
+		if (schemaVersion === LEGACY_SCHEMA_VERSION) {
 			throw new Error(`missing legacy ${tableName} table`);
 		}
 		return false;

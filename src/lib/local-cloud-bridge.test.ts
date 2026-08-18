@@ -207,6 +207,19 @@ describe("local cloud bridge", () => {
 			remark: "Edited from the mobile profile",
 			description: "Edited mobile description",
 		});
+
+		home.db
+			.prepare(
+				`insert into xremark_live_sync (id, token_hash, token_created_at)
+				 values (1, ?, ?)`,
+			)
+			.run("a".repeat(64), "2026-07-31T08:05:00.000Z");
+		await importLocalCloudBridgeBatch(batch);
+		expect(
+			home.db
+				.prepare("select count(*) as count from xremark_profile_notes")
+				.get(),
+		).toEqual({ count: 0 });
 	});
 
 	it("does not let sparse Twillot hydration downgrade richer cloud rows", async () => {

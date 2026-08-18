@@ -1,12 +1,14 @@
 (() => {
 	"use strict";
 
-	const ENDPOINT = "http://127.0.0.1:3001/api/integrations/xremark/snapshot";
+	const BIRDCLAW_ORIGIN = "https://birdclaw-production.up.railway.app";
+	const ENDPOINT = `${BIRDCLAW_ORIGIN}/api/integrations/xremark/snapshot`;
+	const CHANGES_ENDPOINT = `${BIRDCLAW_ORIGIN}/api/integrations/xremark/changes`;
 	const DATABASE_NAME = "xRemark";
 	const STORE_NAMES = ["remarks", "tags", "categories"];
 	const RETRY_ALARM = "birdclaw-xremark-retry";
 	const HEARTBEAT_ALARM = "birdclaw-xremark-heartbeat";
-	const HEARTBEAT_MINUTES = 5;
+	const HEARTBEAT_MINUTES = 0.5;
 	const DEBOUNCE_MS = 800;
 	const STORAGE = {
 		settings: "birdclawXRemarkSettings",
@@ -127,7 +129,7 @@
 		});
 	}
 
-	async function openDatabaseReadOnly() {
+	async function openDatabase() {
 		if (typeof indexedDB.databases === "function") {
 			let databases;
 			try {
@@ -175,7 +177,7 @@
 	}
 
 	async function readFullSnapshot(identity) {
-		const database = await openDatabaseReadOnly();
+		const database = await openDatabase();
 		try {
 			for (const storeName of STORE_NAMES) {
 				if (!database.objectStoreNames.contains(storeName)) {
@@ -222,11 +224,306 @@
 		}
 	}
 
+	function normalizedNames(values) {
+		const result = [];
+		const seen = new Set();
+		for (const value of Array.isArray(values) ? values : []) {
+			const name = typeof value === "string" ? value.trim() : "";
+			const key = name.toLocaleLowerCase();
+			if (!name || seen.has(key)) continue;
+			seen.add(key);
+			result.push(name);
+		}
+		return result;
+	}
+
+	function comparableState(note, tagNames, categoryName) {
+		if (!note) return { exists: false };
+		return {
+			exists: true,
+			remark: typeof note.remark === "string" ? note.remark : "",
+			description: typeof note.description === "string" ? note.description : "",
+			tags: normalizedNames(tagNames),
+			category:
+				typeof categoryName === "string" && categoryName.trim()
+					? categoryName.trim()
+					: null,
+		};
+	}
+
+	function targetState(change) {
+		const tags = normalizedNames(change.tags);
+		const category =
+			typeof change.category === "string" && change.category.trim()
+				? change.category.trim()
+				: null;
+		if (
+			!change.remark &&
+			!change.description &&
+			tags.length === 0 &&
+			!category
+		) {
+			return { exists: false };
+		}
+		return {
+			exists: true,
+			remark: change.remark,
+			description: change.description,
+			tags,
+			category,
+		};
+	}
+
+	function sameState(left, right) {
+		return JSON.stringify(left) === JSON.stringify(right);
+	}
+
+	async function applyRemoteChanges(changes) {
+		if (!Array.isArray(changes) || changes.length === 0) {
+			return { applied: [], conflicts: [], changed: false };
+		}
+		const database = await openDatabase();
+		try {
+			for (const storeName of STORE_NAMES) {
+				if (!database.objectStoreNames.contains(storeName)) {
+					throw new BridgeError(
+						"This X Remark version does not expose the expected local stores.",
+					);
+				}
+			}
+			const transaction = database.transaction(STORE_NAMES, "readwrite");
+			const completion = new Promise((resolve, reject) => {
+				transaction.oncomplete = resolve;
+				transaction.onerror = () =>
+					reject(new BridgeError("X Remark storage could not be updated."));
+				transaction.onabort = () =>
+					reject(new BridgeError("X Remark storage could not be updated."));
+			});
+			const remarksStore = transaction.objectStore("remarks");
+			const tagsStore = transaction.objectStore("tags");
+			const categoriesStore = transaction.objectStore("categories");
+			const [remarks, tags, categories] = await Promise.all([
+				requestAsPromise(
+					remarksStore.getAll(),
+					"X Remark storage could not be read.",
+				),
+				requestAsPromise(
+					tagsStore.getAll(),
+					"X Remark storage could not be read.",
+				),
+				requestAsPromise(
+					categoriesStore.getAll(),
+					"X Remark storage could not be read.",
+				),
+			]);
+			const remarkById = new Map(
+				remarks.map((note) => [String(note?.identifier ?? ""), note]),
+			);
+			const tagById = new Map(tags.map((tag) => [String(tag?.id ?? ""), tag]));
+			const tagByName = new Map(
+				tags
+					.filter((tag) => typeof tag?.name === "string" && tag.name.trim())
+					.map((tag) => [tag.name.trim().toLocaleLowerCase(), tag]),
+			);
+			const categoryById = new Map(
+				categories.map((category) => [String(category?.id ?? ""), category]),
+			);
+			const categoryByName = new Map(
+				categories
+					.filter(
+						(category) =>
+							typeof category?.name === "string" && category.name.trim(),
+					)
+					.map((category) => [
+						category.name.trim().toLocaleLowerCase(),
+						category,
+					]),
+			);
+			const applied = [];
+			const conflicts = [];
+			let changed = false;
+			const now = Date.now();
+
+			for (const change of changes) {
+				const identifier = String(change?.identifier ?? "").trim();
+				const revision = Number(change?.revision);
+				if (!identifier || !Number.isSafeInteger(revision) || revision < 0) {
+					throw new BridgeError(
+						"BirdClaw returned an invalid X Remark change.",
+					);
+				}
+				const currentNote = remarkById.get(identifier);
+				const currentTagNames = (currentNote?.tags ?? []).map(
+					(id) => tagById.get(String(id))?.name ?? "",
+				);
+				const currentCategory = currentNote?.category
+					? categoryById.get(String(currentNote.category))?.name
+					: null;
+				const current = comparableState(
+					currentNote,
+					currentTagNames,
+					currentCategory,
+				);
+				const target = targetState(change);
+				const acceptableBases = Array.isArray(change.acceptableBases)
+					? change.acceptableBases
+					: [change.base];
+				if (
+					!acceptableBases.some((base) => sameState(current, base)) &&
+					!sameState(current, target)
+				) {
+					conflicts.push(revision);
+					continue;
+				}
+				if (sameState(current, target)) {
+					applied.push(revision);
+					continue;
+				}
+				changed = true;
+				if (!target.exists) {
+					remarksStore.delete(identifier);
+					remarkById.delete(identifier);
+					applied.push(revision);
+					continue;
+				}
+				const tagIds = target.tags.map((name) => {
+					const key = name.toLocaleLowerCase();
+					const existing = tagByName.get(key);
+					if (existing) return existing.id;
+					const tag = {
+						id: crypto.randomUUID(),
+						name,
+						description: "",
+						updateTime: now,
+					};
+					tagsStore.add(tag);
+					tagByName.set(key, tag);
+					tagById.set(String(tag.id), tag);
+					return tag.id;
+				});
+				const categoryId = target.category
+					? (categoryByName.get(target.category.toLocaleLowerCase())?.id ??
+						null)
+					: null;
+				const nextNote = {
+					...currentNote,
+					identifier,
+					additionalName: change.handle || currentNote?.additionalName || "",
+					givenName: change.displayName || currentNote?.givenName || "",
+					remark: target.remark,
+					description: target.description,
+					tags: tagIds,
+					category: categoryId,
+					createTime: currentNote?.createTime ?? now,
+					updateTime: now,
+				};
+				remarksStore.put(nextNote);
+				remarkById.set(identifier, nextNote);
+				applied.push(revision);
+			}
+			await completion;
+			if (changed) {
+				try {
+					await chrome.runtime.sendMessage({ type: "XR-TAGS-UPDATED" });
+					for (const change of changes) {
+						await chrome.runtime.sendMessage({
+							type: "XR-SINGLE-REMARK-UPDATED",
+							identifier: change.identifier,
+						});
+					}
+				} catch {
+					// X Remark will still read the committed IndexedDB state on its next render.
+				}
+			}
+			return { applied, conflicts, changed };
+		} finally {
+			database.close();
+		}
+	}
+
 	async function currentToken() {
 		const settings = await getStored(STORAGE.settings);
 		return typeof settings?.token === "string" && settings.token.trim() !== ""
 			? settings.token.trim()
 			: null;
+	}
+
+	async function bridgeFetch(url, options = {}) {
+		const token = await currentToken();
+		if (!token) throw new BridgeError("A BirdClaw pairing token is required.");
+		const response = await fetch(url, {
+			...options,
+			headers: {
+				Authorization: `Bearer ${token}`,
+				...(options.body ? { "Content-Type": "application/json" } : {}),
+				...options.headers,
+			},
+			cache: "no-store",
+		});
+		if (!response.ok) {
+			throw new BridgeError(`BirdClaw returned HTTP ${response.status}.`);
+		}
+		return response;
+	}
+
+	async function pullRemoteChanges() {
+		let response;
+		try {
+			response = await bridgeFetch(CHANGES_ENDPOINT, { method: "GET" });
+		} catch (error) {
+			const message = controlledError(error);
+			await mergeStatus({ state: "error", pending: true, lastError: message });
+			return { ok: false, error: message };
+		}
+		let body;
+		try {
+			body = await response.json();
+		} catch {
+			return { ok: false, error: "BirdClaw returned invalid change data." };
+		}
+		if (!body?.ok || !Array.isArray(body.changes)) {
+			return { ok: false, error: "BirdClaw returned invalid change data." };
+		}
+		if (body.changes.length === 0) return { ok: true, handled: false };
+
+		let result;
+		try {
+			result = await applyRemoteChanges(body.changes);
+		} catch (error) {
+			const message = controlledError(error);
+			await mergeStatus({ state: "error", pending: true, lastError: message });
+			return { ok: false, error: message };
+		}
+		const snapshotResult = await queueFullSnapshot({
+			increment: true,
+			absorbPending: true,
+		});
+		if (snapshotResult.ok === false || !snapshotResult.snapshotUploaded) {
+			return snapshotResult;
+		}
+		try {
+			await bridgeFetch(CHANGES_ENDPOINT, {
+				method: "POST",
+				body: JSON.stringify({
+					applied: result.applied,
+					conflicts: result.conflicts,
+				}),
+			});
+			await mergeStatus({
+				state: result.conflicts.length > 0 ? "conflict" : "ready",
+				pending: false,
+				lastSuccessAt: Date.now(),
+				lastError:
+					result.conflicts.length > 0
+						? "A newer X Remark edit was kept instead of being overwritten."
+						: null,
+			});
+			return { ok: true, handled: true, ...result };
+		} catch (error) {
+			const message = controlledError(error);
+			await mergeStatus({ state: "error", pending: true, lastError: message });
+			return { ok: false, error: message };
+		}
 	}
 
 	async function scheduleRetry(attempts) {
@@ -356,13 +653,29 @@
 		return activeFlush;
 	}
 
-	async function queueFullSnapshot({ increment }) {
+	async function queueFullSnapshot({ increment, absorbPending = false }) {
 		let queued;
 		try {
 			queued = await serializeState(async () => {
 				const pending = await pendingMutation();
-				if (pending) return { kind: "deferred", pending };
-				const identity = await nextIdentity({ increment });
+				if (pending && !absorbPending) return { kind: "deferred", pending };
+				let identity;
+				if (pending) {
+					const current = await ensureIdentity();
+					identity = {
+						sourceId: current.sourceId,
+						sequence: Math.min(
+							Number.MAX_SAFE_INTEGER,
+							Math.max(
+								1,
+								current.sequence + pending.count + (increment ? 1 : 0),
+							),
+						),
+					};
+					await setStored(STORAGE.identity, identity);
+				} else {
+					identity = await nextIdentity({ increment });
+				}
 				const payload = await readFullSnapshot(identity);
 				const outbox = {
 					id: `${identity.sourceId}:${identity.sequence}:${payload.capturedAt}`,
@@ -371,6 +684,7 @@
 					queuedAt: Date.now(),
 				};
 				await setStored(STORAGE.outbox, outbox);
+				if (pending) await chrome.storage.local.remove(STORAGE.pending);
 				await mergeStatus({ state: "queued", pending: true, lastError: null });
 				return { kind: "queued", outbox };
 			});
@@ -392,7 +706,10 @@
 		if (queued?.kind !== "queued") {
 			return { ok: false, error: "The bridge could not queue a snapshot." };
 		}
-		return flushOutbox();
+		const result = await flushOutbox();
+		return result.ok === false || result.deferred
+			? result
+			: { ...result, snapshotUploaded: true };
 	}
 
 	async function performPendingDrain() {
@@ -512,11 +829,13 @@
 				const result = await drainPendingMutations();
 				if (result.ok === false) return result;
 				if (await serializeState(pendingMutation)) continue;
-				return result;
+				if (result.ok === false) return result;
+				return pullRemoteChanges();
 			}
 			const result = await queueFullSnapshot({ increment: true });
 			if (result.deferred) continue;
-			return result;
+			if (result.ok === false) return result;
+			return pullRemoteChanges();
 		}
 	}
 
@@ -530,6 +849,8 @@
 		}
 		const outbox = await getStored(STORAGE.outbox);
 		if (outbox?.id) return flushOutbox();
+		const remote = await pullRemoteChanges();
+		if (remote.ok === false || remote.handled) return remote;
 		return queueFullSnapshot({ increment: false });
 	}
 

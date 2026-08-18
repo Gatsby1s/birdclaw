@@ -110,7 +110,7 @@ describe("X Remark live snapshot API", () => {
 		});
 	});
 
-	it("rejects wrong origins, forwarded requests, invalid tokens, and stale data", async () => {
+	it("accepts Railway forwarding but rejects wrong origins, invalid tokens, and stale data", async () => {
 		const { token } = createXRemarkPairing();
 		expect(
 			(
@@ -124,10 +124,13 @@ describe("X Remark live snapshot API", () => {
 		expect(
 			(
 				await handler("POST")({
-					request: request(token, snapshot(1, []), { forwarded: true }),
+					request: request(token, snapshot(1, []), {
+						forwarded: true,
+						url: "https://birdclaw-production.up.railway.app/api/integrations/xremark/snapshot",
+					}),
 				})
 			).status,
-		).toBe(403);
+		).toBe(200);
 		expect(
 			(
 				await handler("POST")({

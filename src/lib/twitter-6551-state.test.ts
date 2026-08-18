@@ -97,7 +97,7 @@ describe("6551 durable recovery limits", () => {
 		const newer = new NativeSqliteDatabase(":memory:");
 		try {
 			createLegacyDailyBudgetTable(newer);
-			newer.exec("pragma user_version = 19");
+			newer.exec("pragma user_version = 20");
 			expect(() => readTwitter6551DailyBudget(newer, 24, now)).toThrow(
 				Twitter6551RequestBudgetError,
 			);

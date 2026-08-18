@@ -31,14 +31,16 @@ describe("XRemarkLiveUpdater", () => {
 				paired: true,
 				connected: true,
 				extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
-				endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+				endpoint:
+					"https://birdclaw-production.up.railway.app/api/integrations/xremark/snapshot",
 				lastSequence: 1,
 			})
 			.mockResolvedValue({
 				paired: true,
 				connected: true,
 				extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
-				endpoint: "http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+				endpoint:
+					"https://birdclaw-production.up.railway.app/api/integrations/xremark/snapshot",
 				lastSequence: 1,
 				lastSnapshotAt: "2026-07-19T12:00:00.000Z",
 			});
@@ -58,15 +60,24 @@ describe("XRemarkLiveUpdater", () => {
 		});
 	});
 
-	it("does not poll X Remark from a remote deployment", async () => {
+	it("polls X Remark from the cloud deployment", async () => {
 		vi.useFakeTimers();
-		const fetchStatus = vi.fn<() => Promise<XRemarkLiveSyncStatus>>();
+		const fetchStatus = vi
+			.fn<() => Promise<XRemarkLiveSyncStatus>>()
+			.mockResolvedValue({
+				paired: true,
+				connected: true,
+				extensionId: "imbbpjelfehedmikmbjglhpoiehpjjhl",
+				endpoint:
+					"https://birdclaw-production.up.railway.app/api/integrations/xremark/snapshot",
+				lastSequence: 1,
+			});
 
 		renderWithQueryClient(
 			<XRemarkLiveUpdater fetchStatus={fetchStatus} pollMs={10} />,
 		);
 
 		await vi.advanceTimersByTimeAsync(100);
-		expect(fetchStatus).not.toHaveBeenCalled();
+		expect(fetchStatus).toHaveBeenCalled();
 	});
 });

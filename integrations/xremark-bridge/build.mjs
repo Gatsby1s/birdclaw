@@ -154,7 +154,7 @@ function patchManifest(manifest) {
 	]);
 	patched.host_permissions = uniqueStrings([
 		...(patched.host_permissions ?? []),
-		"http://127.0.0.1:3001/*",
+		"https://birdclaw-production.up.railway.app/*",
 	]);
 	patched.options_ui = {
 		page: "birdclaw-options.html",

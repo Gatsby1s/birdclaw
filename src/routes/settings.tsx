@@ -871,10 +871,10 @@ function SettingsRoute() {
 								</div>
 								<p className="mt-1 text-[13px] text-[var(--ink-soft)]">
 									{xRemarkLiveStatus?.connected
-										? "Connected · saved and deleted notes appear automatically"
+										? "Connected · notes and tags sync both ways automatically"
 										: xRemarkLiveStatus?.paired
-											? "Paired · waiting for the local X Remark bridge"
-											: "Pair the local bridge to enable automatic updates."}
+											? "Paired · waiting for the X Remark bridge"
+											: "Pair the X Remark bridge to enable automatic updates."}
 								</p>
 								{xRemarkLiveStatus?.lastSeenAt ? (
 									<p className="mt-1 text-[12px] text-[var(--ink-soft)]">

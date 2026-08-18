@@ -23,6 +23,7 @@ const profileRemarkRequestSchema = z.object({
 	identifier: z.string().trim().min(1).max(128).optional(),
 	remark: z.string().max(80),
 	description: z.string().max(300).optional(),
+	tags: z.array(z.string().trim().min(1).max(200)).max(200).optional(),
 });
 
 type BoundedJsonResult =

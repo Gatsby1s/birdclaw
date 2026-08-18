@@ -77,7 +77,7 @@ afterEach(() => {
 });
 
 describe("database init", () => {
-	it("keeps the schema at v17 while fresh installs include the 6551 event inbox", () => {
+	it("keeps the schema at v19 while fresh installs include X Remark sync state", () => {
 		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-"));
 		tempDirs.push(tempDir);
 		process.env.BIRDCLAW_HOME = tempDir;
@@ -121,8 +121,116 @@ describe("database init", () => {
 				)
 				.get(),
 		).toEqual({ count: 0 });
-		expect(db.pragma("user_version", { simple: true })).toBe(17);
+		expect(
+			db
+				.prepare("pragma table_info(birdclaw_profile_notes)")
+				.all()
+				.map((column) => (column as { name: string }).name),
+		).toEqual([
+			"note_key",
+			"identifier",
+			"additional_name",
+			"remark",
+			"description",
+			"updated_at",
+			"tags_json",
+			"category_name",
+			"sync_revision",
+			"base_json",
+		]);
+		expect(
+			db.prepare("select * from xremark_outbound_state where id = 1").get(),
+		).toEqual({ id: 1, next_revision: 0, last_acked_revision: 0 });
+		expect(db.pragma("user_version", { simple: true })).toBe(19);
 	});
+
+	it.each([17, 18])(
+		"queues v%s BirdClaw notes without crossing a recycled X handle",
+		(legacyVersion) => {
+			const tempDir = mkdtempSync(
+				path.join(os.tmpdir(), "birdclaw-db-xremark-"),
+			);
+			tempDirs.push(tempDir);
+			process.env.BIRDCLAW_HOME = tempDir;
+
+			const initial = getNativeDb({ seedDemoData: false });
+			initial
+				.prepare(
+					`insert into xremark_profile_notes (
+			 identifier, additional_name, given_name, remark, description,
+			 tags_json, category_name, source_updated_at, imported_at
+			) values (?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				)
+				.run(
+					"43",
+					"recycled",
+					"New Owner",
+					"Wrong account baseline",
+					"",
+					"[]",
+					null,
+					100,
+					"2026-08-01T00:00:00.000Z",
+					"99",
+					"ada",
+					"Ada",
+					"Imported A",
+					"Imported description",
+					JSON.stringify(["分析师"]),
+					null,
+					100,
+					"2026-08-01T00:00:00.000Z",
+				);
+			initial.exec(`
+			drop table birdclaw_profile_notes;
+			drop table xremark_outbound_state;
+			create table birdclaw_profile_notes (
+				note_key text primary key,
+				identifier text,
+				additional_name text not null,
+				remark text not null default '',
+				description text,
+				updated_at text not null
+			);
+			insert into birdclaw_profile_notes values (
+				'id:42', '42', 'recycled', 'Local 42', null,
+				'2026-08-01T00:00:00.000Z'
+			);
+			insert into birdclaw_profile_notes values (
+				'handle:ada', null, 'ada', 'Local Ada', null,
+				'2026-08-01T00:01:00.000Z'
+			);
+		`);
+			initial.pragma(`user_version = ${String(legacyVersion)}`);
+			resetDatabaseForTests();
+
+			const db = getNativeDb({ seedDemoData: false });
+			const rows = db
+				.prepare(
+					`select note_key, identifier, sync_revision, base_json
+				 from birdclaw_profile_notes order by sync_revision`,
+				)
+				.all() as Array<Record<string, unknown>>;
+			expect(rows).toEqual([
+				expect.objectContaining({
+					note_key: "id:42",
+					identifier: "42",
+					sync_revision: 1,
+					base_json: JSON.stringify([{ exists: false }]),
+				}),
+				expect.objectContaining({
+					note_key: "handle:ada",
+					identifier: "99",
+					sync_revision: 2,
+					base_json: expect.stringContaining("Imported A"),
+				}),
+			]);
+			expect(
+				db.prepare("select next_revision from xremark_outbound_state").get(),
+			).toEqual({ next_revision: 2 });
+			expect(db.pragma("user_version", { simple: true })).toBe(19);
+		},
+	);
 
 	it("migrates the independent profile-priority table with a false default", () => {
 		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-"));
@@ -510,7 +618,7 @@ describe("database init", () => {
 				.all()
 				.map((column) => (column as { name: string }).name),
 		).toContain("format_version");
-		expect(db.pragma("user_version", { simple: true })).toBe(17);
+		expect(db.pragma("user_version", { simple: true })).toBe(19);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -539,7 +647,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(17);
+		expect(db.pragma("user_version", { simple: true })).toBe(19);
 	});
 
 	it("migrates v12 profile notes without overriding imported descriptions", () => {
@@ -576,7 +684,7 @@ describe("database init", () => {
 				)
 				.get(),
 		).toEqual({ remark: "Legacy local remark", description: null });
-		expect(db.pragma("user_version", { simple: true })).toBe(17);
+		expect(db.pragma("user_version", { simple: true })).toBe(19);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

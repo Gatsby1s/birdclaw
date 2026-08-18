@@ -49,6 +49,7 @@ export interface XRemarkAnnotation {
 
 export interface XRemarkSyncStatus {
 	imported: boolean;
+	bidirectionalEligible?: boolean;
 	annotationCount: number;
 	matchedProfileCount: number;
 	backupId?: string;

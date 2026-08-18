@@ -103,7 +103,7 @@ describe("author local timeline route", () => {
 		expect(screen.getByText("@Alice")).toBeInTheDocument();
 		expect(screen.getByText("Stored locally.")).toBeInTheDocument();
 		expect(
-			await screen.findByRole("button", { name: "Special follow" }),
+			await screen.findByRole("button", { name: "特别关注" }),
 		).toHaveAttribute("aria-pressed", "false");
 		expect(screen.getByRole("link", { name: "Analyse" })).toHaveAttribute(
 			"href",
@@ -155,6 +155,7 @@ describe("author local timeline route", () => {
 	it("edits a private note directly on the author timeline", async () => {
 		let storedRemark = "Original note";
 		let storedDescription = "Original description";
+		let storedTags = ["Founder"];
 		let patchBody: Record<string, unknown> | null = null;
 		const fetchMock = vi.fn(
 			async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -170,6 +171,7 @@ describe("author local timeline route", () => {
 						>;
 						storedRemark = String(patchBody.remark);
 						storedDescription = String(patchBody.description);
+						storedTags = patchBody.tags as string[];
 					}
 					return Response.json({
 						imported: true,
@@ -180,7 +182,7 @@ describe("author local timeline route", () => {
 							handle: "Alice",
 							remark: storedRemark,
 							description: storedDescription,
-							tags: [],
+							tags: storedTags,
 						},
 					});
 				}
@@ -219,6 +221,19 @@ describe("author local timeline route", () => {
 		expect(description).toHaveValue("Original description");
 		expect(remark).toHaveAttribute("maxlength", "80");
 		expect(description).toHaveAttribute("maxlength", "300");
+		expect(screen.getByRole("button", { name: "交易员" })).toHaveAttribute(
+			"aria-pressed",
+			"false",
+		);
+		fireEvent.click(screen.getByRole("button", { name: "交易员" }));
+		expect(screen.getByRole("button", { name: "交易员" })).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
+		fireEvent.change(screen.getByRole("textbox", { name: "Custom tag" }), {
+			target: { value: "宏观" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Add" }));
 		fireEvent.change(remark, { target: { value: "Updated on mobile" } });
 		fireEvent.change(description, {
 			target: { value: "Updated mobile description" },
@@ -235,7 +250,10 @@ describe("author local timeline route", () => {
 			handle: "Alice",
 			remark: "Updated on mobile",
 			description: "Updated mobile description",
+			tags: ["Founder", "交易员", "宏观"],
 		});
+		expect(await screen.findByText("#交易员")).toBeInTheDocument();
+		expect(await screen.findByText("#宏观")).toBeInTheDocument();
 	});
 
 	it("waits for both existing note fields before enabling edits", async () => {

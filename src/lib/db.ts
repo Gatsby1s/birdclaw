@@ -1106,6 +1106,154 @@ function ensureBirdclawProfileNoteDescriptionColumn(db: Database) {
 	}
 }
 
+function ensureXRemarkBidirectionalSyncColumns(db: Database) {
+	ensureBirdclawProfileNotesTable(db);
+	ensureXRemarkLiveSyncTable(db);
+	const noteColumns = getColumnNames(db, "birdclaw_profile_notes");
+	if (!noteColumns.has("tags_json")) {
+		db.exec("alter table birdclaw_profile_notes add column tags_json text");
+	}
+	if (!noteColumns.has("category_name")) {
+		db.exec("alter table birdclaw_profile_notes add column category_name text");
+	}
+	if (!noteColumns.has("sync_revision")) {
+		db.exec(
+			"alter table birdclaw_profile_notes add column sync_revision integer",
+		);
+	}
+	if (!noteColumns.has("base_json")) {
+		db.exec("alter table birdclaw_profile_notes add column base_json text");
+	}
+	db.exec(`
+		create table if not exists xremark_outbound_state (
+			id integer primary key check (id = 1),
+			next_revision integer not null default 0,
+			last_acked_revision integer not null default 0
+		);
+		insert into xremark_outbound_state (
+			id, next_revision, last_acked_revision
+		) values (1, 0, 0)
+		on conflict(id) do nothing;
+		create index if not exists idx_birdclaw_profile_notes_sync_revision
+			on birdclaw_profile_notes(sync_revision);
+	`);
+	reconcileBirdclawXRemarkOutbox(db);
+}
+
+export function reconcileBirdclawXRemarkOutbox(db: Database) {
+	const state = db
+		.prepare("select next_revision from xremark_outbound_state where id = 1")
+		.get() as { next_revision: number };
+	let nextRevision = Math.max(0, state.next_revision);
+	const legacyNotes = db
+		.prepare(
+			`select note_key, identifier, additional_name, base_json
+			 from birdclaw_profile_notes
+			 where sync_revision is null
+			 order by updated_at asc, note_key asc`,
+		)
+		.all() as Array<{
+		note_key: string;
+		identifier: string | null;
+		additional_name: string;
+		base_json: string | null;
+	}>;
+	const stableIdentifier = (value: string | null | undefined) => {
+		const candidate = value?.trim() ?? "";
+		if (/^\d+$/.test(candidate)) return candidate;
+		const prefixed = candidate.match(/^profile_user_(\d+)$/);
+		return prefixed?.[1] ?? "";
+	};
+	const safeTags = (value: string | null | undefined) => {
+		try {
+			const parsed = JSON.parse(value ?? "[]") as unknown;
+			return Array.isArray(parsed)
+				? parsed.filter((tag): tag is string => typeof tag === "string")
+				: [];
+		} catch {
+			return [];
+		}
+	};
+	const updateLegacy = db.prepare(
+		`update birdclaw_profile_notes
+		 set identifier = ?, sync_revision = ?, base_json = ?
+		 where note_key = ? and sync_revision is null`,
+	);
+	const hasXRemarkNotes = Boolean(
+		db
+			.prepare(
+				`select 1 as present from sqlite_master
+				 where type = 'table' and name = 'xremark_profile_notes'`,
+			)
+			.get(),
+	);
+	const importedLookup = hasXRemarkNotes
+		? db.prepare(
+				`select identifier, remark, description, tags_json, category_name
+				 from xremark_profile_notes
+				 where (? <> '' and identifier = ?)
+				    or (? = '' and lower(additional_name) = lower(?))
+				 order by case when identifier = ? then 0 else 1 end
+				 limit 1`,
+			)
+		: null;
+	for (const note of legacyNotes) {
+		let identifier = stableIdentifier(note.identifier);
+		const imported = importedLookup?.get(
+			identifier,
+			identifier,
+			identifier,
+			note.additional_name,
+			identifier,
+		) as
+			| {
+					identifier: string;
+					remark: string;
+					description: string;
+					tags_json: string;
+					category_name: string | null;
+			  }
+			| undefined;
+		if (!identifier) identifier = stableIdentifier(imported?.identifier);
+		if (!identifier) {
+			const profile = db
+				.prepare(
+					"select id from profiles where lower(handle) = lower(?) limit 1",
+				)
+				.get(note.additional_name) as { id: string } | undefined;
+			identifier = stableIdentifier(profile?.id);
+		}
+		if (!identifier) continue;
+		const base = imported
+			? {
+					exists: true as const,
+					remark: imported.remark,
+					description: imported.description,
+					tags: safeTags(imported.tags_json),
+					category: imported.category_name,
+				}
+			: { exists: false as const };
+		let bases: unknown[] = [];
+		try {
+			const parsed = JSON.parse(note.base_json ?? "") as unknown;
+			bases = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+		} catch {
+			bases = [];
+		}
+		if (bases.length === 0) bases.push(base);
+		nextRevision += 1;
+		updateLegacy.run(
+			identifier,
+			nextRevision,
+			JSON.stringify(bases),
+			note.note_key,
+		);
+	}
+	db.prepare(
+		"update xremark_outbound_state set next_revision = ? where id = 1",
+	).run(nextRevision);
+}
+
 function ensureBirdclawProfilePrioritiesTable(db: Database) {
 	db.exec(`
     create table if not exists birdclaw_profile_priorities (
@@ -1438,6 +1586,18 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add durable timeline reading positions",
 		up: (db) => {
 			ensureTimelineReadPositionsTable(db);
+		},
+	},
+	{
+		version: 18,
+		name: "reserve legacy 6551 recovery schema checkpoint",
+		up: () => {},
+	},
+	{
+		version: 19,
+		name: "add bidirectional X Remark note sync",
+		up: (db) => {
+			ensureXRemarkBidirectionalSyncColumns(db);
 		},
 	},
 ];

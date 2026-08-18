@@ -15,8 +15,9 @@ import {
 
 export const XREMARK_EXTENSION_ID = "imbbpjelfehedmikmbjglhpoiehpjjhl";
 export const XREMARK_EXTENSION_ORIGIN = `chrome-extension://${XREMARK_EXTENSION_ID}`;
-export const XREMARK_LIVE_ENDPOINT =
-	"http://127.0.0.1:3001/api/integrations/xremark/snapshot";
+export const XREMARK_PUBLIC_ORIGIN =
+	"https://birdclaw-production.up.railway.app";
+export const XREMARK_LIVE_ENDPOINT = `${XREMARK_PUBLIC_ORIGIN}/api/integrations/xremark/snapshot`;
 
 const CONNECTED_WINDOW_MS = 10 * 60_000;
 

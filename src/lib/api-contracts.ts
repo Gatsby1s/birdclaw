@@ -75,6 +75,7 @@ export const xRemarkAnnotationSchema: z.ZodType<XRemarkAnnotation> = z.object({
 
 export const xRemarkSyncStatusSchema: z.ZodType<XRemarkSyncStatus> = z.object({
 	imported: z.boolean(),
+	bidirectionalEligible: z.boolean().optional(),
 	annotationCount: z.number(),
 	matchedProfileCount: z.number(),
 	backupId: z.string().optional(),

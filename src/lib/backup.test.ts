@@ -33,6 +33,10 @@ import {
 } from "./backup";
 import { resetBirdclawPathsForTests } from "./config";
 import { getNativeDb } from "./db";
+import {
+	acknowledgeXRemarkChanges,
+	saveBirdclawProfileRemark,
+} from "./xremark";
 
 const testHome = useTestHome({ prefix: "birdclaw-backup-home-" });
 
@@ -222,13 +226,15 @@ function seedBackupFixture() {
       'tweet', 'tweet_2025', 'test-model', 88, 'useful', 'has context', '2025-01-09T00:00:00.000Z'
     );
 
-    insert into birdclaw_profile_notes (
-      note_key, identifier, additional_name, remark, description, updated_at
-    ) values (
-      'id:profile_friend', 'profile_friend', 'friend',
-      'Met at a local-first meetup', 'Maintains the local archive',
-      '2025-01-09T00:30:00.000Z'
-    );
+	    insert into birdclaw_profile_notes (
+	      note_key, identifier, additional_name, remark, description,
+	      tags_json, category_name, updated_at
+	    ) values (
+	      'id:42', '42', 'friend',
+	      'Met at a local-first meetup', 'Maintains the local archive',
+	      '["分析师"]', '市场观察',
+	      '2025-01-09T00:30:00.000Z'
+	    );
 
 	insert into birdclaw_profile_priorities (
 	  priority_key, identifier, additional_name, is_special_follow, updated_at
@@ -739,13 +745,17 @@ describe("text backup", () => {
 		expect(
 			getNativeDb({ seedDemoData: false })
 				.prepare(
-					"select additional_name, remark, description from birdclaw_profile_notes where note_key = 'id:profile_friend'",
+					"select additional_name, remark, description, tags_json, category_name, sync_revision, base_json from birdclaw_profile_notes where note_key = 'id:42'",
 				)
 				.get(),
 		).toEqual({
 			additional_name: "friend",
 			remark: "Met at a local-first meetup",
 			description: "Maintains the local archive",
+			tags_json: '["分析师"]',
+			category_name: "市场观察",
+			sync_revision: 1,
+			base_json: JSON.stringify([{ exists: false }]),
 		});
 		expect(
 			getNativeDb({ seedDemoData: false })
@@ -1073,6 +1083,55 @@ describe("text backup", () => {
 				.all(),
 		).toEqual([{ week_start: "2025-01-06", format_version: 1 }]);
 	});
+
+	it("requeues a restored note without letting an old ACK delete it", async () => {
+		switchHome("birdclaw-backup-note-source-");
+		seedBackupFixture();
+		const repoPath = makeTempDir("birdclaw-backup-note-store-");
+		await exportBackup({ repoPath });
+
+		switchHome("birdclaw-backup-note-target-");
+		const db = getNativeDb({ seedDemoData: false });
+		saveBirdclawProfileRemark(
+			{ identifier: "42", handle: "friend", remark: "Pending B" },
+			db,
+		);
+		db.prepare(
+			"update birdclaw_profile_notes set updated_at = ? where note_key = ?",
+		).run("2024-01-01T00:00:00.000Z", "id:42");
+
+		await importBackup({ repoPath, db });
+		const restored = db
+			.prepare(
+				`select remark, sync_revision, base_json
+				 from birdclaw_profile_notes where note_key = 'id:42'`,
+			)
+			.get() as {
+			remark: string;
+			sync_revision: number;
+			base_json: string;
+		};
+		expect(restored).toMatchObject({
+			remark: "Met at a local-first meetup",
+			sync_revision: 2,
+		});
+		expect(JSON.parse(restored.base_json)).toEqual([
+			{ exists: false },
+			expect.objectContaining({ exists: true, remark: "Pending B" }),
+		]);
+
+		acknowledgeXRemarkChanges({ applied: [1], conflicts: [] }, db);
+		expect(
+			db
+				.prepare(
+					"select remark, sync_revision from birdclaw_profile_notes where note_key = 'id:42'",
+				)
+				.get(),
+		).toEqual({
+			remark: "Met at a local-first meetup",
+			sync_revision: 2,
+		});
+	}, 20000);
 
 	it("prefers a richer weekly format over a newer legacy timestamp", async () => {
 		switchHome("birdclaw-backup-weekly-v2-src-");

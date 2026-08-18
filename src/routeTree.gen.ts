@@ -61,6 +61,7 @@ import { Route as ApiIntegrationsXremarkRouteImport } from './routes/api/integra
 import { Route as ApiIntegrationsTwitter6551RouteImport } from './routes/api/integrations.twitter6551'
 import { Route as ApiIntegrationsTwillotHistoryRouteImport } from './routes/api/integrations.twillot-history'
 import { Route as ApiIntegrationsXremarkSnapshotRouteImport } from './routes/api/integrations.xremark.snapshot'
+import { Route as ApiIntegrationsXremarkChangesRouteImport } from './routes/api/integrations.xremark.changes'
 
 const TodayRoute = TodayRouteImport.update({
   id: '/today',
@@ -326,6 +327,12 @@ const ApiIntegrationsXremarkSnapshotRoute =
     path: '/snapshot',
     getParentRoute: () => ApiIntegrationsXremarkRoute,
   } as any)
+const ApiIntegrationsXremarkChangesRoute =
+  ApiIntegrationsXremarkChangesRouteImport.update({
+    id: '/changes',
+    path: '/changes',
+    getParentRoute: () => ApiIntegrationsXremarkRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -379,6 +386,7 @@ export interface FileRoutesByFullPath {
   '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
   '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
+  '/api/integrations/xremark/changes': typeof ApiIntegrationsXremarkChangesRoute
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
 }
 export interface FileRoutesByTo {
@@ -433,6 +441,7 @@ export interface FileRoutesByTo {
   '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
   '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
+  '/api/integrations/xremark/changes': typeof ApiIntegrationsXremarkChangesRoute
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
 }
 export interface FileRoutesById {
@@ -488,6 +497,7 @@ export interface FileRoutesById {
   '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
   '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
+  '/api/integrations/xremark/changes': typeof ApiIntegrationsXremarkChangesRoute
   '/api/integrations/xremark/snapshot': typeof ApiIntegrationsXremarkSnapshotRoute
 }
 export interface FileRouteTypes {
@@ -544,6 +554,7 @@ export interface FileRouteTypes {
     | '/api/integrations/twillot-history'
     | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
+    | '/api/integrations/xremark/changes'
     | '/api/integrations/xremark/snapshot'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -598,6 +609,7 @@ export interface FileRouteTypes {
     | '/api/integrations/twillot-history'
     | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
+    | '/api/integrations/xremark/changes'
     | '/api/integrations/xremark/snapshot'
   id:
     | '__root__'
@@ -652,6 +664,7 @@ export interface FileRouteTypes {
     | '/api/integrations/twillot-history'
     | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
+    | '/api/integrations/xremark/changes'
     | '/api/integrations/xremark/snapshot'
   fileRoutesById: FileRoutesById
 }
@@ -1075,15 +1088,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiIntegrationsXremarkSnapshotRouteImport
       parentRoute: typeof ApiIntegrationsXremarkRoute
     }
+    '/api/integrations/xremark/changes': {
+      id: '/api/integrations/xremark/changes'
+      path: '/changes'
+      fullPath: '/api/integrations/xremark/changes'
+      preLoaderRoute: typeof ApiIntegrationsXremarkChangesRouteImport
+      parentRoute: typeof ApiIntegrationsXremarkRoute
+    }
   }
 }
 
 interface ApiIntegrationsXremarkRouteChildren {
+  ApiIntegrationsXremarkChangesRoute: typeof ApiIntegrationsXremarkChangesRoute
   ApiIntegrationsXremarkSnapshotRoute: typeof ApiIntegrationsXremarkSnapshotRoute
 }
 
 const ApiIntegrationsXremarkRouteChildren: ApiIntegrationsXremarkRouteChildren =
   {
+    ApiIntegrationsXremarkChangesRoute: ApiIntegrationsXremarkChangesRoute,
     ApiIntegrationsXremarkSnapshotRoute: ApiIntegrationsXremarkSnapshotRoute,
   }
 

@@ -114,7 +114,9 @@ test("copies and patches an official extension without modifying the source", as
 			1,
 		);
 		assert.ok(
-			generatedManifest.host_permissions.includes("http://127.0.0.1:3001/*"),
+			generatedManifest.host_permissions.includes(
+				"https://birdclaw-production.up.railway.app/*",
+			),
 		);
 
 		const generatedLoader = await readFile(
@@ -181,7 +183,9 @@ test("copies and patches an official extension without modifying the source", as
 		assert.equal("options_ui" in rollbackManifest, false);
 		assert.equal(rollbackManifest.permissions.includes("storage"), false);
 		assert.equal(
-			rollbackManifest.host_permissions.includes("http://127.0.0.1:3001/*"),
+			rollbackManifest.host_permissions.includes(
+				"https://birdclaw-production.up.railway.app/*",
+			),
 			false,
 		);
 		assert.equal(

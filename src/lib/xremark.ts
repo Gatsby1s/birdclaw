@@ -79,8 +79,34 @@ type BirdclawProfileNoteRow = {
 	additional_name: string;
 	remark: string;
 	description: string | null;
+	tags_json: string | null;
+	category_name: string | null;
 	updated_at: string;
 };
+
+export type XRemarkOutboundChange = {
+	revision: number;
+	identifier: string;
+	handle: string;
+	displayName: string;
+	remark: string;
+	description: string;
+	tags: string[];
+	category: string | null;
+	base: XRemarkComparableState;
+	acceptableBases: XRemarkComparableState[];
+	updatedAt: string;
+};
+
+export type XRemarkComparableState =
+	| { exists: false }
+	| {
+			exists: true;
+			remark: string;
+			description: string;
+			tags: string[];
+			category: string | null;
+	  };
 
 type AnnotationMaps = {
 	byIdentifier: Map<string, XRemarkAnnotation>;
@@ -117,6 +143,33 @@ function storedProfileIdentifier(value: string | null | undefined) {
 	return identifier;
 }
 
+function resolveStableXIdentifier(
+	lookup: { handle: string; identifier?: string },
+	db: Database,
+) {
+	const supplied = storedProfileIdentifier(lookup.identifier);
+	if (isStableXIdentifier(supplied)) return supplied;
+	const imported = db
+		.prepare(
+			`select identifier
+			 from xremark_profile_notes
+			 where identifier = ? or lower(additional_name) = ?
+			 order by case when identifier = ? then 0 else 1 end
+			 limit 1`,
+		)
+		.get(supplied, normalizedHandle(lookup.handle), supplied) as
+		| { identifier: string }
+		| undefined;
+	if (imported && isStableXIdentifier(imported.identifier)) {
+		return imported.identifier;
+	}
+	const profile = db
+		.prepare("select id from profiles where lower(handle) = ? limit 1")
+		.get(normalizedHandle(lookup.handle)) as { id: string } | undefined;
+	const profileIdentifier = storedProfileIdentifier(profile?.id);
+	return isStableXIdentifier(profileIdentifier) ? profileIdentifier : "";
+}
+
 function timestampToIso(value: number | null | undefined) {
 	if (!value || !Number.isFinite(value)) return undefined;
 	const date = new Date(value);
@@ -132,6 +185,107 @@ function parseStringArray(value: string) {
 	} catch {
 		return [];
 	}
+}
+
+function normalizeTagNames(values: string[]) {
+	const tags: string[] = [];
+	const seen = new Set<string>();
+	for (const value of values) {
+		const tag = value.trim();
+		const key = tag.toLocaleLowerCase();
+		if (!tag || tag.length > 200 || seen.has(key)) continue;
+		seen.add(key);
+		tags.push(tag);
+	}
+	return tags.slice(0, 200);
+}
+
+function comparableState(
+	annotation: XRemarkAnnotation | null | undefined,
+): XRemarkComparableState {
+	return annotation
+		? {
+				exists: true,
+				remark: annotation.remark,
+				description: annotation.description,
+				tags: normalizeTagNames(annotation.tags),
+				category: annotation.category ?? null,
+			}
+		: { exists: false };
+}
+
+function outboundState(input: {
+	remark: string;
+	description: string;
+	tags: string[];
+	category: string | null;
+}): XRemarkComparableState {
+	const tags = normalizeTagNames(input.tags);
+	const category = input.category?.trim() || null;
+	if (!input.remark && !input.description && tags.length === 0 && !category) {
+		return { exists: false };
+	}
+	return {
+		exists: true,
+		remark: input.remark,
+		description: input.description,
+		tags,
+		category,
+	};
+}
+
+function parseComparableStates(value: string | null) {
+	if (!value) return [];
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		const candidates = Array.isArray(parsed) ? parsed : [parsed];
+		return candidates.filter((candidate): candidate is XRemarkComparableState =>
+			Boolean(
+				candidate &&
+				typeof candidate === "object" &&
+				"exists" in candidate &&
+				typeof candidate.exists === "boolean",
+			),
+		);
+	} catch {
+		return [];
+	}
+}
+
+function uniqueComparableStates(states: XRemarkComparableState[]) {
+	const seen = new Set<string>();
+	return states.filter((state) => {
+		const key = JSON.stringify(state);
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+}
+
+function rawXRemarkAnnotation(
+	lookup: { handle: string; identifier?: string },
+	db: Database,
+) {
+	const normalizedIdentifier = storedProfileIdentifier(lookup.identifier);
+	const row = db
+		.prepare(
+			`select identifier, additional_name, given_name, remark, description,
+			        tags_json, category_name, source_updated_at,
+			        1 as stable_profile_exists
+			 from xremark_profile_notes
+			 where (? <> '' and identifier = ?)
+			    or (? = '' and lower(additional_name) = ?)
+			 order by case when identifier = ? then 0 else 1 end
+			 limit 1`,
+		)
+		.get(
+			normalizedIdentifier,
+			normalizedIdentifier,
+			normalizedIdentifier,
+			normalizedHandle(lookup.handle),
+			normalizedIdentifier,
+		) as XRemarkNoteRow | undefined;
+	return row ? annotationFromRow(row) : null;
 }
 
 function annotationFromRow(row: XRemarkNoteRow): XRemarkAnnotation {
@@ -187,7 +341,8 @@ function listAnnotationMaps(db: Database): AnnotationMaps {
 
 	const overrides = db
 		.prepare(
-			`select identifier, additional_name, remark, description, updated_at
+			`select identifier, additional_name, remark, description,
+			        tags_json, category_name, updated_at
 			 from birdclaw_profile_notes
 			 order by updated_at asc`,
 		)
@@ -210,8 +365,13 @@ function listAnnotationMaps(db: Database): AnnotationMaps {
 			...(existing?.displayName ? { displayName: existing.displayName } : {}),
 			remark: override.remark,
 			description: override.description ?? existing?.description ?? "",
-			tags: existing?.tags ?? [],
-			...(existing?.category ? { category: existing.category } : {}),
+			tags:
+				override.tags_json == null
+					? (existing?.tags ?? [])
+					: parseStringArray(override.tags_json),
+			...(override.category_name || existing?.category
+				? { category: override.category_name || existing?.category }
+				: {}),
 			sourceUpdatedAt: override.updated_at,
 		};
 		const identifiers = new Set([
@@ -318,14 +478,19 @@ export function saveBirdclawProfileRemark(
 		identifier?: string;
 		remark: string;
 		description?: string;
+		tags?: string[];
 	},
 	db: Database = getNativeDb({ seedDemoData: false }),
 ) {
 	const handle = normalizedHandle(input.handle);
 	if (!handle) throw new Error("A valid X handle is required.");
-	const identifier = storedProfileIdentifier(input.identifier);
-	if (identifier.length > 128)
+	const suppliedIdentifier = storedProfileIdentifier(input.identifier);
+	if (suppliedIdentifier.length > 128)
 		throw new Error("Profile identifier is too long.");
+	const identifier = resolveStableXIdentifier(
+		{ handle, ...(input.identifier ? { identifier: input.identifier } : {}) },
+		db,
+	);
 	const remark = input.remark.trim();
 	if (remark.length > 80) {
 		throw new Error("Profile remark must be 80 characters or fewer.");
@@ -333,7 +498,7 @@ export function saveBirdclawProfileRemark(
 	const noteKey = identifier ? `id:${identifier}` : `handle:${handle}`;
 	const previousOverride = db
 		.prepare(
-			`select description
+			`select remark, description, tags_json, category_name, base_json
 			 from birdclaw_profile_notes
 			 where note_key = ?
 			    or (? <> '' and identifier = ?)
@@ -342,7 +507,13 @@ export function saveBirdclawProfileRemark(
 			 limit 1`,
 		)
 		.get(noteKey, identifier, identifier, handle, noteKey) as
-		| { description: string | null }
+		| {
+				remark: string;
+				description: string | null;
+				tags_json: string | null;
+				category_name: string | null;
+				base_json: string | null;
+		  }
 		| undefined;
 	const description =
 		input.description === undefined
@@ -351,32 +522,208 @@ export function saveBirdclawProfileRemark(
 	if (description != null && description.length > 300) {
 		throw new Error("Profile description must be 300 characters or fewer.");
 	}
+	const tagsJson =
+		input.tags === undefined
+			? (previousOverride?.tags_json ?? null)
+			: JSON.stringify(normalizeTagNames(input.tags));
+	const categoryName = previousOverride?.category_name ?? null;
+	const imported = rawXRemarkAnnotation(
+		{ handle, ...(identifier ? { identifier } : {}) },
+		db,
+	);
+	const acceptableBases = parseComparableStates(
+		previousOverride?.base_json ?? null,
+	);
+	if (acceptableBases.length === 0) {
+		acceptableBases.push(comparableState(imported));
+	}
+	if (previousOverride) {
+		acceptableBases.push(
+			outboundState({
+				remark: previousOverride.remark,
+				description:
+					previousOverride.description ?? imported?.description ?? "",
+				tags:
+					previousOverride.tags_json == null
+						? (imported?.tags ?? [])
+						: parseStringArray(previousOverride.tags_json),
+				category: previousOverride.category_name ?? imported?.category ?? null,
+			}),
+		);
+	}
+	const baseJson = JSON.stringify(uniqueComparableStates(acceptableBases));
 	const updatedAt = new Date().toISOString();
 
-	db.prepare(
-		`delete from birdclaw_profile_notes
-		 where note_key <> ?
-		   and (
-		     (? <> '' and identifier = ?)
-		     or (identifier is null and lower(additional_name) = ?)
-		   )`,
-	).run(noteKey, identifier, identifier, handle);
-	db.prepare(
-		`insert into birdclaw_profile_notes (
-		   note_key, identifier, additional_name, remark, description, updated_at
-		 ) values (?, ?, ?, ?, ?, ?)
-		 on conflict(note_key) do update set
-		   identifier = excluded.identifier,
-		   additional_name = excluded.additional_name,
-		   remark = excluded.remark,
-		   description = excluded.description,
-		   updated_at = excluded.updated_at`,
-	).run(noteKey, identifier || null, handle, remark, description, updatedAt);
+	db.transaction(() => {
+		db.prepare(
+			`insert into xremark_outbound_state (
+			   id, next_revision, last_acked_revision
+			 ) values (1, 0, 0)
+			 on conflict(id) do nothing`,
+		).run();
+		const state = db
+			.prepare("select next_revision from xremark_outbound_state where id = 1")
+			.get() as { next_revision: number };
+		const revision = Math.min(
+			Number.MAX_SAFE_INTEGER,
+			Math.max(0, state.next_revision) + 1,
+		);
+		db.prepare(
+			"update xremark_outbound_state set next_revision = ? where id = 1",
+		).run(revision);
+		db.prepare(
+			`delete from birdclaw_profile_notes
+			 where note_key <> ?
+			   and (
+			     (? <> '' and identifier = ?)
+			     or (identifier is null and lower(additional_name) = ?)
+			   )`,
+		).run(noteKey, identifier, identifier, handle);
+		db.prepare(
+			`insert into birdclaw_profile_notes (
+			   note_key, identifier, additional_name, remark, description,
+			   tags_json, category_name, sync_revision, base_json, updated_at
+			 ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 on conflict(note_key) do update set
+			   identifier = excluded.identifier,
+			   additional_name = excluded.additional_name,
+			   remark = excluded.remark,
+			   description = excluded.description,
+			   tags_json = excluded.tags_json,
+			   category_name = excluded.category_name,
+			   sync_revision = excluded.sync_revision,
+			   base_json = excluded.base_json,
+			   updated_at = excluded.updated_at`,
+		).run(
+			noteKey,
+			identifier || null,
+			handle,
+			remark,
+			description,
+			tagsJson,
+			categoryName,
+			identifier ? revision : null,
+			baseJson,
+			updatedAt,
+		);
+	})();
 
 	return getXRemarkSyncStatus(
 		{ handle, ...(identifier ? { identifier } : {}) },
 		db,
 	);
+}
+
+export function listPendingXRemarkChanges(
+	db: Database = getReadDb({ seedDemoData: false }),
+): { changes: XRemarkOutboundChange[]; latestRevision: number } {
+	const state = db
+		.prepare(
+			`select next_revision, last_acked_revision
+			 from xremark_outbound_state where id = 1`,
+		)
+		.get() as
+		| { next_revision: number; last_acked_revision: number }
+		| undefined;
+	const rows = db
+		.prepare(
+			`select note.sync_revision as revision,
+			        note.identifier,
+			        note.additional_name as handle,
+			        coalesce(imported.given_name, profile.display_name, '') as display_name,
+			        note.remark,
+			        coalesce(note.description, imported.description, '') as description,
+			        coalesce(note.tags_json, imported.tags_json, '[]') as tags_json,
+			        coalesce(note.category_name, imported.category_name) as category_name,
+			        note.base_json,
+			        note.updated_at
+			 from birdclaw_profile_notes note
+			 left join xremark_profile_notes imported
+			   on imported.identifier = note.identifier
+			 left join profiles profile
+			   on profile.id = note.identifier
+			   or profile.id = 'profile_user_' || note.identifier
+			 where note.sync_revision is not null
+			 order by note.sync_revision asc
+			 limit 5000`,
+		)
+		.all() as Array<{
+		revision: number;
+		identifier: string;
+		handle: string;
+		display_name: string;
+		remark: string;
+		description: string;
+		tags_json: string;
+		category_name: string | null;
+		base_json: string | null;
+		updated_at: string;
+	}>;
+	const changes = rows.map((row) => {
+		const acceptableBases = parseComparableStates(row.base_json);
+		const base = acceptableBases[0] ?? { exists: false };
+		return {
+			revision: row.revision,
+			identifier: storedProfileIdentifier(row.identifier),
+			handle: normalizedHandle(row.handle),
+			displayName: row.display_name,
+			remark: row.remark,
+			description: row.description,
+			tags: parseStringArray(row.tags_json),
+			category: row.category_name,
+			base,
+			acceptableBases: acceptableBases.length > 0 ? acceptableBases : [base],
+			updatedAt: row.updated_at,
+		};
+	});
+	return {
+		latestRevision: changes.at(-1)?.revision ?? state?.last_acked_revision ?? 0,
+		changes,
+	};
+}
+
+export function acknowledgeXRemarkChanges(
+	input: { applied: number[]; conflicts: number[] },
+	db: Database = getNativeDb({ seedDemoData: false }),
+) {
+	const revisions = [...new Set([...input.applied, ...input.conflicts])];
+	if (
+		revisions.some(
+			(revision) => !Number.isSafeInteger(revision) || revision < 0,
+		)
+	) {
+		throw new Error("Invalid X Remark change acknowledgement.");
+	}
+	db.transaction(() => {
+		const state = db
+			.prepare(
+				`select next_revision, last_acked_revision
+				 from xremark_outbound_state where id = 1`,
+			)
+			.get() as
+			| { next_revision: number; last_acked_revision: number }
+			| undefined;
+		if (
+			!state ||
+			revisions.some((revision) => revision > state.next_revision)
+		) {
+			throw new Error("X Remark acknowledged an unknown change revision.");
+		}
+		const remove = db.prepare(
+			"delete from birdclaw_profile_notes where sync_revision = ?",
+		);
+		for (const revision of revisions) remove.run(revision);
+		const acknowledgedRevision = Math.max(
+			state.last_acked_revision,
+			...revisions,
+		);
+		db.prepare(
+			`update xremark_outbound_state
+			 set last_acked_revision = max(last_acked_revision, ?)
+			 where id = 1`,
+		).run(acknowledgedRevision);
+	})();
+	return listPendingXRemarkChanges(db);
 }
 
 export class XRemarkImportError extends Error {
@@ -521,6 +868,15 @@ export function getXRemarkSyncStatus(
 
 	return {
 		imported: Boolean(state),
+		...(lookup.handle || lookup.identifier
+			? {
+					bidirectionalEligible: isStableXIdentifier(
+						storedProfileIdentifier(
+							annotation?.identifier ?? resolvedIdentifier,
+						),
+					),
+				}
+			: {}),
 		annotationCount: state?.annotation_count ?? 0,
 		matchedProfileCount,
 		...(state?.backup_id ? { backupId: state.backup_id } : {}),

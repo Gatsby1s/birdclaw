@@ -67,7 +67,7 @@
 		try {
 			await send({ type: CONTROL.setToken, token });
 			tokenInput.value = "";
-			showNotice("Pairing token saved. Full snapshot sent.");
+			showNotice("Pairing token saved. Notes and tags synchronized.");
 		} catch (error) {
 			showNotice(error.message, true);
 		} finally {
@@ -81,7 +81,7 @@
 		showNotice("Syncing…");
 		try {
 			await send({ type: CONTROL.syncNow });
-			showNotice("Full snapshot sent.");
+			showNotice("Notes and tags synchronized.");
 		} catch (error) {
 			showNotice(error.message, true);
 		} finally {

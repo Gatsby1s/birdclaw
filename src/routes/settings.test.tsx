@@ -350,7 +350,7 @@ describe("settings route", () => {
 		await queryClient.refetchQueries({ queryKey: queryKeys.xRemarkLive });
 		expect(
 			await screen.findByText(
-				"Connected · saved and deleted notes appear automatically",
+				"Connected · notes and tags sync both ways automatically",
 			),
 		).toBeVisible();
 	});

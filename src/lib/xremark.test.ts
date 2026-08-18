@@ -10,6 +10,7 @@ import {
 	enrichTimelineItemsWithXRemark,
 	getXRemarkSyncStatus,
 	importXRemarkBackup,
+	listPendingXRemarkChanges,
 	saveBirdclawProfileRemark,
 	xRemarkBackupSchema,
 } from "./xremark";
@@ -213,6 +214,51 @@ describe("X Remark backup import", () => {
 		});
 	});
 
+	it("chains rapid BirdClaw edits across an in-flight earlier revision", () => {
+		const db = createDatabase();
+		importXRemarkBackup(
+			backup([
+				{
+					identifier: "42",
+					additionalName: "ada",
+					remark: "A",
+				},
+			]),
+			db,
+		);
+		saveBirdclawProfileRemark(
+			{ identifier: "42", handle: "ada", remark: "B" },
+			db,
+		);
+		saveBirdclawProfileRemark(
+			{ identifier: "42", handle: "ada", remark: "C" },
+			db,
+		);
+
+		const [change] = listPendingXRemarkChanges(db).changes;
+		expect(change).toMatchObject({ remark: "C" });
+		expect(change.acceptableBases).toEqual([
+			expect.objectContaining({ exists: true, remark: "A" }),
+			expect.objectContaining({ exists: true, remark: "B" }),
+		]);
+	});
+
+	it("resolves a handle-only save through an imported stable X identifier", () => {
+		const db = createDatabase();
+		importXRemarkBackup(
+			backup([{ identifier: "42", additionalName: "ada", remark: "A" }]),
+			db,
+		);
+		saveBirdclawProfileRemark({ handle: "ada", remark: "B" }, db);
+
+		expect(listPendingXRemarkChanges(db).changes).toEqual([
+			expect.objectContaining({ identifier: "42", handle: "ada", remark: "B" }),
+		]);
+		expect(getXRemarkSyncStatus({ handle: "ada" }, db)).toMatchObject({
+			bidirectionalEligible: true,
+		});
+	});
+
 	it("keeps ID-backed notes isolated when an X handle is reused", () => {
 		const db = createDatabase();
 		saveBirdclawProfileRemark(
@@ -309,6 +355,9 @@ describe("X Remark backup import", () => {
 			},
 			db,
 		);
+		expect(getXRemarkSyncStatus({ handle: "ada" }, db)).toMatchObject({
+			bidirectionalEligible: false,
+		});
 		saveBirdclawProfileRemark(
 			{
 				identifier: "profile_user_42",

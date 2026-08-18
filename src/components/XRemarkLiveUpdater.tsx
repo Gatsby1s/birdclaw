@@ -5,7 +5,7 @@ import { fetchJson } from "#/lib/api-client";
 import { queryKeys } from "#/lib/query-client";
 import type { XRemarkLiveSyncStatus } from "#/lib/types";
 
-const DEFAULT_POLL_MS = 2_000;
+const DEFAULT_POLL_MS = 10_000;
 
 export function isLoopbackHostname(hostname: string) {
 	const normalized = hostname
@@ -25,13 +25,6 @@ export function isLoopbackHostname(hostname: string) {
 	);
 }
 
-function runsOnLoopback() {
-	return (
-		typeof window !== "undefined" &&
-		isLoopbackHostname(window.location.hostname)
-	);
-}
-
 async function fetchXRemarkStatus() {
 	return fetchJson(
 		"/api/integrations/xremark",
@@ -44,7 +37,7 @@ async function fetchXRemarkStatus() {
 export function XRemarkLiveUpdater({
 	pollMs = DEFAULT_POLL_MS,
 	fetchStatus = fetchXRemarkStatus,
-	enabled = runsOnLoopback(),
+	enabled = typeof window !== "undefined",
 }: {
 	pollMs?: number;
 	fetchStatus?: () => Promise<XRemarkLiveSyncStatus>;

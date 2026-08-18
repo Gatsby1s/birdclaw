@@ -30,7 +30,7 @@ function fakeIndexedDb(data, control) {
 		objectStoreNames: { contains: (name) => storeNames.includes(name) },
 		close() {},
 		transaction(requestedStoreNames, mode) {
-			assert.equal(mode, "readonly");
+			assert.ok(mode === "readonly" || mode === "readwrite");
 			assert.deepEqual(
 				[...requestedStoreNames],
 				["remarks", "tags", "categories"],
@@ -57,6 +57,30 @@ function fakeIndexedDb(data, control) {
 								}
 							});
 							return request;
+						},
+						add(value) {
+							assert.equal(mode, "readwrite");
+							data[name].push(structuredClone(value));
+							return { result: value?.id };
+						},
+						put(value) {
+							assert.equal(mode, "readwrite");
+							const key = name === "remarks" ? "identifier" : "id";
+							const index = data[name].findIndex(
+								(row) => String(row?.[key]) === String(value?.[key]),
+							);
+							if (index >= 0) data[name][index] = structuredClone(value);
+							else data[name].push(structuredClone(value));
+							return { result: value?.[key] };
+						},
+						delete(key) {
+							assert.equal(mode, "readwrite");
+							const field = name === "remarks" ? "identifier" : "id";
+							const index = data[name].findIndex(
+								(row) => String(row?.[field]) === String(key),
+							);
+							if (index >= 0) data[name].splice(index, 1);
+							return { result: undefined };
 						},
 					};
 				},
@@ -122,6 +146,7 @@ async function createHarness({
 	const observerMessages = [];
 	let timerId = 0;
 	let responseIndex = 0;
+	let uuidIndex = 0;
 	let clock = 1_770_000_000_000;
 	const databaseControl = {
 		present: databasePresent,
@@ -247,10 +272,24 @@ async function createHarness({
 		indexedDB: fakeIndexedDb(databaseData, databaseControl),
 		IDBObjectStore: SyntheticObjectStore,
 		IDBCursor: SyntheticCursor,
-		crypto: { randomUUID: () => FIXED_SOURCE_ID },
+		crypto: {
+			randomUUID: () => {
+				uuidIndex += 1;
+				return uuidIndex === 1
+					? FIXED_SOURCE_ID
+					: `11111111-2222-4333-8444-${String(uuidIndex).padStart(12, "0")}`;
+			},
+		},
 		fetch: async (url, options) => {
 			fetchCalls.push({ url, options: clone(options) });
-			return responses[Math.min(responseIndex++, responses.length - 1)];
+			const response =
+				responses[Math.min(responseIndex++, responses.length - 1)];
+			return {
+				...response,
+				json:
+					response.json ??
+					(async () => ({ ok: true, changes: [], latestRevision: 0 })),
+			};
 		},
 		setTimeout: (callback, delay) => {
 			const id = ++timerId;
@@ -373,7 +412,7 @@ test("debounces official mutations and sends the required full snapshot contract
 	const request = harness.fetchCalls[0];
 	assert.equal(
 		request.url,
-		"http://127.0.0.1:3001/api/integrations/xremark/snapshot",
+		"https://birdclaw-production.up.railway.app/api/integrations/xremark/snapshot",
 	);
 	assert.equal(request.options.method, "POST");
 	assert.equal(
@@ -402,12 +441,13 @@ test("debounces official mutations and sends the required full snapshot contract
 	assert.deepEqual(harness.consoleCalls, []);
 
 	const heartbeat = harness.alarms.get("birdclaw-xremark-heartbeat");
-	assert.equal(heartbeat.delayInMinutes, 5);
-	assert.equal(heartbeat.periodInMinutes, 5);
+	assert.equal(heartbeat.delayInMinutes, 0.5);
+	assert.equal(heartbeat.periodInMinutes, 0.5);
 
 	await harness.fireAlarm("birdclaw-xremark-heartbeat");
-	assert.equal(harness.fetchCalls.length, 2);
-	const heartbeatPayload = JSON.parse(harness.fetchCalls[1].options.body);
+	assert.equal(harness.fetchCalls.length, 3);
+	assert.equal(harness.fetchCalls[1].options.method, "GET");
+	const heartbeatPayload = JSON.parse(harness.fetchCalls[2].options.body);
 	assert.equal(heartbeatPayload.sequence, 2);
 	assert.equal(heartbeatPayload.sourceId, FIXED_SOURCE_ID);
 });
@@ -494,7 +534,8 @@ test("manual sync waits for the pending debounce and sends only the post-mutatio
 
 	await harness.firePendingDeadline();
 	assert.equal((await manual).ok, true);
-	assert.equal(harness.fetchCalls.length, 1);
+	assert.equal(harness.fetchCalls.length, 2);
+	assert.equal(harness.fetchCalls[1].options.method, "GET");
 	const payload = JSON.parse(harness.fetchCalls[0].options.body);
 	assert.equal(payload.sequence, 1);
 	assert.deepEqual(payload.remarks, harness.databaseData.remarks);
@@ -596,7 +637,8 @@ test("keeps a snapshot pending until a token is paired and never returns the tok
 	});
 	await drain(32);
 	assert.equal((await paired).ok, true);
-	assert.equal(harness.fetchCalls.length, 1);
+	assert.equal(harness.fetchCalls.length, 2);
+	assert.equal(harness.fetchCalls[1].options.method, "GET");
 	assert.equal(JSON.parse(harness.fetchCalls[0].options.body).sequence, 2);
 
 	const after = await harness.control({ type: "birdclaw:xremark:get-state" });
@@ -609,4 +651,119 @@ test("keeps a snapshot pending until a token is paired and never returns the tok
 		),
 		false,
 	);
+});
+
+test("writes BirdClaw notes and quick tags into X Remark before acknowledging", async () => {
+	const change = {
+		revision: 7,
+		identifier: "synthetic-user",
+		handle: "ada",
+		displayName: "Ada",
+		remark: "Momentum trader",
+		description: "Tracks liquid majors",
+		tags: ["交易员", "分析师"],
+		category: null,
+		base: { exists: false },
+		acceptableBases: [
+			{ exists: false },
+			{
+				exists: true,
+				remark: "Synthetic private note",
+				description: "",
+				tags: [],
+				category: null,
+			},
+		],
+		updatedAt: "2026-08-18T08:00:00.000Z",
+	};
+	let harness;
+	harness = await createHarness({
+		responses: [
+			{
+				ok: true,
+				status: 200,
+				json: async () => {
+					harness.storage.set("birdclawXRemarkPendingMutation", {
+						count: 1,
+						dueAt: 1_770_000_000_800,
+					});
+					return { ok: true, changes: [change], latestRevision: 7 };
+				},
+			},
+			{ ok: true, status: 200 },
+			{ ok: true, status: 200 },
+		],
+	});
+
+	await harness.fireAlarm("birdclaw-xremark-heartbeat");
+
+	assert.equal(harness.fetchCalls.length, 3);
+	assert.equal(harness.fetchCalls[0].options.method, "GET");
+	assert.equal(harness.fetchCalls[1].options.method, "POST");
+	assert.equal(harness.fetchCalls[2].options.method, "POST");
+	const note = harness.databaseData.remarks.find(
+		(row) => row.identifier === "synthetic-user",
+	);
+	assert.equal(note.remark, "Momentum trader");
+	assert.equal(note.description, "Tracks liquid majors");
+	assert.equal(note.tags.length, 2);
+	assert.deepEqual(
+		note.tags.map(
+			(id) => harness.databaseData.tags.find((tag) => tag.id === id)?.name,
+		),
+		["交易员", "分析师"],
+	);
+	const snapshotPayload = JSON.parse(harness.fetchCalls[1].options.body);
+	assert.equal(
+		snapshotPayload.remarks.some((row) => row.identifier === "synthetic-user"),
+		true,
+	);
+	assert.equal(harness.storage.has("birdclawXRemarkPendingMutation"), false);
+	assert.deepEqual(JSON.parse(harness.fetchCalls[2].options.body), {
+		applied: [7],
+		conflicts: [],
+	});
+});
+
+test("keeps a newer X Remark edit when the BirdClaw baseline no longer matches", async () => {
+	const harness = await createHarness({
+		responses: [
+			{
+				ok: true,
+				status: 200,
+				json: async () => ({
+					ok: true,
+					latestRevision: 9,
+					changes: [
+						{
+							revision: 9,
+							identifier: "synthetic-user",
+							handle: "synthetic",
+							displayName: "Synthetic",
+							remark: "BirdClaw target",
+							description: "",
+							tags: [],
+							category: null,
+							base: { exists: false },
+							updatedAt: "2026-08-18T08:01:00.000Z",
+						},
+					],
+				}),
+			},
+			{ ok: true, status: 200 },
+			{ ok: true, status: 200 },
+		],
+	});
+
+	await harness.fireAlarm("birdclaw-xremark-heartbeat");
+
+	assert.equal(
+		harness.databaseData.remarks[0].remark,
+		"Synthetic private note",
+	);
+	assert.deepEqual(JSON.parse(harness.fetchCalls[2].options.body), {
+		applied: [],
+		conflicts: [9],
+	});
+	assert.equal(harness.storage.get("birdclawXRemarkStatus").state, "conflict");
 });

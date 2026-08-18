@@ -178,7 +178,7 @@ describe("profile route", () => {
 		expect(screen.getByText(/Futurist/)).toBeInTheDocument();
 		expect(screen.getByText(/Contact hello@openai\.com/)).toBeInTheDocument();
 		expect(
-			await screen.findByRole("button", { name: "Special follow" }),
+			await screen.findByRole("button", { name: "特别关注" }),
 		).toHaveAttribute("aria-pressed", "false");
 		expect(await screen.findByText("Local-first builder")).toBeInTheDocument();
 		expect(

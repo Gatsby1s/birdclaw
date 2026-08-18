@@ -16,7 +16,7 @@ import {
 	type BackupJsonValue as JsonValue,
 } from "./backup-table-codecs";
 import { getBirdclawConfig } from "./config";
-import { getNativeDb } from "./db";
+import { getNativeDb, reconcileBirdclawXRemarkOutbox } from "./db";
 import { databaseWriteEffect } from "./database-writer";
 import { runEffectPromise, tryPromise } from "./effect-runtime";
 import { getImportRepository } from "./import-repository";
@@ -937,6 +937,114 @@ function rowsForManifestPath(
 		.sort();
 }
 
+function prepareProfileNoteBackupMerge(db: Database, rows: JsonRecord[]) {
+	const stableIdentifier = (value: unknown) => {
+		const candidate = typeof value === "string" ? value.trim() : "";
+		if (/^\d+$/.test(candidate)) return candidate;
+		return candidate.match(/^profile_user_(\d+)$/)?.[1] ?? "";
+	};
+	const stringArray = (value: unknown) => {
+		try {
+			const parsed = JSON.parse(
+				typeof value === "string" ? value : "[]",
+			) as unknown;
+			return Array.isArray(parsed)
+				? parsed.filter((item): item is string => typeof item === "string")
+				: [];
+		} catch {
+			return [];
+		}
+	};
+	const existingLookup = db.prepare(
+		`select note_key, identifier, additional_name, remark, description,
+		        tags_json, category_name, sync_revision, base_json, updated_at
+		 from birdclaw_profile_notes where note_key = ?`,
+	);
+	const importedLookup = db.prepare(
+		`select description, tags_json, category_name
+		 from xremark_profile_notes
+		 where (? <> '' and identifier = ?)
+		    or (? = '' and lower(additional_name) = lower(?))
+		 order by case when identifier = ? then 0 else 1 end
+		 limit 1`,
+	);
+	const invalidate = db.prepare(
+		`update birdclaw_profile_notes
+		 set sync_revision = null, base_json = ?
+		 where note_key = ? and sync_revision = ?`,
+	);
+	for (const row of rows) {
+		const noteKey = typeof row.note_key === "string" ? row.note_key : "";
+		const incomingUpdatedAt =
+			typeof row.updated_at === "string" ? row.updated_at : "";
+		if (!noteKey || !incomingUpdatedAt) continue;
+		const existing = existingLookup.get(noteKey) as
+			| {
+					note_key: string;
+					identifier: string | null;
+					additional_name: string;
+					remark: string;
+					description: string | null;
+					tags_json: string | null;
+					category_name: string | null;
+					sync_revision: number | null;
+					base_json: string | null;
+					updated_at: string;
+			  }
+			| undefined;
+		if (!existing?.sync_revision || incomingUpdatedAt < existing.updated_at) {
+			continue;
+		}
+		const identifier = stableIdentifier(existing.identifier);
+		const imported = importedLookup.get(
+			identifier,
+			identifier,
+			identifier,
+			existing.additional_name,
+			identifier,
+		) as
+			| {
+					description: string;
+					tags_json: string;
+					category_name: string | null;
+			  }
+			| undefined;
+		const previousTarget = {
+			exists: true,
+			remark: existing.remark,
+			description: existing.description ?? imported?.description ?? "",
+			tags:
+				existing.tags_json == null
+					? stringArray(imported?.tags_json)
+					: stringArray(existing.tags_json),
+			category: existing.category_name ?? imported?.category_name ?? null,
+		};
+		const target =
+			!previousTarget.remark &&
+			!previousTarget.description &&
+			previousTarget.tags.length === 0 &&
+			!previousTarget.category
+				? { exists: false }
+				: previousTarget;
+		let bases: unknown[] = [];
+		try {
+			const parsed = JSON.parse(existing.base_json ?? "") as unknown;
+			bases = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+		} catch {
+			bases = [];
+		}
+		const targetKey = JSON.stringify(target);
+		if (!bases.some((base) => JSON.stringify(base) === targetKey)) {
+			bases.push(target);
+		}
+		invalidate.run(
+			JSON.stringify(bases),
+			existing.note_key,
+			existing.sync_revision,
+		);
+	}
+}
+
 export function importBackupEffect({
 	repoPath,
 	db: providedDb,
@@ -983,6 +1091,11 @@ export function importBackupEffect({
 			const repository = getImportRepository(writeDb);
 			if (mode === "replace") {
 				repository.clearBackupImport();
+			} else {
+				prepareProfileNoteBackupMerge(
+					writeDb,
+					importRows.birdclaw_profile_notes,
+				);
 			}
 			const existingFtsIds = new Map<string, Set<string>>();
 			for (const codec of BACKUP_TABLE_CODECS) {
@@ -1011,6 +1124,7 @@ export function importBackupEffect({
 					existingIds: existingFtsIds.get(codec.name),
 				});
 			}
+			reconcileBirdclawXRemarkOutbox(writeDb);
 			return getBackupDatabaseFingerprint(writeDb);
 		}, db);
 

@@ -98,6 +98,18 @@ describe("api X Remark route", () => {
 		for (const body of [
 			{ handle: "Ada", remark: "r".repeat(81), description: "" },
 			{ handle: "Ada", remark: "", description: "d".repeat(301) },
+			{
+				handle: "Ada",
+				remark: "",
+				description: "",
+				tags: Array.from({ length: 201 }, (_, index) => `tag-${String(index)}`),
+			},
+			{
+				handle: "Ada",
+				remark: "",
+				description: "",
+				tags: ["t".repeat(201)],
+			},
 		]) {
 			const response = await PATCH({
 				request: new Request("http://localhost/api/xremark", {
@@ -108,6 +120,26 @@ describe("api X Remark route", () => {
 			});
 			expect(response.status).toBe(400);
 		}
+	});
+
+	it("saves quick tags as names and removes duplicates", async () => {
+		const response = await PATCH({
+			request: new Request("http://localhost/api/xremark", {
+				method: "PATCH",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					identifier: "profile_user_42",
+					handle: "Ada",
+					remark: "Trader",
+					description: "",
+					tags: ["交易员", "分析师", "交易员"],
+				}),
+			}),
+		});
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			annotation: { tags: ["交易员", "分析师"] },
+		});
 	});
 
 	it("imports a valid X Remark backup and reports its status", async () => {

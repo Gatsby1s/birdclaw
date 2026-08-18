@@ -1487,7 +1487,12 @@ export async function importLocalCloudBridgeBatch(input: unknown) {
 				row.updatedAt,
 			);
 		}
-		if (batch.xRemarkSnapshot) {
+		const directXRemarkPairing = db
+			.prepare(
+				"select token_hash as tokenHash from xremark_live_sync where id = 1",
+			)
+			.get() as { tokenHash: string | null } | undefined;
+		if (batch.xRemarkSnapshot && !directXRemarkPairing?.tokenHash) {
 			db.prepare("delete from xremark_profile_notes").run();
 			for (const annotation of batch.xRemarkSnapshot.annotations) {
 				insertXRemarkAnnotation.run(

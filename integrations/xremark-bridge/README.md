@@ -8,7 +8,7 @@ Both generated copies keep the official manifest `key`, so Chrome derives the sa
 
 1. Use X Remark's own backup/export feature once. Keeping a fresh backup is the safest rollback.
 2. Keep the official extension installed. Do **not** uninstall or remove it: Chrome can delete extension-origin IndexedDB data during uninstall.
-3. Start BirdClaw on `http://127.0.0.1:3001` and create/copy an X Remark pairing token from BirdClaw.
+3. Open BirdClaw Settings on Railway and create/copy an X Remark pairing token.
 4. Use the same Chrome profile in which the X Remark notes already exist. Extension storage is profile-specific.
 
 ## Locate the official extension directory
@@ -76,12 +76,14 @@ The injected background bridge:
 
 - listens for X Remark's existing remark, tag, and category mutation messages;
 - observes direct sidepanel IndexedDB `add`, `put`, `delete`, `clear`, cursor `update`, and cursor `delete` calls without changing their return values. Multiple writes in one transaction produce one notification, only after that transaction completes successfully;
-- debounces bursts for 800 ms and reads a full, read-only IndexedDB snapshot from `xRemark` stores `remarks`, `tags`, and `categories`;
+- debounces bursts for 800 ms and reads a full IndexedDB snapshot from `xRemark` stores `remarks`, `tags`, and `categories`;
 - persists pending mutation state before the debounce, preventing heartbeat, retry, pairing, or manual-sync paths from sending a pre-mutation snapshot. Pending mutation counts advance the persistent `sequence` only when the post-debounce snapshot is captured;
 - persists the latest full snapshot in a local outbox before sending it;
-- posts to `http://127.0.0.1:3001/api/integrations/xremark/snapshot` with `Authorization: Bearer <token>`;
+- posts directly to BirdClaw Railway with `Authorization: Bearer <token>`;
 - retries failures with a Chrome alarm and keeps the outbox until BirdClaw accepts it;
-- sends a fresh full-snapshot heartbeat at least every five minutes while paired. Heartbeats keep the existing sequence; a newer `capturedAt` lets BirdClaw reapply the current full snapshot and update `lastSeenAt` without advancing the mutation sequence.
+- polls every 30 seconds for BirdClaw-authored changes, maps tag names to X Remark tag IDs, writes the note in one IndexedDB transaction, then uploads the resulting full snapshot before acknowledging the change;
+- compares every BirdClaw change with the X Remark value captured when editing began. If X changed in the meantime, the bridge keeps the newer X value and reports a conflict instead of silently overwriting it;
+- sends a fresh full-snapshot heartbeat every 30 seconds while paired. Heartbeats keep the existing sequence; a newer `capturedAt` lets BirdClaw reapply the current full snapshot and update `lastSeenAt` without advancing the mutation sequence.
 
 The snapshot body has this shape:
 
@@ -102,7 +104,7 @@ The snapshot body has this shape:
 }
 ```
 
-The bridge never writes to X Remark's IndexedDB. If database enumeration is unavailable, an unexpected `onupgradeneeded` event is aborted so opening a missing database cannot create one. The bridge does not log snapshots, note contents, or pairing tokens. A failed snapshot remains only in the generated extension's local `chrome.storage.local` outbox so it can be retried.
+The bridge writes only authenticated BirdClaw note changes to the existing X Remark `remarks` and `tags` stores. It never changes the database schema. If database enumeration is unavailable, an unexpected `onupgradeneeded` event is aborted so opening a missing database cannot create one. The bridge does not log snapshots, note contents, or pairing tokens. A failed snapshot remains only in the generated extension's local `chrome.storage.local` outbox so it can be retried.
 
 ## Verify
 
@@ -112,7 +114,7 @@ The tests use synthetic fixtures only:
 node --test integrations/xremark-bridge/test/*.test.mjs
 ```
 
-They verify manifest-key preservation, byte-identical managed-source metadata, vanilla rollback output, independent marker/overwrite safety, permission patching, worker and pre-module sidepanel injection, direct/bulk IndexedDB transactions, mutation debounce, alarm/manual-sync race gates, missing-database aborts, the API contract, private-data-free status/logging, persistent retry, pairing, and the five-minute same-sequence heartbeat.
+They verify manifest-key preservation, byte-identical managed-source metadata, vanilla rollback output, independent marker/overwrite safety, permission patching, worker and pre-module sidepanel injection, direct/bulk IndexedDB transactions, mutation debounce, alarm/manual-sync race gates, missing-database aborts, the API contract, tag-ID mapping, conflict protection, private-data-free status/logging, persistent retry, pairing, and the 30-second same-sequence heartbeat.
 
 ## Compatibility notes
 
