@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 0.10.0 - 2026-08-18
+
+### Added
+
+- Add private, account-scoped Lists beside Home with create, rename, delete, member search, and member management flows.
+- Read each List as a searchable, paginated timeline of already-synced Home posts, and add profiles to Lists directly from author and profile pages.
+
+### Changed
+
+- Put Lists between Home and Feed in the desktop navigation and in the mobile More menu without displacing the primary mobile tabs.
+- Preserve Lists, membership state, and removal tombstones through schema v21 migration and portable backup schema v12.
+
+### Fixed
+
+- Refresh the currently selected BirdClaw account from a List instead of silently refreshing the default account.
+- Keep List APIs account-isolated and retain stable profile identities when handles change or are reused.
+
 ## 0.9.4 - 2026-08-18
 
 ### Added
