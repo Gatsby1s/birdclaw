@@ -5,7 +5,7 @@ This integration builds two local copies of the user-installed official Twillot 
 - a BirdClaw bridge that claims queued history jobs and reads Twillot's extension-origin IndexedDB **read-only**;
 - a vanilla rollback copy with the official Twillot code and no BirdClaw assets.
 
-The builder never edits or overwrites Chrome's managed extension directory. Both generated copies preserve the official manifest `key`, so Chrome derives Twillot's audited extension ID `flkokionhgagpmnhlngldhbfnblmenen`. That exact origin is the only extension origin accepted by BirdClaw's loopback endpoint.
+The builder never edits or overwrites Chrome's managed extension directory. Both generated copies preserve the official manifest `key`, so Chrome derives Twillot's audited extension ID `flkokionhgagpmnhlngldhbfnblmenen`. That exact origin is the only extension origin accepted by BirdClaw's companion endpoint.
 
 ## Safety boundary
 
@@ -16,11 +16,12 @@ The companion:
 - opens all IndexedDB transactions as `readonly` and never calls `put`, `add`, `delete`, or `clear`;
 - never reads `chrome.storage.session`, X authorization headers, cookies, or Twillot/X private APIs;
 - never clicks Twillot's **Start** button. The page companion only shows a lightweight prompt and tells the worker that the matching page is open;
-- sends data only to a configured uncredentialed `http://127.0.0.1`, `http://localhost`, or `http://[::1]` endpoint;
+- sends data only to BirdClaw's exact production HTTPS endpoint or a configured uncredentialed `http://127.0.0.1`, `http://localhost`, or `http://[::1]` development endpoint;
 - stores the pairing token only in the generated extension's `chrome.storage.local` and never displays or logs it;
 - records the existing per-user `lastSyncTime` when a job is claimed and does not open the export page until that baseline read succeeds; it then waits for a strictly newer value that remains unchanged across two scans at least five seconds apart before it reads any posts;
 - keeps freshness baselines/approvals isolated by BirdClaw job and target, so interleaved queue jobs cannot overwrite one another;
-- projects every IndexedDB row onto BirdClaw's explicit post/media whitelist; raw rows, `_data`, `quoted_tweet`, `conversations`, unknown fields, and other private nested data are never uploaded;
+- projects every IndexedDB row onto BirdClaw's explicit post/media whitelist; raw rows, `_data`, `conversations`, unknown fields, and other private nested data are never uploaded. Quoted posts use a separate strict one-level whitelist;
+- excludes `video` and `animated_gif` media plus all `video_info` variants while retaining the surrounding post text and references;
 - persists one exact batch in a local outbox before POST and retries the same stable `batchId` with exponential backoff from 30 seconds to a 15-minute ceiling;
 - discards the batch lease after every accepted batch and reclaims the server-owned cursor before reading the next batch; a `409 STALE_LEASE` safely drops only the stale outbox/lease and also reclaims;
 - treats storage-not-ready and temporary IndexedDB read failures as retryable. Only audited version/schema, missing cursor, record-limit, or body-size violations are reported as permanent job errors;
@@ -29,7 +30,7 @@ The companion:
 
 The copied official Twillot code retains its existing X/Twillot permissions because the copy must remain a functioning Twillot extension. The BirdClaw injection adds only `alarms`, loopback host access, an options page, and a prompt content script. It does not use the official extension's X credentials.
 
-The upload projection permits only `id`, `tweet_id`, `conversation_id`, `owner_id`, `user_id`, `category_name`, `sort_index`, `created_at`, `full_text`, `screen_name`, `username`, `avatar_url`, `lang`, `views_count`, `bookmark_count`, `favorite_count`, `quote_count`, `reply_count`, `retweet_count`, `is_reply`, `is_quote`, `reply_to_id`, `quoted_tweet_id`, normalized `entities`, and normalized `media_items`. Each media item permits only `media_key`, `id`, `type`, `url`, `preview_image_url`, `media_url`, `media_url_https`, `width`, `height`, and normalized `video_info`.
+The upload projection permits only `id`, `tweet_id`, `conversation_id`, `owner_id`, `user_id`, `category_name`, `sort_index`, `created_at`, `full_text`, `screen_name`, `username`, `avatar_url`, `lang`, `views_count`, `bookmark_count`, `favorite_count`, `quote_count`, `reply_count`, `retweet_count`, `is_reply`, `is_quote`, `reply_to_id`, `quoted_tweet_id`, normalized `entities`, normalized photo `media_items`, and a one-level normalized `quoted_tweet`. Each photo item permits only `media_key`, `id`, `type`, `url`, `preview_image_url`, `media_url`, `media_url_https`, `width`, and `height`.
 
 `tweet_id` must come from an audited Twillot tweet identifier (`tweet_id`, `rest_id`, legacy `id_str`, or a bare numeric primary ID). A composite IndexedDB key such as `<tweet>_<owner>_public-post` is never used as `tweet_id`; a row without a valid identifier fails closed. Distinct media `media_key` and `id` values remain distinct.
 
@@ -38,7 +39,7 @@ The upload projection permits only `id`, `tweet_id`, `conversation_id`, `owner_i
 1. Keep the official Twillot extension installed. Do **not** uninstall or click **Remove**; uninstalling an extension can delete its extension-origin IndexedDB.
 2. Open `chrome://extensions`, enable **Developer mode**, and confirm Twillot is version `11.0.7` with ID `flkokionhgagpmnhlngldhbfnblmenen`.
 3. Open `chrome://version` and note the active **Profile Path**. Extension storage is profile-specific.
-4. Start BirdClaw on `http://127.0.0.1:3001` and create a Twillot companion pairing token in BirdClaw settings.
+4. Open BirdClaw Cloud Settings and create a Twillot companion pairing token.
 
 The official version directory normally looks like:
 
@@ -80,7 +81,7 @@ The builder refuses symlinks/special files, nested source/output paths, an unrec
 1. In `chrome://extensions`, click **Load unpacked** and select `~/.birdclaw/twillot-bridge`.
 2. Chrome may replace the active code for the same extension ID. That is expected; do not click **Remove**.
 3. Open the extension's **Options** page.
-4. Keep the default endpoint `http://127.0.0.1:3001/api/integrations/twillot-history`, paste BirdClaw's pairing token, and choose **Save and check queue**.
+4. Keep the default endpoint `https://birdclaw-production.up.railway.app/api/integrations/twillot-history`, paste BirdClaw's pairing token, and choose **Save and check queue**.
 
 The worker creates one stable `sourceId`, then:
 
@@ -89,8 +90,8 @@ The worker creates one stable `sourceId`, then:
 3. only after the baseline is safe, opens the queued account's official Twillot export page and waits for the user to click Twillot's **Start** control;
 4. compares the matching `public-post_<externalUserId>_*_lastSyncTime` with the baseline captured at claim; an old cached value cannot start or complete an import;
 5. after a strictly newer value is observed, waits for the same value in a second scan at least five seconds later, then streams only `category_name="public-post"` rows whose `user_id` and `screen_name` match the leased BirdClaw job;
-6. posts `heartbeat`, `batch`, or `error` actions to the same loopback endpoint;
-7. sends only `id`, tweet/account identifiers, counts/flags, text metadata, normalized `entities`, and normalized `media_items`; it never serializes the full IndexedDB row;
+6. posts `heartbeat`, `batch`, or `error` actions to the same companion endpoint;
+7. sends only `id`, tweet/account identifiers, counts/flags, text metadata, normalized `entities`, photo media, and one-level quoted-post context; it never serializes the full IndexedDB row or video media;
 8. after BirdClaw accepts a stable batch, drops the old lease and issues a new GET so the server returns the authoritative next cursor and allowance;
 9. stops when the day's lease allowance is exhausted. The persistent server queue makes the account eligible again after the next Asia/Shanghai quota reset.
 

@@ -186,6 +186,7 @@ function patchManifest(manifest) {
 	]);
 	patched.host_permissions = uniqueStrings([
 		...(patched.host_permissions || []),
+		"https://birdclaw-production.up.railway.app/*",
 		"http://127.0.0.1/*",
 		"http://localhost/*",
 	]);

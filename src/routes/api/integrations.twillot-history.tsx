@@ -13,6 +13,8 @@ import { TwillotHistoryQueueError } from "#/lib/twillot-history-queue";
 
 export const TWILLOT_EXTENSION_ID = "flkokionhgagpmnhlngldhbfnblmenen";
 export const TWILLOT_EXTENSION_ORIGIN = `chrome-extension://${TWILLOT_EXTENSION_ID}`;
+export const TWILLOT_CLOUD_ORIGIN =
+	"https://birdclaw-production.up.railway.app";
 const MAX_BATCH_BYTES = 16 * 1024 * 1024;
 
 function corsHeaders() {
@@ -34,16 +36,36 @@ function bridgeResponse(data: unknown, init?: ResponseInit) {
 
 function bridgeRequestDenied(request: Request) {
 	const url = new URL(request.url);
+	const isLoopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(
+		url.hostname,
+	);
+	const forwardedHost = request.headers
+		.get("x-forwarded-host")
+		?.split(",")[0]
+		?.trim()
+		.toLowerCase();
+	const forwardedProto = request.headers
+		.get("x-forwarded-proto")
+		?.split(",")[0]
+		?.trim()
+		.toLowerCase();
+	const cloudHost = new URL(TWILLOT_CLOUD_ORIGIN).hostname;
+	const isCloud =
+		url.origin === TWILLOT_CLOUD_ORIGIN ||
+		(forwardedHost === cloudHost && forwardedProto === "https");
+	const hasForwardingHeaders = [
+		"forwarded",
+		"x-forwarded-for",
+		"x-forwarded-host",
+		"x-forwarded-proto",
+		"x-real-ip",
+	].some((header) => request.headers.has(header));
 	if (
-		!["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname) ||
-		request.headers.has("forwarded") ||
-		request.headers.has("x-forwarded-for") ||
-		request.headers.has("x-forwarded-host") ||
-		request.headers.has("x-forwarded-proto") ||
-		request.headers.has("x-real-ip")
+		(!isLoopback && !isCloud) ||
+		(isLoopback && hasForwardingHeaders && !isCloud)
 	) {
 		return jsonResponse(
-			{ ok: false, message: "Twillot history sync is loopback-only." },
+			{ ok: false, message: "Untrusted Twillot companion endpoint." },
 			{ status: 403 },
 		);
 	}

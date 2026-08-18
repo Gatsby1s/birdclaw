@@ -246,7 +246,22 @@ describe("Twillot companion", () => {
 					id: "video-1",
 					media_url: "https://pbs.twimg.com/duplicate.jpg",
 				},
+				{
+					id: "photo-1",
+					type: "photo",
+					media_url_https: "https://pbs.twimg.com/photo.jpg",
+					width: 1200,
+					height: 800,
+				},
 			],
+			quoted_tweet: {
+				tweet_id: "248",
+				user_id: "84",
+				created_at: 1_699_000_000,
+				full_text: "Quoted context",
+				screen_name: "quoted_author",
+				username: "Quoted Author",
+			},
 		});
 		const mapped = twillotRecordsToTweetPayload([rich]);
 		expect(mapped.data[0]).toMatchObject({
@@ -265,18 +280,24 @@ describe("Twillot companion", () => {
 		});
 		expect(mapped.includes?.media).toEqual([
 			expect.objectContaining({
-				media_key: "video-1",
-				width: 640,
-				height: 360,
-				variants: [
-					{
-						url: "https://video.twimg.com/a.mp4",
-						content_type: "video/mp4",
-						bit_rate: 832000,
-					},
-				],
+				media_key: "photo-1",
+				type: "photo",
+				width: 1200,
+				height: 800,
 			}),
 		]);
+		expect(mapped.includes?.tweets).toEqual([
+			expect.objectContaining({
+				id: "248",
+				author_id: "84",
+				text: "Quoted context",
+			}),
+		]);
+		expect(mapped.includes?.users).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: "84", username: "quoted_author" }),
+			]),
+		);
 		const fallback = twillotRecordsToTweetPayload([
 			record("301", {
 				created_at: 9_000_000_000_000_000,
@@ -322,11 +343,7 @@ describe("Twillot companion", () => {
 			}),
 		]);
 		expect(stringFallback.data[0]?.created_at).toBe("not-a-date");
-		expect(stringFallback.includes?.media?.[0]).toMatchObject({
-			media_key: "302:0",
-			type: "photo",
-			url: "https://pbs.twimg.com/default-type.jpg",
-		});
+		expect(stringFallback.includes?.media).toEqual([]);
 		const minimal = twillotRecordsToTweetPayload([
 			record("303", {
 				conversation_id: undefined,
@@ -343,11 +360,7 @@ describe("Twillot companion", () => {
 			record("304", { media_items: undefined }),
 		]);
 		expect(minimal.data[0]?.conversation_id).toBe("303");
-		expect(minimal.includes?.media?.[0]).toMatchObject({
-			media_key: "url-only",
-			url: "https://pbs.twimg.com/url-only.jpg",
-		});
-		expect(minimal.includes?.media?.[0]?.preview_image_url).toBeUndefined();
+		expect(minimal.includes?.media).toEqual([]);
 	});
 
 	it("handles heartbeat and permanent worker error submissions", () => {

@@ -3,7 +3,8 @@
 
 	const PROTOCOL_VERSION = 1;
 	const DEFAULT_ENDPOINT =
-		"http://127.0.0.1:3001/api/integrations/twillot-history";
+		"https://birdclaw-production.up.railway.app/api/integrations/twillot-history";
+	const CLOUD_ENDPOINT = DEFAULT_ENDPOINT;
 	const DATABASE_NAME = "twillot";
 	const DATABASE_VERSION = 41;
 	const POSTS_STORE = "posts";
@@ -123,18 +124,21 @@
 		try {
 			parsed = new URL(String(value || DEFAULT_ENDPOINT));
 		} catch {
-			throw new CompanionError("Enter a valid BirdClaw loopback endpoint.");
+			throw new CompanionError("Enter a valid BirdClaw companion endpoint.");
 		}
+		const isLoopback =
+			parsed.protocol === "http:" &&
+			["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname);
+		const isCloud = parsed.toString().replace(/\/$/, "") === CLOUD_ENDPOINT;
 		if (
-			parsed.protocol !== "http:" ||
-			!["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname) ||
+			(!isLoopback && !isCloud) ||
 			parsed.username ||
 			parsed.password ||
 			parsed.search ||
 			parsed.hash
 		) {
 			throw new CompanionError(
-				"The endpoint must be an uncredentialed http:// loopback URL.",
+				"Use the official BirdClaw cloud endpoint or an uncredentialed http:// loopback URL.",
 			);
 		}
 		parsed.pathname = parsed.pathname.replace(/\/+$/, "");
@@ -745,6 +749,28 @@
 			...(Array.isArray(raw.media_items) ? raw.media_items : []),
 			...(Array.isArray(extended?.media) ? extended.media : []),
 		];
+		const blockedVideoKeys = new Set();
+		for (const candidate of candidates) {
+			const item = asPlainRecord(candidate);
+			if (!item) continue;
+			const type = stringValue(item.type);
+			if (
+				type !== "video" &&
+				type !== "animated_gif" &&
+				(type === "photo" || !projectVideoInfo(item.video_info))
+			)
+				continue;
+			const key = stringValue(
+				item.media_key ??
+					item.id ??
+					item.id_str ??
+					item.url ??
+					item.preview_image_url ??
+					item.media_url_https ??
+					item.media_url,
+			);
+			if (key) blockedVideoKeys.add(key);
+		}
 		const seen = new Set();
 		const result = [];
 		for (const candidate of candidates) {
@@ -761,12 +787,19 @@
 				continue;
 			const dedupeKey =
 				mediaKey ?? id ?? url ?? preview ?? mediaUrlHttps ?? mediaUrl;
+			if (blockedVideoKeys.has(dedupeKey)) continue;
 			if (seen.has(dedupeKey)) continue;
-			seen.add(dedupeKey);
 			const type = stringValue(item.type);
+			const videoInfo = projectVideoInfo(item.video_info);
+			if (
+				type === "video" ||
+				type === "animated_gif" ||
+				(type !== "photo" && videoInfo)
+			)
+				continue;
+			seen.add(dedupeKey);
 			const width = nonNegativeInteger(item.width);
 			const height = nonNegativeInteger(item.height);
-			const videoInfo = projectVideoInfo(item.video_info);
 			result.push({
 				...(mediaKey ? { media_key: mediaKey } : {}),
 				...(id ? { id } : {}),
@@ -777,9 +810,68 @@
 				...(mediaUrlHttps ? { media_url_https: mediaUrlHttps } : {}),
 				...(width !== null ? { width } : {}),
 				...(height !== null ? { height } : {}),
-				...(videoInfo ? { video_info: videoInfo } : {}),
 			});
 		}
+		return result;
+	}
+
+	function projectQuotedPost(value) {
+		const raw = asPlainRecord(value);
+		if (!raw) return undefined;
+		const tweetId = stringValue(raw.tweet_id ?? raw.rest_id ?? raw.id);
+		const userId = stringValue(raw.user_id);
+		const screenName = stringValue(raw.screen_name);
+		const fullText = typeof raw.full_text === "string" ? raw.full_text : null;
+		const createdAt = raw.created_at;
+		if (
+			!tweetId ||
+			!/^\d+$/.test(tweetId) ||
+			!userId ||
+			!screenName ||
+			!fullText ||
+			fullText.length > 100_000 ||
+			!(typeof createdAt === "string" || typeof createdAt === "number")
+		) {
+			throw new PermanentCaptureError(
+				"A quoted Twillot post failed schema checks.",
+			);
+		}
+		const result = {
+			tweet_id: tweetId,
+			user_id: userId,
+			created_at: createdAt,
+			full_text: fullText,
+			screen_name: screenName,
+		};
+		for (const [key, item] of Object.entries({
+			conversation_id: raw.conversation_id,
+			username: raw.username,
+			avatar_url: raw.avatar_url,
+			lang: raw.lang,
+			reply_to_id: raw.reply_to_id,
+			quoted_tweet_id: raw.quoted_tweet_id,
+		})) {
+			const normalized = stringValue(item);
+			if (normalized) result[key] = normalized;
+		}
+		for (const key of [
+			"views_count",
+			"bookmark_count",
+			"favorite_count",
+			"quote_count",
+			"reply_count",
+			"retweet_count",
+		]) {
+			const count = nonNegativeInteger(raw[key]);
+			if (count !== null) result[key] = count;
+		}
+		for (const key of ["is_reply", "is_quote"]) {
+			if (typeof raw[key] === "boolean") result[key] = raw[key];
+		}
+		const entities = projectEntities(raw.entities);
+		if (entities) result.entities = entities;
+		const mediaItems = projectMediaItems(raw, {});
+		if (mediaItems.length) result.media_items = mediaItems;
 		return result;
 	}
 
@@ -870,6 +962,11 @@
 		if (entities) result.entities = entities;
 		const mediaItems = projectMediaItems(raw, legacy);
 		if (mediaItems.length) result.media_items = mediaItems;
+		const quotedPost = projectQuotedPost(raw.quoted_tweet);
+		if (quotedPost) {
+			result.quoted_tweet = quotedPost;
+			if (!result.quoted_tweet_id) result.quoted_tweet_id = quotedPost.tweet_id;
+		}
 		return result;
 	}
 
@@ -1520,6 +1617,7 @@
 			outboxRetryDelay,
 			pageMatchesJob,
 			projectPostRecord,
+			projectQuotedPost,
 			readPostBatch,
 			readSyncSettings,
 			scanActiveJob,

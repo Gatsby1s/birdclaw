@@ -10,6 +10,7 @@ import { enqueueTwillotHistoryJob } from "#/lib/twillot-history-queue";
 import { getRouteHandler } from "#/test/route-handlers";
 import {
 	Route,
+	TWILLOT_CLOUD_ORIGIN,
 	TWILLOT_EXTENSION_ORIGIN,
 } from "./integrations.twillot-history";
 
@@ -62,7 +63,7 @@ function headers(token: string) {
 }
 
 describe("Twillot extension bridge API", () => {
-	it("answers trusted preflight and rejects forwarded preflight", async () => {
+	it("answers trusted loopback and exact Railway preflight", async () => {
 		const allowed = await OPTIONS({
 			request: new Request(
 				"http://localhost:3001/api/integrations/twillot-history",
@@ -73,6 +74,28 @@ describe("Twillot extension bridge API", () => {
 		expect(allowed.headers.get("access-control-allow-origin")).toBe(
 			TWILLOT_EXTENSION_ORIGIN,
 		);
+		const cloud = await OPTIONS({
+			request: new Request(
+				`${TWILLOT_CLOUD_ORIGIN}/api/integrations/twillot-history`,
+				{ method: "OPTIONS", headers: { origin: TWILLOT_EXTENSION_ORIGIN } },
+			),
+		});
+		expect(cloud.status).toBe(204);
+		const railwayForwarded = await OPTIONS({
+			request: new Request(
+				"http://internal:3000/api/integrations/twillot-history",
+				{
+					method: "OPTIONS",
+					headers: {
+						origin: TWILLOT_EXTENSION_ORIGIN,
+						"x-forwarded-host": new URL(TWILLOT_CLOUD_ORIGIN).hostname,
+						"x-forwarded-proto": "https",
+						"x-forwarded-for": "203.0.113.2",
+					},
+				},
+			),
+		});
+		expect(railwayForwarded.status).toBe(204);
 		const denied = await OPTIONS({
 			request: new Request(
 				"http://localhost:3001/api/integrations/twillot-history",

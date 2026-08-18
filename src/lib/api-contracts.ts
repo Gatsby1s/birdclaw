@@ -788,7 +788,7 @@ export type TwillotProviderStatus = z.infer<typeof twillotProviderStatusSchema>;
 export const twillotManagementResponseSchema = z.object({
 	ok: z.literal(true),
 	endpoint: z.string().url(),
-	localQueueExecutor: z.literal(true),
+	localQueueExecutor: z.boolean(),
 	managementAvailable: z.boolean(),
 	token: z.string().optional(),
 	status: twillotProviderStatusSchema,
