@@ -44,13 +44,67 @@ function makeTempDir(prefix: string) {
 	return testHome().makeTempDir(prefix);
 }
 
+function ensureEditorialBackupTestSchema() {
+	const db = getNativeDb({ seedDemoData: false });
+	db.exec(`
+		create table if not exists feed_items (
+			id text primary key,
+			source text not null,
+			external_id text not null,
+			kind text not null check (kind in ('flash', 'article')),
+			title text not null,
+			summary text not null default '',
+			url text not null,
+			publisher text not null,
+			published_at text not null,
+			market text not null default '',
+			language text not null default 'zh-CN',
+			symbols_json text not null default '[]',
+			image_url text,
+			is_important integer not null default 0 check (is_important in (0, 1)),
+			content_hash text not null,
+			first_seen_at text not null,
+			updated_at text not null,
+			unique (source, kind, external_id)
+		);
+		create table if not exists feed_sync_state (
+			source text not null,
+			kind text not null check (kind in ('flash', 'article')),
+			status text not null check (status in ('idle', 'syncing', 'ready', 'error')),
+			last_started_at text,
+			last_success_at text,
+			last_item_at text,
+			last_error text,
+			updated_at text not null,
+			primary key (source, kind)
+		);
+	`);
+	for (const [table, column, definition] of [
+		["period_digest_history", "include_feed", "integer not null default 0"],
+		["period_digest_history", "feed_json", "text not null default '[]'"],
+		["weekly_digest_history", "include_feed", "integer not null default 0"],
+		["weekly_digest_history", "feed_json", "text not null default '[]'"],
+	] as const) {
+		const columns = db.prepare(`pragma table_info(${table})`).all() as Array<{
+			name: string;
+		}>;
+		if (!columns.some((item) => item.name === column)) {
+			db.exec(`alter table ${table} add column ${column} ${definition}`);
+		}
+	}
+}
+
 function switchHome(prefix: string) {
-	return testHome().switchHome(prefix).root;
+	const root = testHome().switchHome(prefix).root;
+	ensureEditorialBackupTestSchema();
+	return root;
 }
 
 function clearData() {
 	const db = getNativeDb();
 	db.exec(`
+	delete from feed_sync_state;
+	delete from feed_items;
 	delete from tweet_quality_score_requests;
 	delete from tweet_quality_scores;
 	delete from twillot_history_batches;
@@ -243,6 +297,32 @@ function seedBackupFixture() {
 	  '2025-01-09T00:45:00.000Z'
 	);
 
+	insert into feed_items (
+	  id, source, external_id, kind, title, summary, url, publisher,
+	  published_at, market, language, symbols_json, image_url, is_important,
+	  content_hash, first_seen_at, updated_at
+	) values
+	  ('tiger:flash:flash-1', 'tiger', 'flash-1', 'flash',
+	   'Important market flash', 'A verified editorial flash item.',
+	   'https://example.com/flash-1', 'Tiger News',
+	   '2025-01-08T08:00:00.000Z', 'US', 'zh-CN', '["AAPL"]', null, 1,
+	   'feed-hash-flash-1', '2025-01-08T08:01:00.000Z', '2025-01-08T08:01:00.000Z'),
+	  ('tiger:article:article-1', 'tiger', 'article-1', 'article',
+	   'Editorial market article', 'A concise article summary.',
+	   'https://example.com/article-1', 'Tiger News',
+	   '2025-01-09T08:00:00.000Z', 'US', 'zh-CN', '["NVDA"]',
+	   'https://example.com/article-1.jpg', 0, 'feed-hash-article-1',
+	   '2025-01-09T08:01:00.000Z', '2025-01-09T08:01:00.000Z');
+
+	insert into feed_sync_state (
+	  source, kind, status, last_started_at, last_success_at, last_item_at,
+	  last_error, updated_at
+	) values (
+	  'tiger', 'flash', 'ready', '2025-01-09T08:01:00.000Z',
+	  '2025-01-09T08:01:00.000Z', '2025-01-08T08:00:00.000Z', null,
+	  '2025-01-09T08:01:00.000Z'
+	);
+
     insert into discussion_history (
       id, root_id, parent_id, cache_key, title, summary, query, question,
       account, source, mode, range, since, until, include_dms,
@@ -265,34 +345,36 @@ function seedBackupFixture() {
 
     insert into period_digest_history (
       id, digest_date, timezone, status, attempt_count, window_since,
-      window_until, include_dms, provider, model, reasoning_effort,
+	  window_until, include_dms, include_feed, provider, model, reasoning_effort,
       service_tier, context_hash, counts_json, digest_json, markdown,
-      tweets_json, dms_json, links_json, started_at, finished_at,
+	  tweets_json, dms_json, links_json, feed_json, started_at, finished_at,
       created_at, updated_at
     ) values (
       'daily_2025_01_08', '2025-01-08', 'UTC', 'ready', 1,
-      '2025-01-08T00:00:00.000Z', '2025-01-09T00:00:00.000Z', 0,
+	  '2025-01-08T00:00:00.000Z', '2025-01-09T00:00:00.000Z', 0, 1,
       'openai', 'gpt-5.5', 'medium', 'priority', 'daily_hash',
-      '{"home":1,"mentions":0,"authored":0,"likes":0,"bookmarks":0,"dms":0,"links":0}',
+	  '{"home":1,"mentions":0,"authored":0,"likes":0,"bookmarks":0,"dms":0,"links":0,"feed":1}',
       '{"title":"Daily backup","summary":"Saved daily report","keyTopics":[],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[]}',
-      '# Daily backup', '[]', '[]', '[]',
+	  '# Daily backup', '[]', '[]', '[]',
+	  '[{"id":"tiger:flash:flash-1","title":"Important market flash"}]',
       '2025-01-09T00:00:00.000Z', '2025-01-09T00:01:00.000Z',
       '2025-01-09T00:00:00.000Z', '2025-01-09T00:01:00.000Z'
     );
 
     insert into weekly_digest_history (
       id, week_start, week_end, timezone, status, attempt_count, window_since,
-      window_until, include_dms, provider, model, reasoning_effort,
+	  window_until, include_dms, include_feed, provider, model, reasoning_effort,
       service_tier, context_hash, counts_json, digest_json, markdown,
-      tweets_json, dms_json, links_json, started_at, finished_at,
+	  tweets_json, dms_json, links_json, feed_json, started_at, finished_at,
       created_at, updated_at
     ) values (
       'weekly_2025_01_06', '2025-01-06', '2025-01-12', 'UTC', 'ready', 1,
-      '2025-01-06T00:00:00.000Z', '2025-01-13T00:00:00.000Z', 0,
+	  '2025-01-06T00:00:00.000Z', '2025-01-13T00:00:00.000Z', 0, 1,
       'openai', 'gpt-5.5', 'high', 'priority', 'weekly_hash',
-      '{"home":1,"mentions":0,"authored":0,"likes":0,"bookmarks":0,"dms":0,"links":0}',
+	  '{"home":1,"mentions":0,"authored":0,"likes":0,"bookmarks":0,"dms":0,"links":0,"feed":1}',
       '{"title":"Weekly backup","summary":"Saved weekly report","keyTopics":[],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[]}',
-      '# Weekly backup', '[]', '[]', '[]',
+	  '# Weekly backup', '[]', '[]', '[]',
+	  '[{"id":"tiger:article:article-1","title":"Editorial market article"}]',
       '2025-01-13T00:00:00.000Z', '2025-01-13T00:01:00.000Z',
       '2025-01-13T00:00:00.000Z', '2025-01-13T00:01:00.000Z'
     );
@@ -536,6 +618,7 @@ describe("text backup", () => {
 			birdclaw_profile_notes: 1,
 			birdclaw_profile_priorities: 1,
 			discussion_history: 1,
+			feed_items: 2,
 			period_digest_history: 1,
 			weekly_digest_history: 1,
 			follow_snapshots: 1,
@@ -606,6 +689,7 @@ describe("text backup", () => {
 		expect(
 			existsSync(path.join(repoPath, "data/discussions/history.jsonl")),
 		).toBe(true);
+		expect(existsSync(path.join(repoPath, "data/feed/items.jsonl"))).toBe(true);
 		expect(
 			existsSync(path.join(repoPath, "data/digests/weekly-history.jsonl")),
 		).toBe(true);
@@ -639,6 +723,22 @@ describe("text backup", () => {
       ) values (
         'dm', 'deleted-message', 0, 'https://t.co/stale', '2026-04-01T00:00:00.000Z'
       );
+	  insert into feed_items (
+		id, source, external_id, kind, title, summary, url, publisher,
+		published_at, market, language, symbols_json, image_url, is_important,
+		content_hash, first_seen_at, updated_at
+	  ) values (
+		'stale-feed', 'stale', 'stale-1', 'flash', 'Stale feed item', '',
+		'https://example.com/stale', 'Stale', '2026-04-01T00:00:00.000Z',
+		'', 'zh-CN', '[]', null, 1, 'stale-feed-hash',
+		'2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z'
+	  );
+	  insert into feed_sync_state (
+		source, kind, status, last_error, updated_at
+	  ) values (
+		'stale', 'flash', 'error', 'stale runtime state',
+		'2026-04-01T00:00:00.000Z'
+	  );
     `);
 		const imported = await importBackup({ repoPath, mode: "replace" });
 		const after = getBackupDatabaseFingerprint();
@@ -776,20 +876,23 @@ describe("text backup", () => {
 		expect(
 			getNativeDb({ seedDemoData: false })
 				.prepare(
-					"select digest_date, status, markdown from period_digest_history",
+					"select digest_date, status, include_feed, feed_json, markdown from period_digest_history",
 				)
 				.all(),
 		).toEqual([
 			{
 				digest_date: "2025-01-08",
 				status: "ready",
+				include_feed: 1,
+				feed_json:
+					'[{"id":"tiger:flash:flash-1","title":"Important market flash"}]',
 				markdown: "# Daily backup",
 			},
 		]);
 		expect(
 			getNativeDb({ seedDemoData: false })
 				.prepare(
-					"select week_start, week_end, status, markdown from weekly_digest_history",
+					"select week_start, week_end, status, include_feed, feed_json, markdown from weekly_digest_history",
 				)
 				.all(),
 		).toEqual([
@@ -797,9 +900,27 @@ describe("text backup", () => {
 				week_start: "2025-01-06",
 				week_end: "2025-01-12",
 				status: "ready",
+				include_feed: 1,
+				feed_json:
+					'[{"id":"tiger:article:article-1","title":"Editorial market article"}]',
 				markdown: "# Weekly backup",
 			},
 		]);
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare(
+					"select id, kind, is_important from feed_items order by published_at, id",
+				)
+				.all(),
+		).toEqual([
+			{ id: "tiger:flash:flash-1", kind: "flash", is_important: 1 },
+			{ id: "tiger:article:article-1", kind: "article", is_important: 0 },
+		]);
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare("select count(*) as count from feed_sync_state")
+				.get(),
+		).toEqual({ count: 0 });
 
 		const validation = await validateBackup(repoPath);
 		expect(validation.ok).toBe(true);
@@ -1036,7 +1157,7 @@ describe("text backup", () => {
 		).toEqual({ count: 0 });
 	}, 20000);
 
-	it("emits byte-identical schema-v10 data and still accepts schema v2", async () => {
+	it("emits byte-identical schema-v11 data and still accepts schema v2", async () => {
 		switchHome("birdclaw-backup-stable-src-");
 		seedBackupFixture();
 		const firstRepoPath = makeTempDir("birdclaw-backup-stable-first-");
@@ -1045,7 +1166,7 @@ describe("text backup", () => {
 		const first = await exportBackup({ repoPath: firstRepoPath });
 		const second = await exportBackup({ repoPath: secondRepoPath });
 
-		expect(first.manifest.schemaVersion).toBe(10);
+		expect(first.manifest.schemaVersion).toBe(11);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);
 		expect(second.manifest.backupHash).toBe(first.manifest.backupHash);
@@ -1059,6 +1180,65 @@ describe("text backup", () => {
 			JSON.stringify({ ...second.manifest, schemaVersion: 2 }, null, 2) + "\n",
 		);
 		expect((await validateBackup(secondRepoPath)).ok).toBe(true);
+	}, 20000);
+
+	it("imports schema-v10 history without feed fields or feed items", async () => {
+		switchHome("birdclaw-backup-legacy-feed-src-");
+		seedBackupFixture();
+		const repoPath = makeTempDir("birdclaw-backup-legacy-feed-repo-");
+		const exported = await exportBackup({ repoPath });
+
+		for (const relativePath of [
+			"data/digests/daily-history.jsonl",
+			"data/digests/weekly-history.jsonl",
+		]) {
+			const fullPath = path.join(repoPath, relativePath);
+			const row = JSON.parse(readFileSync(fullPath, "utf8")) as Record<
+				string,
+				unknown
+			>;
+			delete row.include_feed;
+			delete row.feed_json;
+			writeFileSync(fullPath, `${JSON.stringify(row)}\n`);
+		}
+		const feedPath = path.join(repoPath, "data/feed/items.jsonl");
+		rmSync(feedPath);
+		const manifestPath = path.join(repoPath, "manifest.json");
+		writeFileSync(
+			manifestPath,
+			`${JSON.stringify(
+				{
+					...exported.manifest,
+					schemaVersion: 10,
+					files: exported.manifest.files.filter(
+						(file) => file.path !== "data/feed/items.jsonl",
+					),
+				},
+				null,
+				2,
+			)}\n`,
+		);
+
+		switchHome("birdclaw-backup-legacy-feed-dest-");
+		await importBackup({ repoPath, mode: "replace", validate: false });
+		const destinationDb = getNativeDb({ seedDemoData: false });
+		expect(
+			destinationDb
+				.prepare(
+					"select include_feed, feed_json from period_digest_history where digest_date = '2025-01-08'",
+				)
+				.get(),
+		).toEqual({ include_feed: 0, feed_json: "[]" });
+		expect(
+			destinationDb
+				.prepare(
+					"select include_feed, feed_json from weekly_digest_history where week_start = '2025-01-06'",
+				)
+				.get(),
+		).toEqual({ include_feed: 0, feed_json: "[]" });
+		expect(
+			destinationDb.prepare("select count(*) as count from feed_items").get(),
+		).toEqual({ count: 0 });
 	}, 20000);
 
 	it("imports legacy weekly digest backups without a format version", async () => {
@@ -1302,6 +1482,7 @@ describe("text backup", () => {
 			birdclaw_profile_notes: 1,
 			birdclaw_profile_priorities: 1,
 			discussion_history: 1,
+			feed_items: 2,
 			period_digest_history: 1,
 			weekly_digest_history: 1,
 			follow_snapshots: 1,

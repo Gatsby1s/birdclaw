@@ -137,6 +137,17 @@ function sanitizeImportedUrlExpansions(rows: BackupJsonRecord[]) {
 	});
 }
 
+function sanitizeImportedFeedItems(rows: BackupJsonRecord[]) {
+	return rows.map((row) => ({
+		...row,
+		url: typeof row.url === "string" ? (safeHttpUrl(row.url) ?? "") : "",
+		image_url:
+			typeof row.image_url === "string"
+				? safeHttpUrl(row.image_url)
+				: (row.image_url ?? null),
+	}));
+}
+
 const definitions = {
 	accounts: {
 		exportSql: `
@@ -953,12 +964,67 @@ const definitions = {
 			],
 		},
 	},
+	feed_items: {
+		exportSql: `
+      select id, source, external_id, kind, title, summary, url, publisher,
+        published_at, market, language, symbols_json, image_url, is_important,
+        content_hash, first_seen_at, updated_at
+      from feed_items
+      order by published_at, id
+    `,
+		...fixedShard("data/feed/items.jsonl", "feed_items"),
+		merge: {
+			order: 30,
+			transform: sanitizeImportedFeedItems,
+			sql: `
+      insert into feed_items (
+        id, source, external_id, kind, title, summary, url, publisher,
+        published_at, market, language, symbols_json, image_url, is_important,
+        content_hash, first_seen_at, updated_at
+      ) values (?, ?, ?, ?, ?, coalesce(?, ''), ?, ?, ?, coalesce(?, ''), coalesce(?, 'zh-CN'), coalesce(?, '[]'), ?, coalesce(?, 0), ?, ?, ?)
+      on conflict(id) do update set
+        title = excluded.title,
+        summary = excluded.summary,
+        url = excluded.url,
+        publisher = excluded.publisher,
+        published_at = excluded.published_at,
+        market = excluded.market,
+        language = excluded.language,
+        symbols_json = excluded.symbols_json,
+        image_url = excluded.image_url,
+        is_important = excluded.is_important,
+        content_hash = excluded.content_hash,
+        first_seen_at = min(feed_items.first_seen_at, excluded.first_seen_at),
+        updated_at = excluded.updated_at
+      where excluded.updated_at >= feed_items.updated_at
+      `,
+			columns: [
+				"id",
+				"source",
+				"external_id",
+				"kind",
+				"title",
+				"summary",
+				"url",
+				"publisher",
+				"published_at",
+				"market",
+				"language",
+				"symbols_json",
+				"image_url",
+				"is_important",
+				"content_hash",
+				"first_seen_at",
+				"updated_at",
+			],
+		},
+	},
 	period_digest_history: {
 		exportSql: `
       select id, digest_date, timezone, status, attempt_count, window_since,
-        window_until, include_dms, provider, model, reasoning_effort,
+		window_until, include_dms, include_feed, provider, model, reasoning_effort,
         service_tier, context_hash, counts_json, digest_json, markdown,
-        tweets_json, dms_json, links_json, error, started_at, finished_at,
+		tweets_json, dms_json, links_json, feed_json, error, started_at, finished_at,
         created_at, updated_at
       from period_digest_history
       where status = 'ready'
@@ -970,11 +1036,11 @@ const definitions = {
 			sql: `
       insert into period_digest_history (
         id, digest_date, timezone, status, attempt_count, window_since,
-        window_until, include_dms, provider, model, reasoning_effort,
+		window_until, include_dms, include_feed, provider, model, reasoning_effort,
         service_tier, context_hash, counts_json, digest_json, markdown,
-        tweets_json, dms_json, links_json, error, started_at, finished_at,
+		tweets_json, dms_json, links_json, feed_json, error, started_at, finished_at,
         created_at, updated_at
-      ) values (?, ?, ?, 'ready', coalesce(?, 1), ?, ?, coalesce(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
+	  ) values (?, ?, ?, 'ready', coalesce(?, 1), ?, ?, coalesce(?, 0), coalesce(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
       on conflict(digest_date) do update set
         timezone = excluded.timezone,
         status = 'ready',
@@ -982,6 +1048,7 @@ const definitions = {
         window_since = excluded.window_since,
         window_until = excluded.window_until,
         include_dms = excluded.include_dms,
+		include_feed = excluded.include_feed,
         provider = excluded.provider,
         model = excluded.model,
         reasoning_effort = excluded.reasoning_effort,
@@ -993,6 +1060,7 @@ const definitions = {
         tweets_json = excluded.tweets_json,
         dms_json = excluded.dms_json,
         links_json = excluded.links_json,
+		feed_json = excluded.feed_json,
         error = null,
         started_at = excluded.started_at,
         finished_at = excluded.finished_at,
@@ -1008,6 +1076,7 @@ const definitions = {
 				"window_since",
 				"window_until",
 				"include_dms",
+				"include_feed",
 				"provider",
 				"model",
 				"reasoning_effort",
@@ -1019,6 +1088,7 @@ const definitions = {
 				"tweets_json",
 				"dms_json",
 				"links_json",
+				"feed_json",
 				"error",
 				"started_at",
 				"finished_at",
@@ -1030,9 +1100,9 @@ const definitions = {
 	weekly_digest_history: {
 		exportSql: `
 		select id, week_start, week_end, timezone, status, attempt_count, format_version,
-        window_since, window_until, include_dms, provider, model,
+		window_since, window_until, include_dms, include_feed, provider, model,
         reasoning_effort, service_tier, context_hash, counts_json,
-        digest_json, markdown, tweets_json, dms_json, links_json, error,
+		digest_json, markdown, tweets_json, dms_json, links_json, feed_json, error,
         started_at, finished_at, created_at, updated_at
       from weekly_digest_history
       where status = 'ready'
@@ -1044,11 +1114,11 @@ const definitions = {
 			sql: `
       insert into weekly_digest_history (
 		id, week_start, week_end, timezone, status, attempt_count, format_version,
-        window_since, window_until, include_dms, provider, model,
+		window_since, window_until, include_dms, include_feed, provider, model,
         reasoning_effort, service_tier, context_hash, counts_json,
-        digest_json, markdown, tweets_json, dms_json, links_json, error,
+		digest_json, markdown, tweets_json, dms_json, links_json, feed_json, error,
         started_at, finished_at, created_at, updated_at
-	  ) values (?, ?, ?, ?, 'ready', coalesce(?, 1), coalesce(?, 1), ?, ?, coalesce(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
+	  ) values (?, ?, ?, ?, 'ready', coalesce(?, 1), coalesce(?, 1), ?, ?, coalesce(?, 0), coalesce(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
       on conflict(week_start) do update set
 		week_end = excluded.week_end,
 		timezone = excluded.timezone,
@@ -1059,6 +1129,7 @@ const definitions = {
         window_since = excluded.window_since,
         window_until = excluded.window_until,
         include_dms = excluded.include_dms,
+		include_feed = excluded.include_feed,
         provider = excluded.provider,
         model = excluded.model,
         reasoning_effort = excluded.reasoning_effort,
@@ -1070,6 +1141,7 @@ const definitions = {
         tweets_json = excluded.tweets_json,
         dms_json = excluded.dms_json,
         links_json = excluded.links_json,
+		feed_json = excluded.feed_json,
         error = null,
         started_at = excluded.started_at,
         finished_at = excluded.finished_at,
@@ -1091,6 +1163,7 @@ const definitions = {
 				"window_since",
 				"window_until",
 				"include_dms",
+				"include_feed",
 				"provider",
 				"model",
 				"reasoning_effort",
@@ -1102,6 +1175,7 @@ const definitions = {
 				"tweets_json",
 				"dms_json",
 				"links_json",
+				"feed_json",
 				"error",
 				"started_at",
 				"finished_at",

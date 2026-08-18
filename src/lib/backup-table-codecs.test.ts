@@ -12,7 +12,7 @@ import {
 describe("backup table codecs", () => {
 	it("owns every portable table and path exactly once", () => {
 		expect(assertBackupTableCodecRegistry()).toBe(true);
-		expect(BACKUP_TABLE_CODECS).toHaveLength(30);
+		expect(BACKUP_TABLE_CODECS).toHaveLength(31);
 		expect(BACKUP_TABLE_CODECS.map((codec) => codec.name)).toEqual([
 			"accounts",
 			"profiles",
@@ -34,6 +34,7 @@ describe("backup table codecs", () => {
 			"birdclaw_profile_notes",
 			"birdclaw_profile_priorities",
 			"discussion_history",
+			"feed_items",
 			"period_digest_history",
 			"weekly_digest_history",
 			"follow_snapshots",
@@ -49,7 +50,7 @@ describe("backup table codecs", () => {
 			BACKUP_TABLE_CODECS.map((codec) => codec.merge.order).sort(
 				(left, right) => left - right,
 			),
-		).toEqual(Array.from({ length: 30 }, (_, index) => index));
+		).toEqual(Array.from({ length: 31 }, (_, index) => index));
 
 		const sample = { created_at: "2026-01-02T00:00:00.000Z", kind: "likes" };
 		for (const codec of BACKUP_TABLE_CODECS) {
@@ -57,6 +58,29 @@ describe("backup table codecs", () => {
 			expect(backupCodecForPath(relativePath)).toBe(codec);
 			expect(codec.countKey(relativePath)).not.toBe("");
 		}
+	});
+
+	it("sanitizes feed item URLs at the import boundary", () => {
+		const codec = BACKUP_TABLE_CODECS.find(
+			(candidate) => candidate.name === "feed_items",
+		);
+		const transform = codec?.merge.transform;
+		expect(transform).toBeTypeOf("function");
+		expect(
+			transform?.([
+				{
+					id: "tiger:flash:1",
+					url: "javascript:alert(1)",
+					image_url: "https://example.com/image.jpg",
+				},
+			]),
+		).toEqual([
+			{
+				id: "tiger:flash:1",
+				url: "",
+				image_url: "https://example.com/image.jpg",
+			},
+		]);
 	});
 
 	it("routes and counts a synthetic descriptor without central switches", () => {
