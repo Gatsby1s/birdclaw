@@ -173,4 +173,72 @@ describe("Lists route", () => {
 			),
 		);
 	});
+
+	it("refreshes Home for the selected non-default account", async () => {
+		window.localStorage.setItem("birdclaw:selected-account-id", "acct-other");
+		const list = {
+			id: "list-other",
+			accountId: "acct-other",
+			name: "Other account List",
+			description: "",
+			memberCount: 0,
+			createdAt: "2026-08-18T00:00:00.000Z",
+			updatedAt: "2026-08-18T00:00:00.000Z",
+		};
+		let syncBody: Record<string, unknown> | undefined;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = new URL(String(input), "http://localhost");
+				if (url.pathname === "/api/status") {
+					const payload = statusPayload();
+					payload.accounts.push({
+						id: "acct-other",
+						name: "Other",
+						handle: "@other",
+						transport: "archive",
+						isDefault: 0,
+						createdAt: "2026-08-18T00:00:00.000Z",
+					});
+					return Response.json(payload);
+				}
+				if (url.pathname === "/api/lists")
+					return Response.json({ lists: [list] });
+				if (url.pathname === "/api/list-feed") {
+					return Response.json({ list, items: [], hasMore: false });
+				}
+				if (url.pathname === "/api/sync" && init?.method === "POST") {
+					syncBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+					return Response.json({
+						id: "sync-other",
+						kind: "timeline",
+						accountId: "acct-other",
+						status: "succeeded",
+						startedAt: "2026-08-18T00:00:00.000Z",
+						finishedAt: "2026-08-18T00:00:01.000Z",
+						summary: "Synced other account",
+						inProgress: false,
+						result: {
+							ok: true,
+							kind: "timeline",
+							accountId: "acct-other",
+							startedAt: "2026-08-18T00:00:00.000Z",
+							finishedAt: "2026-08-18T00:00:01.000Z",
+							summary: "Synced other account",
+							steps: [],
+						},
+					});
+				}
+				throw new Error(`Unexpected fetch ${url.toString()}`);
+			}),
+		);
+
+		render(
+			<ListsRouteView searchState={{ list: "list-other", tab: "posts" }} />,
+		);
+		fireEvent.click(await screen.findByRole("button", { name: "刷新 Home" }));
+		await waitFor(() =>
+			expect(syncBody).toEqual({ kind: "timeline", accountId: "acct-other" }),
+		);
+	});
 });

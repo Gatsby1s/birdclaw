@@ -30,7 +30,11 @@ import {
 	profileListSummarySchema,
 } from "#/lib/api-contracts";
 import { queryKeys } from "#/lib/query-client";
-import type { ProfileListSummary, TimelineItem } from "#/lib/types";
+import type {
+	AccountRecord,
+	ProfileListSummary,
+	TimelineItem,
+} from "#/lib/types";
 import {
 	cx,
 	pageHeaderClass,
@@ -422,9 +426,11 @@ function ListMembers({
 
 function ListPosts({
 	accountId,
+	accounts,
 	list,
 }: {
 	accountId: string;
+	accounts: AccountRecord[];
 	list: ProfileListSummary;
 }) {
 	const queryClient = useQueryClient();
@@ -501,6 +507,7 @@ function ListPosts({
 					value={search}
 				/>
 				<SyncNowButton
+					accounts={accounts}
 					kind="timeline"
 					label="刷新 Home"
 					onSynced={() => {
@@ -578,6 +585,7 @@ function ListPosts({
 
 function SelectedList({
 	accountId,
+	accounts,
 	list,
 	tab,
 	onBack,
@@ -586,6 +594,7 @@ function SelectedList({
 	onUpdated,
 }: {
 	accountId: string;
+	accounts: AccountRecord[];
 	list: ProfileListSummary;
 	tab: "posts" | "members";
 	onBack: () => void;
@@ -703,7 +712,7 @@ function SelectedList({
 			{tab === "members" ? (
 				<ListMembers accountId={accountId} list={list} />
 			) : (
-				<ListPosts accountId={accountId} list={list} />
+				<ListPosts accountId={accountId} accounts={accounts} list={list} />
 			)}
 		</>
 	);
@@ -783,6 +792,7 @@ export function ListsRouteView({
 			{selected ? (
 				<SelectedList
 					accountId={accountId}
+					accounts={statusQuery.data?.accounts ?? []}
 					list={selected}
 					tab={search.tab}
 					onBack={() => updateSearch({ list: "", tab: "posts" })}
