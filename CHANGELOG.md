@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 0.10.1 - 2026-08-18
+
+### Added
+
+- Generate and archive a closed-window intraday overview every eight hours at 00:00, 08:00, and 16:00 local time.
+- Browse intraday history beside daily and weekly archives, with distinct slot labels and PDF filenames.
+
+### Changed
+
+- Make Today summaries strictly on demand so opening the page or changing its period and source controls does not call the model or spend tokens.
+- Limit automatic intraday catch-up to the latest 24 hours and serialize it with daily and weekly generation.
+
 ## 0.10.0 - 2026-08-18
 
 ### Added
