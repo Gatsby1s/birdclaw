@@ -873,6 +873,95 @@ const definitions = {
 			],
 		},
 	},
+	birdclaw_lists: {
+		exportSql: `
+      select id, account_id, name, description, created_at, updated_at, deleted_at
+      from birdclaw_lists
+      order by account_id, created_at, id
+    `,
+		...fixedShard("data/profile-lists.jsonl", "birdclaw_lists"),
+		merge: {
+			order: 31,
+			sql: `
+      insert into birdclaw_lists (
+        id, account_id, name, description, created_at, updated_at, deleted_at
+      )
+      select incoming.id, incoming.account_id, incoming.name,
+        incoming.description, incoming.created_at, incoming.updated_at,
+        incoming.deleted_at
+      from (
+        select ? as id, ? as account_id, ? as name, ? as description,
+          ? as created_at, ? as updated_at, ? as deleted_at
+      ) as incoming
+      where incoming.deleted_at is not null or not exists (
+        select 1 from birdclaw_lists as existing
+        where existing.account_id = incoming.account_id
+          and existing.name = incoming.name collate nocase
+          and existing.deleted_at is null
+          and existing.id <> incoming.id
+      )
+      on conflict(id) do update set
+        account_id = excluded.account_id,
+        name = excluded.name,
+        description = excluded.description,
+        created_at = min(birdclaw_lists.created_at, excluded.created_at),
+        updated_at = excluded.updated_at,
+        deleted_at = excluded.deleted_at
+      where excluded.updated_at >= birdclaw_lists.updated_at
+      `,
+			columns: [
+				"id",
+				"account_id",
+				"name",
+				"description",
+				"created_at",
+				"updated_at",
+				"deleted_at",
+			],
+		},
+	},
+	birdclaw_list_members: {
+		exportSql: `
+      select list_id, member_key, identifier, additional_name, is_member,
+        added_at, updated_at
+      from birdclaw_list_members
+      order by list_id, member_key
+    `,
+		...fixedShard("data/profile-list-members.jsonl", "birdclaw_list_members"),
+		merge: {
+			order: 32,
+			sql: `
+      insert into birdclaw_list_members (
+        list_id, member_key, identifier, additional_name, is_member,
+        added_at, updated_at
+      )
+      select incoming.list_id, incoming.member_key, incoming.identifier,
+        incoming.additional_name, incoming.is_member, incoming.added_at,
+        incoming.updated_at
+      from (
+        select ? as list_id, ? as member_key, ? as identifier,
+          ? as additional_name, ? as is_member, ? as added_at, ? as updated_at
+      ) as incoming
+      where exists (select 1 from birdclaw_lists where id = incoming.list_id)
+      on conflict(list_id, member_key) do update set
+        identifier = excluded.identifier,
+        additional_name = excluded.additional_name,
+        is_member = excluded.is_member,
+        added_at = min(birdclaw_list_members.added_at, excluded.added_at),
+        updated_at = excluded.updated_at
+      where excluded.updated_at >= birdclaw_list_members.updated_at
+      `,
+			columns: [
+				"list_id",
+				"member_key",
+				"identifier",
+				"additional_name",
+				"is_member",
+				"added_at",
+				"updated_at",
+			],
+		},
+	},
 	discussion_history: {
 		exportSql: `
       select id, root_id, parent_id, cache_key, title, summary, query,

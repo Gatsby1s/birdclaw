@@ -35,7 +35,7 @@ vi.mock("./AccountSwitcher", () => ({
 	),
 }));
 
-import { AppNav } from "./AppNav";
+import { AppNav, MobileAppNav } from "./AppNav";
 
 afterEach(() => {
 	routerState.path = "/inbox";
@@ -63,10 +63,15 @@ describe("AppNav", () => {
 			"/bookmarks",
 		);
 		const home = screen.getByRole("link", { name: "Home" });
+		const lists = screen.getByRole("link", { name: "Lists" });
 		const feed = screen.getByRole("link", { name: "Feed" });
+		expect(lists).toHaveAttribute("href", "/lists");
 		expect(feed).toHaveAttribute("href", "/feed");
 		expect(
-			home.compareDocumentPosition(feed) & Node.DOCUMENT_POSITION_FOLLOWING,
+			home.compareDocumentPosition(lists) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			lists.compareDocumentPosition(feed) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		expect(
 			screen.getByRole("link", { name: "Rate Limits" }),
@@ -83,6 +88,18 @@ describe("AppNav", () => {
 				name: "Theme: System default. Switch to Light theme.",
 			}),
 		).toBeInTheDocument();
+	});
+
+	it("marks Lists active in the desktop rail", () => {
+		routerState.path = "/lists";
+		render(
+			<ThemeProvider>
+				<AppNav />
+			</ThemeProvider>,
+		);
+		expect(screen.getByRole("link", { name: "Lists" })).toHaveClass(
+			"nav-link-active",
+		);
 	});
 
 	it("places the theme toggle inside the bottom account picker", () => {
@@ -116,5 +133,13 @@ describe("AppNav", () => {
 		);
 		expect(screen.getByText("birdclaw").parentElement).toHaveClass("sr-only");
 		expect(screen.getByText("DMs")).toHaveClass("sr-only");
+	});
+
+	it("keeps Lists in the mobile More menu with a touch-sized row", () => {
+		render(<MobileAppNav />);
+		const lists = screen.getByRole("link", { name: "Lists" });
+		expect(lists).toHaveAttribute("href", "/lists");
+		expect(lists).toHaveClass("min-h-12");
+		expect(screen.getByText("More")).toBeInTheDocument();
 	});
 });

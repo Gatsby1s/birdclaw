@@ -8,6 +8,10 @@ import type {
 	EmbeddedTweet,
 	LinkInsightItem,
 	ProfileAffiliation,
+	ProfileListFeedResponse,
+	ProfileListMember,
+	ProfileListMembershipStatus,
+	ProfileListSummary,
 	ProfilePriorityStatus,
 	ProfileRecord,
 	SpecialFollowFeedResponse,
@@ -91,6 +95,36 @@ export const profilePriorityStatusSchema: z.ZodType<ProfilePriorityStatus> =
 		identifier: z.string().optional(),
 		specialFollow: z.boolean(),
 		updatedAt: z.string().optional(),
+	});
+
+export const profileListSummarySchema: z.ZodType<ProfileListSummary> = z.object(
+	{
+		id: z.string(),
+		accountId: z.string(),
+		name: z.string(),
+		description: z.string(),
+		memberCount: z.number().int().nonnegative(),
+		createdAt: z.string(),
+		updatedAt: z.string(),
+	},
+);
+
+export const profileListCollectionSchema = z.object({
+	lists: z.array(profileListSummarySchema),
+});
+
+export const profileListMembershipStatusSchema: z.ZodType<ProfileListMembershipStatus> =
+	z.object({
+		profile: z.object({
+			handle: z.string(),
+			identifier: z.string().optional(),
+		}),
+		lists: z.array(
+			z.intersection(
+				profileListSummarySchema,
+				z.object({ included: z.boolean() }),
+			),
+		),
 	});
 
 export const specialFollowCursorSchema = z.object({
@@ -279,6 +313,36 @@ export const timelineItemSchema: z.ZodType<TimelineItem> = z.object({
 	retweetedTweet: embeddedTweetSchema.nullable().optional(),
 	qualityReason: z.string().nullable().optional(),
 });
+
+export const profileListMemberSchema: z.ZodType<ProfileListMember> = z.object({
+	listId: z.string(),
+	memberKey: z.string(),
+	identifier: z.string().optional(),
+	handle: z.string(),
+	addedAt: z.string(),
+	updatedAt: z.string(),
+	profile: profileRecordSchema.optional(),
+});
+
+export const profileListMembersResponseSchema = z.object({
+	list: profileListSummarySchema,
+	members: z.array(profileListMemberSchema),
+	candidates: z
+		.array(
+			z.object({
+				profile: profileRecordSchema,
+				included: z.boolean(),
+			}),
+		)
+		.default([]),
+});
+
+export const profileListFeedResponseSchema: z.ZodType<ProfileListFeedResponse> =
+	z.object({
+		list: profileListSummarySchema,
+		items: z.array(timelineItemSchema),
+		hasMore: z.boolean(),
+	});
 
 export const specialFollowFeedResponseSchema: z.ZodType<SpecialFollowFeedResponse> =
 	z.object({

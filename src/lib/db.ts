@@ -409,6 +409,29 @@ const BASE_SCHEMA_SQL = `
     primary key (source, kind)
   );
 
+  create table if not exists birdclaw_lists (
+    id text primary key,
+    account_id text not null,
+    name text not null,
+    description text not null default '',
+    created_at text not null,
+    updated_at text not null,
+    deleted_at text,
+    foreign key (account_id) references accounts(id) on delete cascade
+  );
+
+  create table if not exists birdclaw_list_members (
+    list_id text not null,
+    member_key text not null,
+    identifier text,
+    additional_name text not null,
+    is_member integer not null default 1 check (is_member in (0, 1)),
+    added_at text not null,
+    updated_at text not null,
+    primary key (list_id, member_key),
+    foreign key (list_id) references birdclaw_lists(id) on delete cascade
+  );
+
   create table if not exists follow_snapshots (
     id text primary key,
     account_id text not null,
@@ -538,6 +561,15 @@ const INDEX_SQL = `
   create index if not exists idx_feed_items_source_external on feed_items(source, kind, external_id);
   create index if not exists idx_feed_items_publisher on feed_items(publisher, published_at desc);
   create index if not exists idx_feed_sync_state_updated on feed_sync_state(updated_at desc);
+  create unique index if not exists idx_birdclaw_lists_active_name
+    on birdclaw_lists(account_id, name collate nocase)
+    where deleted_at is null;
+  create index if not exists idx_birdclaw_lists_account
+    on birdclaw_lists(account_id, deleted_at, updated_at desc);
+  create index if not exists idx_birdclaw_list_members_active
+    on birdclaw_list_members(list_id, is_member, updated_at desc);
+  create index if not exists idx_birdclaw_list_members_identifier
+    on birdclaw_list_members(identifier, is_member);
   create index if not exists idx_follow_edges_current on follow_edges(account_id, direction, current, last_seen_at desc);
   create index if not exists idx_follow_edges_profile on follow_edges(profile_id, current);
   create index if not exists idx_follow_snapshots_account on follow_snapshots(account_id, direction, completed_at desc);
@@ -860,6 +892,43 @@ function ensureFeedTables(db: Database) {
       on feed_items(publisher, published_at desc);
     create index if not exists idx_feed_sync_state_updated
       on feed_sync_state(updated_at desc);
+  `);
+}
+
+function ensureProfileListsTables(db: Database) {
+	db.exec(`
+    create table if not exists birdclaw_lists (
+      id text primary key,
+      account_id text not null,
+      name text not null,
+      description text not null default '',
+      created_at text not null,
+      updated_at text not null,
+      deleted_at text,
+      foreign key (account_id) references accounts(id) on delete cascade
+    );
+
+    create table if not exists birdclaw_list_members (
+      list_id text not null,
+      member_key text not null,
+      identifier text,
+      additional_name text not null,
+      is_member integer not null default 1 check (is_member in (0, 1)),
+      added_at text not null,
+      updated_at text not null,
+      primary key (list_id, member_key),
+      foreign key (list_id) references birdclaw_lists(id) on delete cascade
+    );
+
+    create unique index if not exists idx_birdclaw_lists_active_name
+      on birdclaw_lists(account_id, name collate nocase)
+      where deleted_at is null;
+    create index if not exists idx_birdclaw_lists_account
+      on birdclaw_lists(account_id, deleted_at, updated_at desc);
+    create index if not exists idx_birdclaw_list_members_active
+      on birdclaw_list_members(list_id, is_member, updated_at desc);
+    create index if not exists idx_birdclaw_list_members_identifier
+      on birdclaw_list_members(identifier, is_member);
   `);
 }
 
@@ -1738,6 +1807,13 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 			ensureFeedTables(db);
 			ensurePeriodDigestHistoryTable(db);
 			ensureWeeklyDigestHistoryTable(db);
+		},
+	},
+	{
+		version: 21,
+		name: "add private profile lists",
+		up: (db) => {
+			ensureProfileListsTables(db);
 		},
 	},
 ];

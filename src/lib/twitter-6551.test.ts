@@ -1911,6 +1911,7 @@ describe("6551 Twitter adapter", () => {
 		vi.setSystemTime(new Date("2026-08-15T03:00:00.000Z"));
 		try {
 			await stopTwitter6551WorkerManager();
+			await recordTwitter6551LocalHeartbeat(0, new Date(0));
 			process.env.BIRDCLAW_6551_ENABLED = "1";
 			process.env.BIRDCLAW_6551_ACCOUNT_ID = "acct_manager_failover";
 			process.env.BIRDCLAW_6551_WATCH_USERS = "manager_failover_user";

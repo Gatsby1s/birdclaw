@@ -15,6 +15,7 @@ import { Route as RateLimitsRouteImport } from './routes/rate-limits'
 import { Route as ProfileAnalyzeRouteImport } from './routes/profile-analyze'
 import { Route as NetworkMapRouteImport } from './routes/network-map'
 import { Route as MentionsRouteImport } from './routes/mentions'
+import { Route as ListsRouteImport } from './routes/lists'
 import { Route as LinksRouteImport } from './routes/links'
 import { Route as LikesRouteImport } from './routes/likes'
 import { Route as InboxRouteImport } from './routes/inbox'
@@ -48,6 +49,9 @@ import { Route as ApiProfileAnalysisRouteImport } from './routes/api/profile-ana
 import { Route as ApiPeriodDigestHistoryRouteImport } from './routes/api/period-digest-history'
 import { Route as ApiPeriodDigestRouteImport } from './routes/api/period-digest'
 import { Route as ApiNetworkMapRouteImport } from './routes/api/network-map'
+import { Route as ApiListsRouteImport } from './routes/api/lists'
+import { Route as ApiListMembersRouteImport } from './routes/api/list-members'
+import { Route as ApiListFeedRouteImport } from './routes/api/list-feed'
 import { Route as ApiLinkPreviewRouteImport } from './routes/api/link-preview'
 import { Route as ApiLinkInsightsRouteImport } from './routes/api/link-insights'
 import { Route as ApiInboxRouteImport } from './routes/api/inbox'
@@ -95,6 +99,11 @@ const NetworkMapRoute = NetworkMapRouteImport.update({
 const MentionsRoute = MentionsRouteImport.update({
   id: '/mentions',
   path: '/mentions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ListsRoute = ListsRouteImport.update({
+  id: '/lists',
+  path: '/lists',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LinksRoute = LinksRouteImport.update({
@@ -263,6 +272,21 @@ const ApiNetworkMapRoute = ApiNetworkMapRouteImport.update({
   path: '/api/network-map',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiListsRoute = ApiListsRouteImport.update({
+  id: '/api/lists',
+  path: '/api/lists',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiListMembersRoute = ApiListMembersRouteImport.update({
+  id: '/api/list-members',
+  path: '/api/list-members',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiListFeedRoute = ApiListFeedRouteImport.update({
+  id: '/api/list-feed',
+  path: '/api/list-feed',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiLinkPreviewRoute = ApiLinkPreviewRouteImport.update({
   id: '/api/link-preview',
   path: '/api/link-preview',
@@ -369,6 +393,7 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof InboxRoute
   '/likes': typeof LikesRoute
   '/links': typeof LinksRoute
+  '/lists': typeof ListsRoute
   '/mentions': typeof MentionsRoute
   '/network-map': typeof NetworkMapRoute
   '/profile-analyze': typeof ProfileAnalyzeRoute
@@ -388,6 +413,9 @@ export interface FileRoutesByFullPath {
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
+  '/api/list-feed': typeof ApiListFeedRoute
+  '/api/list-members': typeof ApiListMembersRoute
+  '/api/lists': typeof ApiListsRoute
   '/api/network-map': typeof ApiNetworkMapRoute
   '/api/period-digest': typeof ApiPeriodDigestRoute
   '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
@@ -428,6 +456,7 @@ export interface FileRoutesByTo {
   '/inbox': typeof InboxRoute
   '/likes': typeof LikesRoute
   '/links': typeof LinksRoute
+  '/lists': typeof ListsRoute
   '/mentions': typeof MentionsRoute
   '/network-map': typeof NetworkMapRoute
   '/profile-analyze': typeof ProfileAnalyzeRoute
@@ -447,6 +476,9 @@ export interface FileRoutesByTo {
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
+  '/api/list-feed': typeof ApiListFeedRoute
+  '/api/list-members': typeof ApiListMembersRoute
+  '/api/lists': typeof ApiListsRoute
   '/api/network-map': typeof ApiNetworkMapRoute
   '/api/period-digest': typeof ApiPeriodDigestRoute
   '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
@@ -488,6 +520,7 @@ export interface FileRoutesById {
   '/inbox': typeof InboxRoute
   '/likes': typeof LikesRoute
   '/links': typeof LinksRoute
+  '/lists': typeof ListsRoute
   '/mentions': typeof MentionsRoute
   '/network-map': typeof NetworkMapRoute
   '/profile-analyze': typeof ProfileAnalyzeRoute
@@ -507,6 +540,9 @@ export interface FileRoutesById {
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
+  '/api/list-feed': typeof ApiListFeedRoute
+  '/api/list-members': typeof ApiListMembersRoute
+  '/api/lists': typeof ApiListsRoute
   '/api/network-map': typeof ApiNetworkMapRoute
   '/api/period-digest': typeof ApiPeriodDigestRoute
   '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
@@ -549,6 +585,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/likes'
     | '/links'
+    | '/lists'
     | '/mentions'
     | '/network-map'
     | '/profile-analyze'
@@ -568,6 +605,9 @@ export interface FileRouteTypes {
     | '/api/inbox'
     | '/api/link-insights'
     | '/api/link-preview'
+    | '/api/list-feed'
+    | '/api/list-members'
+    | '/api/lists'
     | '/api/network-map'
     | '/api/period-digest'
     | '/api/period-digest-history'
@@ -608,6 +648,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/likes'
     | '/links'
+    | '/lists'
     | '/mentions'
     | '/network-map'
     | '/profile-analyze'
@@ -627,6 +668,9 @@ export interface FileRouteTypes {
     | '/api/inbox'
     | '/api/link-insights'
     | '/api/link-preview'
+    | '/api/list-feed'
+    | '/api/list-members'
+    | '/api/lists'
     | '/api/network-map'
     | '/api/period-digest'
     | '/api/period-digest-history'
@@ -667,6 +711,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/likes'
     | '/links'
+    | '/lists'
     | '/mentions'
     | '/network-map'
     | '/profile-analyze'
@@ -686,6 +731,9 @@ export interface FileRouteTypes {
     | '/api/inbox'
     | '/api/link-insights'
     | '/api/link-preview'
+    | '/api/list-feed'
+    | '/api/list-members'
+    | '/api/lists'
     | '/api/network-map'
     | '/api/period-digest'
     | '/api/period-digest-history'
@@ -727,6 +775,7 @@ export interface RootRouteChildren {
   InboxRoute: typeof InboxRoute
   LikesRoute: typeof LikesRoute
   LinksRoute: typeof LinksRoute
+  ListsRoute: typeof ListsRoute
   MentionsRoute: typeof MentionsRoute
   NetworkMapRoute: typeof NetworkMapRoute
   ProfileAnalyzeRoute: typeof ProfileAnalyzeRoute
@@ -746,6 +795,9 @@ export interface RootRouteChildren {
   ApiInboxRoute: typeof ApiInboxRoute
   ApiLinkInsightsRoute: typeof ApiLinkInsightsRoute
   ApiLinkPreviewRoute: typeof ApiLinkPreviewRoute
+  ApiListFeedRoute: typeof ApiListFeedRoute
+  ApiListMembersRoute: typeof ApiListMembersRoute
+  ApiListsRoute: typeof ApiListsRoute
   ApiNetworkMapRoute: typeof ApiNetworkMapRoute
   ApiPeriodDigestRoute: typeof ApiPeriodDigestRoute
   ApiPeriodDigestHistoryRoute: typeof ApiPeriodDigestHistoryRoute
@@ -816,6 +868,13 @@ declare module '@tanstack/react-router' {
       path: '/mentions'
       fullPath: '/mentions'
       preLoaderRoute: typeof MentionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lists': {
+      id: '/lists'
+      path: '/lists'
+      fullPath: '/lists'
+      preLoaderRoute: typeof ListsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/links': {
@@ -1049,6 +1108,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiNetworkMapRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/lists': {
+      id: '/api/lists'
+      path: '/api/lists'
+      fullPath: '/api/lists'
+      preLoaderRoute: typeof ApiListsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/list-members': {
+      id: '/api/list-members'
+      path: '/api/list-members'
+      fullPath: '/api/list-members'
+      preLoaderRoute: typeof ApiListMembersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/list-feed': {
+      id: '/api/list-feed'
+      path: '/api/list-feed'
+      fullPath: '/api/list-feed'
+      preLoaderRoute: typeof ApiListFeedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/link-preview': {
       id: '/api/link-preview'
       path: '/api/link-preview'
@@ -1205,6 +1285,7 @@ const rootRouteChildren: RootRouteChildren = {
   InboxRoute: InboxRoute,
   LikesRoute: LikesRoute,
   LinksRoute: LinksRoute,
+  ListsRoute: ListsRoute,
   MentionsRoute: MentionsRoute,
   NetworkMapRoute: NetworkMapRoute,
   ProfileAnalyzeRoute: ProfileAnalyzeRoute,
@@ -1224,6 +1305,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiInboxRoute: ApiInboxRoute,
   ApiLinkInsightsRoute: ApiLinkInsightsRoute,
   ApiLinkPreviewRoute: ApiLinkPreviewRoute,
+  ApiListFeedRoute: ApiListFeedRoute,
+  ApiListMembersRoute: ApiListMembersRoute,
+  ApiListsRoute: ApiListsRoute,
   ApiNetworkMapRoute: ApiNetworkMapRoute,
   ApiPeriodDigestRoute: ApiPeriodDigestRoute,
   ApiPeriodDigestHistoryRoute: ApiPeriodDigestHistoryRoute,

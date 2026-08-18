@@ -12,7 +12,7 @@ import {
 describe("backup table codecs", () => {
 	it("owns every portable table and path exactly once", () => {
 		expect(assertBackupTableCodecRegistry()).toBe(true);
-		expect(BACKUP_TABLE_CODECS).toHaveLength(31);
+		expect(BACKUP_TABLE_CODECS).toHaveLength(33);
 		expect(BACKUP_TABLE_CODECS.map((codec) => codec.name)).toEqual([
 			"accounts",
 			"profiles",
@@ -33,6 +33,8 @@ describe("backup table codecs", () => {
 			"ai_scores",
 			"birdclaw_profile_notes",
 			"birdclaw_profile_priorities",
+			"birdclaw_lists",
+			"birdclaw_list_members",
 			"discussion_history",
 			"feed_items",
 			"period_digest_history",
@@ -50,7 +52,7 @@ describe("backup table codecs", () => {
 			BACKUP_TABLE_CODECS.map((codec) => codec.merge.order).sort(
 				(left, right) => left - right,
 			),
-		).toEqual(Array.from({ length: 31 }, (_, index) => index));
+		).toEqual(Array.from({ length: 33 }, (_, index) => index));
 
 		const sample = { created_at: "2026-01-02T00:00:00.000Z", kind: "likes" };
 		for (const codec of BACKUP_TABLE_CODECS) {

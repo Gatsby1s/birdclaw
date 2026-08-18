@@ -11,6 +11,7 @@ import {
 	Home,
 	Inbox,
 	Link as LinkIcon,
+	List as ListIcon,
 	Mail,
 	Menu,
 	MessagesSquare,
@@ -44,6 +45,7 @@ import { ThemeSlider } from "./ThemeSlider";
 
 const links = [
 	{ to: "/", label: "Home", icon: Home },
+	{ to: "/lists", label: "Lists", icon: ListIcon },
 	{ to: "/feed", label: "Feed", icon: Rss },
 	{ to: "/inbox", label: "Inbox", icon: Inbox },
 	{ to: "/today", label: "Today", icon: CalendarDays },

@@ -112,6 +112,8 @@ function clearData() {
 	delete from twillot_history_batches;
 	delete from twillot_history_daily_usage;
 	delete from twillot_history_jobs;
+	delete from birdclaw_list_members;
+	delete from birdclaw_lists;
 	delete from birdclaw_profile_priorities;
 	delete from birdclaw_profile_notes;
 	delete from weekly_digest_history;
@@ -298,6 +300,21 @@ function seedBackupFixture() {
 	  'id:profile_friend', 'profile_friend', 'friend', 1,
 	  '2025-01-09T00:45:00.000Z'
 	);
+
+	insert into birdclaw_lists (
+	  id, account_id, name, description, created_at, updated_at, deleted_at
+	) values (
+	  'list-facts', 'acct_primary', '事实源', '公司与媒体',
+	  '2025-01-09T00:46:00.000Z', '2025-01-09T00:47:00.000Z', null
+	);
+
+	insert into birdclaw_list_members (
+	  list_id, member_key, identifier, additional_name, is_member, added_at, updated_at
+	) values
+	  ('list-facts', 'id:profile_friend', 'profile_friend', 'friend', 1,
+	   '2025-01-09T00:48:00.000Z', '2025-01-09T00:48:00.000Z'),
+	  ('list-facts', 'handle:removed', null, 'removed', 0,
+	   '2025-01-09T00:49:00.000Z', '2025-01-09T00:50:00.000Z');
 
 	insert into feed_items (
 	  id, source, external_id, kind, title, summary, url, publisher,
@@ -619,6 +636,8 @@ describe("text backup", () => {
 			ai_scores: 1,
 			birdclaw_profile_notes: 1,
 			birdclaw_profile_priorities: 1,
+			birdclaw_lists: 1,
+			birdclaw_list_members: 2,
 			discussion_history: 1,
 			feed_items: 2,
 			period_digest_history: 1,
@@ -690,6 +709,12 @@ describe("text backup", () => {
 		);
 		expect(
 			existsSync(path.join(repoPath, "data/discussions/history.jsonl")),
+		).toBe(true);
+		expect(existsSync(path.join(repoPath, "data/profile-lists.jsonl"))).toBe(
+			true,
+		);
+		expect(
+			existsSync(path.join(repoPath, "data/profile-list-members.jsonl")),
 		).toBe(true);
 		expect(existsSync(path.join(repoPath, "data/feed/items.jsonl"))).toBe(true);
 		expect(
@@ -875,6 +900,29 @@ describe("text backup", () => {
 			additional_name: "friend",
 			is_special_follow: 1,
 		});
+		expect(
+			getNativeDb({ seedDemoData: false })
+				.prepare(
+					`select list.name, list.description, member.member_key, member.is_member
+					 from birdclaw_lists as list
+					 join birdclaw_list_members as member on member.list_id = list.id
+					 order by member.member_key`,
+				)
+				.all(),
+		).toEqual([
+			{
+				name: "事实源",
+				description: "公司与媒体",
+				member_key: "handle:removed",
+				is_member: 0,
+			},
+			{
+				name: "事实源",
+				description: "公司与媒体",
+				member_key: "id:profile_friend",
+				is_member: 1,
+			},
+		]);
 		expect(
 			getNativeDb({ seedDemoData: false })
 				.prepare(
@@ -1161,7 +1209,7 @@ describe("text backup", () => {
 		).toEqual({ count: 0 });
 	}, 20000);
 
-	it("emits byte-identical schema-v11 data and still accepts schema v2", async () => {
+	it("emits byte-identical schema-v12 data and still accepts schema v2", async () => {
 		switchHome("birdclaw-backup-stable-src-");
 		seedBackupFixture();
 		const firstRepoPath = makeTempDir("birdclaw-backup-stable-first-");
@@ -1170,7 +1218,7 @@ describe("text backup", () => {
 		const first = await exportBackup({ repoPath: firstRepoPath });
 		const second = await exportBackup({ repoPath: secondRepoPath });
 
-		expect(first.manifest.schemaVersion).toBe(11);
+		expect(first.manifest.schemaVersion).toBe(12);
 		expect(second.manifest.files).toEqual(first.manifest.files);
 		expect(second.manifest.counts).toEqual(first.manifest.counts);
 		expect(second.manifest.backupHash).toBe(first.manifest.backupHash);
@@ -1486,6 +1534,8 @@ describe("text backup", () => {
 			ai_scores: 1,
 			birdclaw_profile_notes: 1,
 			birdclaw_profile_priorities: 1,
+			birdclaw_lists: 1,
+			birdclaw_list_members: 2,
 			discussion_history: 1,
 			feed_items: 2,
 			period_digest_history: 1,

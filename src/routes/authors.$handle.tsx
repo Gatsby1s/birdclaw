@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AvatarChip } from "#/components/AvatarChip";
 import { cleanProfileHandle } from "#/components/ProfileAnalysisStream";
 import { ProfileRemarkEditor } from "#/components/ProfileRemarkEditor";
+import { ProfileListsButton } from "#/components/ProfileListsButton";
 import { ProfileSpecialFollowButton } from "#/components/ProfileSpecialFollowButton";
 import { TimelineCard } from "#/components/TimelineCard";
 import {
@@ -132,6 +133,11 @@ export function AuthorTimelineRouteView({ handle }: { handle: string }) {
 									handle={profile?.handle ?? cleanHandle}
 									identifier={profile?.id}
 									key={`special-follow:${profile?.id ?? cleanHandle.toLowerCase()}`}
+								/>
+								<ProfileListsButton
+									className="mt-3"
+									handle={profile?.handle ?? cleanHandle}
+									identifier={profile?.id}
 								/>
 								<ProfileRemarkEditor
 									className="mt-3"

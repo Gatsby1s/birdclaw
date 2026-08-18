@@ -66,6 +66,40 @@ export interface ProfilePriorityStatus {
 	updatedAt?: string;
 }
 
+export interface ProfileListSummary {
+	id: string;
+	accountId: string;
+	name: string;
+	description: string;
+	memberCount: number;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface ProfileListMember {
+	listId: string;
+	memberKey: string;
+	identifier?: string;
+	handle: string;
+	addedAt: string;
+	updatedAt: string;
+	profile?: ProfileRecord;
+}
+
+export interface ProfileListMembershipStatus {
+	profile: {
+		handle: string;
+		identifier?: string;
+	};
+	lists: Array<ProfileListSummary & { included: boolean }>;
+}
+
+export interface ProfileListFeedResponse {
+	list: ProfileListSummary;
+	items: TimelineItem[];
+	hasMore: boolean;
+}
+
 export type SpecialFollowFeedMode = "newest" | "resume" | "newer" | "older";
 
 export interface SpecialFollowCursor {

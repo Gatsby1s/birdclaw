@@ -11,7 +11,7 @@ const FALLBACK_STATE_KIND = "fallback_state";
 const LEGACY_DAILY_BUDGET_TABLE = "twitter6551_paid_daily_usage";
 const LEGACY_FALLBACK_STATE_TABLE = "twitter6551_recovery_state";
 const LEGACY_SCHEMA_VERSION = 18;
-const CURRENT_SCHEMA_VERSION = 20;
+const CURRENT_SCHEMA_VERSION = 21;
 
 interface StoredStateEvent {
 	event_id: string;

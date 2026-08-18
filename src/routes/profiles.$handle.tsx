@@ -4,6 +4,7 @@ import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { AvatarChip } from "#/components/AvatarChip";
 import { ProfileSpecialFollowButton } from "#/components/ProfileSpecialFollowButton";
+import { ProfileListsButton } from "#/components/ProfileListsButton";
 import { TweetRichText } from "#/components/TweetRichText";
 import { XRemarkAnnotationCard } from "#/components/XRemarkAnnotation";
 import {
@@ -221,6 +222,11 @@ export function ProfileRouteView({ handle }: { handle: string }) {
 							handle={xRemarkHandle}
 							identifier={profile?.id}
 							key={`special-follow:${profile?.id ?? xRemarkHandle.toLowerCase()}`}
+						/>
+
+						<ProfileListsButton
+							handle={xRemarkHandle}
+							identifier={profile?.id}
 						/>
 
 						{xRemarkQuery.data?.annotation ? (
