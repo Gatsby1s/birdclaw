@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.9.2 - 2026-08-18
+
+### Fixed
+
+- Find Chinese, Japanese, and Korean phrases inside continuous post text while preserving the existing English full-text and author/ID search behavior.
+- Keep substring results deduplicated and provide correctly aligned highlighted snippets for Unicode text.
+
 ## 0.9.1 - 2026-08-18
 
 ### Changed
