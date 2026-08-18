@@ -28,6 +28,8 @@ function resultForWeek(weekStart: string): PeriodDigestRunResult {
 		context: {
 			window: { label: weekStart, since: window.since, until: window.until },
 			includeDms: false,
+			includeFeed: true,
+			twitterScope: "home",
 			counts: {
 				home: 40,
 				mentions: 2,
@@ -36,10 +38,30 @@ function resultForWeek(weekStart: string): PeriodDigestRunResult {
 				bookmarks: 0,
 				dms: 0,
 				links: 8,
+				feed: 1,
 			},
 			tweets: [],
 			dms: [],
 			links: [],
+			feedItems: [
+				{
+					id: "tiger:article:weekly",
+					source: "tiger",
+					externalId: "weekly",
+					kind: "article",
+					title: "Saved weekly article",
+					summary: "Short licensed excerpt.",
+					url: "https://www.laohu8.com/news/weekly",
+					publisher: "Tiger News",
+					publishedAt: window.since,
+					market: "us",
+					language: "zh-CN",
+					symbols: [],
+					imageUrl: null,
+					isImportant: false,
+					updatedAt: window.since,
+				},
+			],
 			hash: `hash-${weekStart}`,
 		},
 		digest: {
@@ -140,9 +162,33 @@ describe("weekly digest history", () => {
 				status: "ready",
 				formatVersion: CURRENT_WEEKLY_DIGEST_FORMAT_VERSION,
 			},
-			result: { cached: true, reasoningEffort: "high" },
+			result: {
+				cached: true,
+				reasoningEffort: "high",
+				context: {
+					includeFeed: true,
+					twitterScope: "home",
+					feedItems: [{ id: "tiger:article:weekly" }],
+				},
+			},
 		});
 		expect(listWeeklyDigestHistory()).toHaveLength(1);
+	});
+
+	it("restores Home scope independently from the Feed toggle", () => {
+		const claim = claimWeeklyDigest("2026-07-13");
+		if (!claim.claimed) throw new Error("Expected claim");
+		const result = resultForWeek("2026-07-13");
+		result.context.includeFeed = false;
+		result.context.feedItems = [];
+		result.context.counts.feed = 0;
+		expect(
+			completeWeeklyDigestHistory(claim.id, claim.claimToken, result),
+		).toBe(true);
+		expect(getWeeklyDigestHistory(claim.id)?.result.context).toMatchObject({
+			includeFeed: false,
+			twitterScope: "home",
+		});
 	});
 
 	it("upgrades an old ready report without hiding or losing it on failure", () => {

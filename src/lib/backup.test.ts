@@ -82,8 +82,10 @@ function ensureEditorialBackupTestSchema() {
 	for (const [table, column, definition] of [
 		["period_digest_history", "include_feed", "integer not null default 0"],
 		["period_digest_history", "feed_json", "text not null default '[]'"],
+		["period_digest_history", "twitter_scope", "text not null default 'all'"],
 		["weekly_digest_history", "include_feed", "integer not null default 0"],
 		["weekly_digest_history", "feed_json", "text not null default '[]'"],
+		["weekly_digest_history", "twitter_scope", "text not null default 'all'"],
 	] as const) {
 		const columns = db.prepare(`pragma table_info(${table})`).all() as Array<{
 			name: string;
@@ -345,13 +347,13 @@ function seedBackupFixture() {
 
     insert into period_digest_history (
       id, digest_date, timezone, status, attempt_count, window_since,
-	  window_until, include_dms, include_feed, provider, model, reasoning_effort,
+	  window_until, include_dms, include_feed, twitter_scope, provider, model, reasoning_effort,
       service_tier, context_hash, counts_json, digest_json, markdown,
 	  tweets_json, dms_json, links_json, feed_json, started_at, finished_at,
       created_at, updated_at
     ) values (
       'daily_2025_01_08', '2025-01-08', 'UTC', 'ready', 1,
-	  '2025-01-08T00:00:00.000Z', '2025-01-09T00:00:00.000Z', 0, 1,
+	  '2025-01-08T00:00:00.000Z', '2025-01-09T00:00:00.000Z', 0, 1, 'home',
       'openai', 'gpt-5.5', 'medium', 'priority', 'daily_hash',
 	  '{"home":1,"mentions":0,"authored":0,"likes":0,"bookmarks":0,"dms":0,"links":0,"feed":1}',
       '{"title":"Daily backup","summary":"Saved daily report","keyTopics":[],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[]}',
@@ -363,13 +365,13 @@ function seedBackupFixture() {
 
     insert into weekly_digest_history (
       id, week_start, week_end, timezone, status, attempt_count, window_since,
-	  window_until, include_dms, include_feed, provider, model, reasoning_effort,
+	  window_until, include_dms, include_feed, twitter_scope, provider, model, reasoning_effort,
       service_tier, context_hash, counts_json, digest_json, markdown,
 	  tweets_json, dms_json, links_json, feed_json, started_at, finished_at,
       created_at, updated_at
     ) values (
       'weekly_2025_01_06', '2025-01-06', '2025-01-12', 'UTC', 'ready', 1,
-	  '2025-01-06T00:00:00.000Z', '2025-01-13T00:00:00.000Z', 0, 1,
+	  '2025-01-06T00:00:00.000Z', '2025-01-13T00:00:00.000Z', 0, 1, 'home',
       'openai', 'gpt-5.5', 'high', 'priority', 'weekly_hash',
 	  '{"home":1,"mentions":0,"authored":0,"likes":0,"bookmarks":0,"dms":0,"links":0,"feed":1}',
       '{"title":"Weekly backup","summary":"Saved weekly report","keyTopics":[],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[]}',
@@ -876,7 +878,7 @@ describe("text backup", () => {
 		expect(
 			getNativeDb({ seedDemoData: false })
 				.prepare(
-					"select digest_date, status, include_feed, feed_json, markdown from period_digest_history",
+					"select digest_date, status, include_feed, twitter_scope, feed_json, markdown from period_digest_history",
 				)
 				.all(),
 		).toEqual([
@@ -884,6 +886,7 @@ describe("text backup", () => {
 				digest_date: "2025-01-08",
 				status: "ready",
 				include_feed: 1,
+				twitter_scope: "home",
 				feed_json:
 					'[{"id":"tiger:flash:flash-1","title":"Important market flash"}]',
 				markdown: "# Daily backup",
@@ -892,7 +895,7 @@ describe("text backup", () => {
 		expect(
 			getNativeDb({ seedDemoData: false })
 				.prepare(
-					"select week_start, week_end, status, include_feed, feed_json, markdown from weekly_digest_history",
+					"select week_start, week_end, status, include_feed, twitter_scope, feed_json, markdown from weekly_digest_history",
 				)
 				.all(),
 		).toEqual([
@@ -901,6 +904,7 @@ describe("text backup", () => {
 				week_end: "2025-01-12",
 				status: "ready",
 				include_feed: 1,
+				twitter_scope: "home",
 				feed_json:
 					'[{"id":"tiger:article:article-1","title":"Editorial market article"}]',
 				markdown: "# Weekly backup",
@@ -1199,6 +1203,7 @@ describe("text backup", () => {
 			>;
 			delete row.include_feed;
 			delete row.feed_json;
+			delete row.twitter_scope;
 			writeFileSync(fullPath, `${JSON.stringify(row)}\n`);
 		}
 		const feedPath = path.join(repoPath, "data/feed/items.jsonl");
@@ -1225,17 +1230,17 @@ describe("text backup", () => {
 		expect(
 			destinationDb
 				.prepare(
-					"select include_feed, feed_json from period_digest_history where digest_date = '2025-01-08'",
+					"select include_feed, twitter_scope, feed_json from period_digest_history where digest_date = '2025-01-08'",
 				)
 				.get(),
-		).toEqual({ include_feed: 0, feed_json: "[]" });
+		).toEqual({ include_feed: 0, twitter_scope: "all", feed_json: "[]" });
 		expect(
 			destinationDb
 				.prepare(
-					"select include_feed, feed_json from weekly_digest_history where week_start = '2025-01-06'",
+					"select include_feed, twitter_scope, feed_json from weekly_digest_history where week_start = '2025-01-06'",
 				)
 				.get(),
-		).toEqual({ include_feed: 0, feed_json: "[]" });
+		).toEqual({ include_feed: 0, twitter_scope: "all", feed_json: "[]" });
 		expect(
 			destinationDb.prepare("select count(*) as count from feed_items").get(),
 		).toEqual({ count: 0 });

@@ -292,6 +292,9 @@ const BASE_SCHEMA_SQL = `
     window_since text not null default '',
     window_until text not null default '',
     include_dms integer not null default 0,
+    include_feed integer not null default 0,
+	twitter_scope text not null default 'all'
+	  check (twitter_scope in ('home', 'all')),
     provider text not null default '',
     model text not null default '',
     reasoning_effort text not null default '',
@@ -303,6 +306,7 @@ const BASE_SCHEMA_SQL = `
     tweets_json text not null default '[]',
     dms_json text not null default '[]',
     links_json text not null default '[]',
+    feed_json text not null default '[]',
     error text,
     started_at text not null,
     finished_at text,
@@ -322,6 +326,9 @@ const BASE_SCHEMA_SQL = `
     window_since text not null default '',
     window_until text not null default '',
     include_dms integer not null default 0,
+    include_feed integer not null default 0,
+	twitter_scope text not null default 'all'
+	  check (twitter_scope in ('home', 'all')),
     provider text not null default '',
     model text not null default '',
     reasoning_effort text not null default '',
@@ -333,6 +340,7 @@ const BASE_SCHEMA_SQL = `
     tweets_json text not null default '[]',
     dms_json text not null default '[]',
     links_json text not null default '[]',
+    feed_json text not null default '[]',
     error text,
     started_at text not null,
     finished_at text,
@@ -366,6 +374,39 @@ const BASE_SCHEMA_SQL = `
     direction text,
     created_at text not null,
     primary key (source_kind, source_id, source_position, short_url)
+  );
+
+  create table if not exists feed_items (
+    id text primary key,
+    source text not null,
+    external_id text not null,
+    kind text not null check (kind in ('flash', 'article')),
+    title text not null,
+    summary text not null default '',
+    url text not null,
+    publisher text not null,
+    published_at text not null,
+    market text not null default '',
+    language text not null default 'zh-CN',
+    symbols_json text not null default '[]',
+    image_url text,
+    is_important integer not null default 0 check (is_important in (0, 1)),
+    content_hash text not null,
+    first_seen_at text not null,
+    updated_at text not null,
+    unique (source, kind, external_id)
+  );
+
+  create table if not exists feed_sync_state (
+    source text not null,
+    kind text not null check (kind in ('flash', 'article')),
+    status text not null check (status in ('idle', 'syncing', 'ready', 'error')),
+    last_started_at text,
+    last_success_at text,
+    last_item_at text,
+    last_error text,
+    updated_at text not null,
+    primary key (source, kind)
   );
 
   create table if not exists follow_snapshots (
@@ -493,6 +534,10 @@ const INDEX_SQL = `
   create index if not exists idx_link_occurrences_created on link_occurrences(created_at desc);
   create index if not exists idx_link_occurrences_account on link_occurrences(account_id, created_at desc);
   create index if not exists idx_link_occurrences_direction on link_occurrences(direction, created_at desc);
+  create index if not exists idx_feed_items_kind_published on feed_items(kind, published_at desc, id desc);
+  create index if not exists idx_feed_items_source_external on feed_items(source, kind, external_id);
+  create index if not exists idx_feed_items_publisher on feed_items(publisher, published_at desc);
+  create index if not exists idx_feed_sync_state_updated on feed_sync_state(updated_at desc);
   create index if not exists idx_follow_edges_current on follow_edges(account_id, direction, current, last_seen_at desc);
   create index if not exists idx_follow_edges_profile on follow_edges(profile_id, current);
   create index if not exists idx_follow_snapshots_account on follow_snapshots(account_id, direction, completed_at desc);
@@ -772,6 +817,52 @@ function ensureLinkIndexTables(db: Database) {
 	}
 }
 
+function ensureFeedTables(db: Database) {
+	db.exec(`
+    create table if not exists feed_items (
+      id text primary key,
+      source text not null,
+      external_id text not null,
+      kind text not null check (kind in ('flash', 'article')),
+      title text not null,
+      summary text not null default '',
+      url text not null,
+      publisher text not null,
+      published_at text not null,
+      market text not null default '',
+      language text not null default 'zh-CN',
+      symbols_json text not null default '[]',
+      image_url text,
+      is_important integer not null default 0 check (is_important in (0, 1)),
+      content_hash text not null,
+      first_seen_at text not null,
+      updated_at text not null,
+      unique (source, kind, external_id)
+    );
+
+    create table if not exists feed_sync_state (
+      source text not null,
+      kind text not null check (kind in ('flash', 'article')),
+      status text not null check (status in ('idle', 'syncing', 'ready', 'error')),
+      last_started_at text,
+      last_success_at text,
+      last_item_at text,
+      last_error text,
+      updated_at text not null,
+      primary key (source, kind)
+    );
+
+    create index if not exists idx_feed_items_kind_published
+      on feed_items(kind, published_at desc, id desc);
+    create index if not exists idx_feed_items_source_external
+      on feed_items(source, kind, external_id);
+    create index if not exists idx_feed_items_publisher
+      on feed_items(publisher, published_at desc);
+    create index if not exists idx_feed_sync_state_updated
+      on feed_sync_state(updated_at desc);
+  `);
+}
+
 function ensureFollowGraphTables(db: Database) {
 	db.exec(`
     create table if not exists follow_snapshots (
@@ -965,6 +1056,9 @@ function ensurePeriodDigestHistoryTable(db: Database) {
       window_since text not null default '',
       window_until text not null default '',
       include_dms integer not null default 0,
+      include_feed integer not null default 0,
+	  twitter_scope text not null default 'all'
+	    check (twitter_scope in ('home', 'all')),
       provider text not null default '',
       model text not null default '',
       reasoning_effort text not null default '',
@@ -976,6 +1070,7 @@ function ensurePeriodDigestHistoryTable(db: Database) {
       tweets_json text not null default '[]',
       dms_json text not null default '[]',
       links_json text not null default '[]',
+      feed_json text not null default '[]',
       error text,
       started_at text not null,
       finished_at text,
@@ -988,6 +1083,22 @@ function ensurePeriodDigestHistoryTable(db: Database) {
     create index if not exists idx_period_digest_history_status
       on period_digest_history(status, updated_at desc);
 	`);
+	const columns = getColumnNames(db, "period_digest_history");
+	if (!columns.has("include_feed")) {
+		db.exec(
+			"alter table period_digest_history add column include_feed integer not null default 0",
+		);
+	}
+	if (!columns.has("feed_json")) {
+		db.exec(
+			"alter table period_digest_history add column feed_json text not null default '[]'",
+		);
+	}
+	if (!columns.has("twitter_scope")) {
+		db.exec(
+			"alter table period_digest_history add column twitter_scope text not null default 'all' check (twitter_scope in ('home', 'all'))",
+		);
+	}
 }
 
 function ensureWeeklyDigestHistoryTable(db: Database) {
@@ -1004,6 +1115,9 @@ function ensureWeeklyDigestHistoryTable(db: Database) {
       window_since text not null default '',
       window_until text not null default '',
       include_dms integer not null default 0,
+      include_feed integer not null default 0,
+	  twitter_scope text not null default 'all'
+	    check (twitter_scope in ('home', 'all')),
       provider text not null default '',
       model text not null default '',
       reasoning_effort text not null default '',
@@ -1015,6 +1129,7 @@ function ensureWeeklyDigestHistoryTable(db: Database) {
       tweets_json text not null default '[]',
       dms_json text not null default '[]',
       links_json text not null default '[]',
+      feed_json text not null default '[]',
       error text,
       started_at text not null,
       finished_at text,
@@ -1027,6 +1142,22 @@ function ensureWeeklyDigestHistoryTable(db: Database) {
     create index if not exists idx_weekly_digest_history_status
       on weekly_digest_history(status, updated_at desc);
 	`);
+	const columns = getColumnNames(db, "weekly_digest_history");
+	if (!columns.has("include_feed")) {
+		db.exec(
+			"alter table weekly_digest_history add column include_feed integer not null default 0",
+		);
+	}
+	if (!columns.has("feed_json")) {
+		db.exec(
+			"alter table weekly_digest_history add column feed_json text not null default '[]'",
+		);
+	}
+	if (!columns.has("twitter_scope")) {
+		db.exec(
+			"alter table weekly_digest_history add column twitter_scope text not null default 'all' check (twitter_scope in ('home', 'all'))",
+		);
+	}
 }
 
 function ensureWeeklyDigestFormatVersionColumn(db: Database) {
@@ -1598,6 +1729,15 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		name: "add bidirectional X Remark note sync",
 		up: (db) => {
 			ensureXRemarkBidirectionalSyncColumns(db);
+		},
+	},
+	{
+		version: 20,
+		name: "add editorial feed and digest feed context",
+		up: (db) => {
+			ensureFeedTables(db);
+			ensurePeriodDigestHistoryTable(db);
+			ensureWeeklyDigestHistoryTable(db);
 		},
 	},
 ];

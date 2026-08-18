@@ -11,7 +11,7 @@ import { redactProviderError } from "./openai-response-runtime";
 import type { Database } from "./sqlite";
 
 export type WeeklyDigestHistoryStatus = "pending" | "ready" | "failed";
-export const CURRENT_WEEKLY_DIGEST_FORMAT_VERSION = 2;
+export const CURRENT_WEEKLY_DIGEST_FORMAT_VERSION = 3;
 
 export interface WeeklyDigestHistoryMetadata {
 	id: string;
@@ -51,6 +51,8 @@ interface WeeklyDigestHistoryRow extends Record<string, unknown> {
 	window_since: string;
 	window_until: string;
 	include_dms: number;
+	include_feed: number;
+	twitter_scope: string;
 	provider: string;
 	model: string;
 	reasoning_effort: string;
@@ -62,6 +64,7 @@ interface WeeklyDigestHistoryRow extends Record<string, unknown> {
 	tweets_json: string;
 	dms_json: string;
 	links_json: string;
+	feed_json: string;
 	error: string | null;
 	started_at: string;
 	finished_at: string | null;
@@ -77,6 +80,7 @@ const EMPTY_COUNTS: PeriodDigestRunResult["context"]["counts"] = {
 	bookmarks: 0,
 	dms: 0,
 	links: 0,
+	feed: 0,
 };
 const CLAIM_STALE_MS = 30 * 60_000;
 
@@ -218,10 +222,13 @@ function detailFromRow(
 					until: row.window_until,
 				},
 				includeDms: Boolean(row.include_dms),
+				includeFeed: Boolean(row.include_feed),
+				twitterScope: row.twitter_scope === "home" ? "home" : "all",
 				counts: metadata.counts,
 				tweets: parseJson(row.tweets_json, []),
 				dms: parseJson(row.dms_json, []),
 				links: parseJson(row.links_json, []),
+				feedItems: parseJson(row.feed_json, []),
 				hash: row.context_hash,
 			},
 			digest,
@@ -284,6 +291,7 @@ function compactContext(result: PeriodDigestRunResult) {
 		tweets,
 		dms: result.context.dms,
 		links: result.context.links,
+		feedItems: result.context.feedItems ?? [],
 	};
 }
 
@@ -388,10 +396,10 @@ export function completeWeeklyDigestHistory(
 		.prepare(
 			`update weekly_digest_history set
 			 status = 'ready', claim_token = '', format_version = ?,
-			 include_dms = ?, provider = ?, model = ?,
+				 include_dms = ?, include_feed = ?, twitter_scope = ?, provider = ?, model = ?,
 			 reasoning_effort = ?, service_tier = ?, context_hash = ?,
 			 counts_json = ?, digest_json = ?, markdown = ?, tweets_json = ?,
-			 dms_json = ?, links_json = ?, error = null, finished_at = ?, updated_at = ?
+			 dms_json = ?, links_json = ?, feed_json = ?, error = null, finished_at = ?, updated_at = ?
 			 where id = ? and claim_token = ?
 			   and (
 			     status = 'pending'
@@ -401,6 +409,8 @@ export function completeWeeklyDigestHistory(
 		.run(
 			CURRENT_WEEKLY_DIGEST_FORMAT_VERSION,
 			result.context.includeDms ? 1 : 0,
+			result.context.includeFeed ? 1 : 0,
+			result.context.twitterScope === "home" ? "home" : "all",
 			result.provider ?? "",
 			result.model,
 			result.reasoningEffort,
@@ -412,6 +422,7 @@ export function completeWeeklyDigestHistory(
 			JSON.stringify(compact.tweets),
 			JSON.stringify(compact.dms),
 			JSON.stringify(compact.links),
+			JSON.stringify(compact.feedItems),
 			now,
 			now,
 			id,
@@ -471,6 +482,8 @@ async function archiveWeeklyDigestWithStream(
 			since: window.since,
 			until: window.until,
 			includeDms: false,
+			includeFeed: true,
+			twitterScope: "home",
 			refresh: false,
 			reasoningEffort: "high",
 			serviceTier: "priority",

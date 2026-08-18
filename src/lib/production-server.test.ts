@@ -22,6 +22,8 @@ const schedulerMocks = vi.hoisted(() => ({
 	stopDaily: vi.fn(),
 	startWeekly: vi.fn(),
 	stopWeekly: vi.fn(),
+	startFeed: vi.fn(),
+	stopFeed: vi.fn(),
 }));
 const localTwitterCollectorMocks = vi.hoisted(() => ({
 	start: vi.fn(),
@@ -36,6 +38,11 @@ vi.mock("./period-digest-scheduler", () => ({
 vi.mock("./weekly-digest-scheduler", () => ({
 	startWeeklyDigestScheduler: schedulerMocks.startWeekly,
 	stopWeeklyDigestScheduler: schedulerMocks.stopWeekly,
+}));
+
+vi.mock("./editorial-feed-scheduler", () => ({
+	startEditorialFeedScheduler: schedulerMocks.startFeed,
+	stopEditorialFeedScheduler: schedulerMocks.stopFeed,
 }));
 
 vi.mock("./local-twitter-collector", () => ({
@@ -97,6 +104,7 @@ describe("production server", () => {
 		});
 		expect(schedulerMocks.startDaily).toHaveBeenCalledTimes(1);
 		expect(schedulerMocks.startWeekly).toHaveBeenCalledTimes(1);
+		expect(schedulerMocks.startFeed).toHaveBeenCalledTimes(1);
 		expect(localTwitterCollectorMocks.start).toHaveBeenCalledTimes(1);
 		try {
 			const address = server.address();
@@ -127,6 +135,7 @@ describe("production server", () => {
 		}
 		expect(schedulerMocks.stopDaily).toHaveBeenCalledTimes(1);
 		expect(schedulerMocks.stopWeekly).toHaveBeenCalledTimes(1);
+		expect(schedulerMocks.stopFeed).toHaveBeenCalledTimes(1);
 		expect(localTwitterCollectorMocks.stop).toHaveBeenCalledTimes(1);
 	});
 

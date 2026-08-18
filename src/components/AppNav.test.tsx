@@ -62,6 +62,12 @@ describe("AppNav", () => {
 			"href",
 			"/bookmarks",
 		);
+		const home = screen.getByRole("link", { name: "Home" });
+		const feed = screen.getByRole("link", { name: "Feed" });
+		expect(feed).toHaveAttribute("href", "/feed");
+		expect(
+			home.compareDocumentPosition(feed) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 		expect(
 			screen.getByRole("link", { name: "Rate Limits" }),
 		).toBeInTheDocument();

@@ -66,6 +66,7 @@ export const Route = createFileRoute("/today")({
 type PeriodOption = PeriodRouteSearch;
 type ReferenceTweet = PeriodDigestContext["tweets"][number];
 type ReferenceDm = PeriodDigestContext["dms"][number];
+type ReferenceFeedItem = NonNullable<PeriodDigestContext["feedItems"]>[number];
 type ReferenceGroup = {
 	section: string;
 	title: string;
@@ -127,6 +128,7 @@ function periodLabel(period: PeriodOption) {
 function digestUrl(
 	period: PeriodOption,
 	includeDms: boolean,
+	includeFeed: boolean,
 	refresh: boolean,
 	since: string,
 	until: string,
@@ -134,6 +136,7 @@ function digestUrl(
 	const url = new URL("/api/period-digest", window.location.origin);
 	url.searchParams.set("period", period);
 	url.searchParams.set("includeDms", String(includeDms));
+	url.searchParams.set("includeFeed", String(includeFeed));
 	url.searchParams.set("maxTweets", "5000");
 	url.searchParams.set("maxLinks", "20");
 	// Cloudflare caps proxied requests; live timeline sync remains a separate job/UI action.
@@ -172,7 +175,10 @@ function formatCounts(context: PeriodDigestContext | null) {
 	const counts = context.counts;
 	return [
 		`${String(counts.home)} home`,
-		`${String(counts.mentions)} mentions`,
+		context.twitterScope === "home"
+			? null
+			: `${String(counts.mentions)} mentions`,
+		context.includeFeed ? `${String(counts.feed ?? 0)} feed` : null,
 		`${String(counts.links)} links`,
 		context.includeDms ? `${String(counts.dms)} DMs` : null,
 	]
@@ -622,6 +628,52 @@ function ReferenceDmCard({ item }: { item: ReferenceDm }) {
 	);
 }
 
+function ReferenceFeedCard({ item }: { item: ReferenceFeedItem }) {
+	return (
+		<section className="today-reference-source">
+			<div
+				className="today-reference-source-head"
+				id={`reference-feed-${item.id}`}
+			>
+				<span className="today-reference-badge">
+					{item.kind === "flash" ? "快讯" : "文章"}
+				</span>
+				<strong className="today-reference-author">{item.publisher}</strong>
+				<time dateTime={item.publishedAt}>
+					{formatReferenceTimestamp(item.publishedAt)}
+				</time>
+			</div>
+			<p className="today-reference-source-body">
+				<strong>{item.title}</strong>
+				{item.summary ? `\n\n${item.summary}` : ""}
+			</p>
+			<p>
+				<a href={item.url} rel="noreferrer">
+					查看发布方原文
+				</a>
+			</p>
+		</section>
+	);
+}
+
+function referencedFeedItems(result: PeriodDigestRunResult) {
+	const feedItems = result.context.feedItems ?? [];
+	const referencedIds = new Set([
+		...(result.digest.sourceFeedItemIds ?? []),
+		...result.digest.keyTopics.flatMap((topic) => topic.feedItemIds ?? []),
+		...result.digest.notableLinks.flatMap(
+			(link) => link.sourceFeedItemIds ?? [],
+		),
+	]);
+	if (referencedIds.size === 0) {
+		return feedItems
+			.filter((item) => item.isImportant)
+			.concat(feedItems.filter((item) => !item.isImportant).slice(0, 20))
+			.slice(0, 40);
+	}
+	return feedItems.filter((item) => referencedIds.has(item.id));
+}
+
 function ReferenceDigestPrint({
 	generatedAt,
 	markdown,
@@ -642,7 +694,9 @@ function ReferenceDigestPrint({
 	const sections = groupReferenceSections(groups);
 	const tweetLookup = buildReferenceTweetLookup(result.context);
 	const { labelsById, orderedIds } = collectReferenceLabels(groups);
-	const sourceCount = orderedIds.length;
+	const feedItems = referencedFeedItems(result);
+	const sourceCount = orderedIds.length + feedItems.length;
+	const sourceScopeLabel = result.context.includeFeed ? "Home + Feed" : "Home";
 	const groupAnchors = new Map(
 		groups.map((group, index) => [
 			group,
@@ -683,7 +737,7 @@ function ReferenceDigestPrint({
 						: ""}
 					<br />
 					{generatedAt ? `生成日期：${generatedAt} · ` : ""}
-					来源：{String(sourceCount)} 条引用原文
+					来源：{String(sourceCount)} 条引用原文（{sourceScopeLabel}）
 				</p>
 				<table className="today-reference-cover-table">
 					<tbody>
@@ -748,8 +802,10 @@ function ReferenceDigestPrint({
 			<section className="today-reference-guide today-reference-sheet">
 				<h2>阅读说明</h2>
 				<p>
-					这份合集不是网页截图，而是把总结尾注对应的原始推文重新编成一份可打印文档。每个主题先保留网页上的标题和摘要，随后按尾注出现顺序列出原文。S01、S02
-					等是全局来源编号，方便在纸上做标记。
+					{result.context.includeFeed
+						? "这份合集不是网页截图，而是把总结引用的 Home 推文和 Feed 编辑来源重新编成一份可打印文档。每个主题先保留网页上的标题和摘要，随后按尾注出现顺序列出推文；Feed 来源单独保留发布方、时间和原文链接。"
+						: "这份合集不是网页截图，而是把总结引用的 Home 推文重新编成一份可打印文档。每个主题先保留网页上的标题和摘要，随后按尾注出现顺序列出推文。"}
+					S01、S02 等是推文来源编号，方便在纸上做标记。
 				</p>
 				<h2>目录</h2>
 				{groups.length > 0 ? (
@@ -850,6 +906,19 @@ function ReferenceDigestPrint({
 					<h2>DM 摘录</h2>
 					{result.context.dms.slice(0, 8).map((item) => (
 						<ReferenceDmCard item={item} key={item.id} />
+					))}
+				</section>
+			) : null}
+
+			{feedItems.length > 0 ? (
+				<section className="today-reference-section">
+					<h2>Feed 编辑来源</h2>
+					<p>
+						仅保留发布方、时间、短摘要和原文链接；快讯与文章是编辑来源，不等同于
+						BirdClaw 已独立核实。
+					</p>
+					{feedItems.map((item) => (
+						<ReferenceFeedCard item={item} key={item.id} />
 					))}
 				</section>
 			) : null}
@@ -979,6 +1048,7 @@ function applyHydratedProfilesToResult(
 function useDigestStream(
 	period: PeriodOption,
 	includeDms: boolean,
+	includeFeed: boolean,
 	since: string,
 	until: string,
 	enabled = true,
@@ -999,11 +1069,11 @@ function useDigestStream(
 	}, []);
 	const request = useCallback(
 		(signal: AbortSignal, refresh: boolean) =>
-			fetch(digestUrl(period, includeDms, refresh, since, until), {
+			fetch(digestUrl(period, includeDms, includeFeed, refresh, since, until), {
 				cache: "no-store",
 				signal,
 			}),
-		[includeDms, period, since, until],
+		[includeDms, includeFeed, period, since, until],
 	);
 	const onEvent = useCallback((event: PeriodDigestStreamEvent) => {
 		if (event.type === "status") {
@@ -1197,6 +1267,7 @@ export function TodayRouteView({
 		since,
 		until,
 		includeDms,
+		includeFeed,
 	} = searchState;
 	const historyEnabled = Boolean(controlledSearch && onSearchChange);
 	const [customRangeOpen, setCustomRangeOpen] = useState(
@@ -1226,7 +1297,14 @@ export function TodayRouteView({
 		restore,
 		run,
 		status,
-	} = useDigestStream(period, includeDms, since, until, !activeHistoryId);
+	} = useDigestStream(
+		period,
+		includeDms,
+		includeFeed,
+		since,
+		until,
+		!activeHistoryId,
+	);
 	const loadHistory = useCallback(async () => {
 		if (!historyEnabled) return;
 		const sequence = ++historyLoadSequence.current;
@@ -1482,7 +1560,7 @@ export function TodayRouteView({
 						</div>
 						<div
 							className={cx(
-								"today-screen-only max-w-full overflow-x-auto max-sm:w-full [&>button]:shrink-0",
+								"today-screen-only max-w-full overflow-x-auto max-sm:w-full max-sm:flex-wrap max-sm:overflow-visible [&>button]:shrink-0",
 								pageHeaderActionsClass,
 							)}
 						>
@@ -1579,7 +1657,20 @@ export function TodayRouteView({
 								</button>
 							))}
 						</div>
-						<label className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] px-3 py-1 text-[13px] font-medium text-[var(--ink-soft)]">
+						<label className="inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--line)] px-3 py-2 text-[13px] font-medium text-[var(--ink-soft)]">
+							<input
+								type="checkbox"
+								checked={includeFeed}
+								onChange={(event) =>
+									showLivePeriod({
+										...searchState,
+										includeFeed: event.currentTarget.checked,
+									})
+								}
+							/>
+							Feed
+						</label>
+						<label className="inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--line)] px-3 py-2 text-[13px] font-medium text-[var(--ink-soft)]">
 							<input
 								type="checkbox"
 								checked={includeDms}

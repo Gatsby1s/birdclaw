@@ -109,6 +109,18 @@ export function validateLinksSearch(
 	};
 }
 
+export interface FeedRouteSearch {
+	tab: "flash" | "article";
+}
+
+export function validateFeedSearch(
+	search: Record<string, unknown>,
+): FeedRouteSearch {
+	return {
+		tab: enumValue(search.tab, ["flash", "article"], "flash"),
+	};
+}
+
 export interface DiscussRouteSearch {
 	run: string;
 	q: string;
@@ -164,6 +176,7 @@ export interface TodayRouteSearch {
 	since: string;
 	until: string;
 	includeDms: boolean;
+	includeFeed: boolean;
 }
 
 export function validateTodaySearch(
@@ -186,6 +199,7 @@ export function validateTodaySearch(
 		since: customRange?.since ?? "",
 		until: customRange?.until ?? "",
 		includeDms: booleanValue(search.includeDms),
+		includeFeed: booleanValue(search.includeFeed, true),
 	};
 }
 

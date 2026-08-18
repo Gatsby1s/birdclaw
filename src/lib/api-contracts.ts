@@ -1056,6 +1056,61 @@ export const linkPreviewResponseSchema = z.object({
 });
 export type LinkPreviewResponse = z.infer<typeof linkPreviewResponseSchema>;
 
+export const feedItemKindSchema = z.enum(["flash", "article"]);
+export type FeedItemKind = z.infer<typeof feedItemKindSchema>;
+
+export const feedItemSchema = z.object({
+	id: z.string(),
+	source: z.string(),
+	externalId: z.string(),
+	kind: feedItemKindSchema,
+	title: z.string(),
+	summary: z.string(),
+	url: z.string(),
+	publisher: z.string(),
+	publishedAt: z.string(),
+	market: z.string(),
+	language: z.string(),
+	symbols: z.array(z.string()),
+	imageUrl: z.string().nullable(),
+	isImportant: z.boolean(),
+	updatedAt: z.string(),
+});
+export type FeedItem = z.infer<typeof feedItemSchema>;
+
+export const feedSyncStatusSchema = z.object({
+	source: z.string(),
+	kind: feedItemKindSchema,
+	state: z.enum(["idle", "syncing", "ready", "error"]),
+	lastStartedAt: z.string().nullable(),
+	lastSuccessAt: z.string().nullable(),
+	lastItemAt: z.string().nullable(),
+	error: z.string().nullable(),
+	updatedAt: z.string(),
+});
+export type FeedSyncStatus = z.infer<typeof feedSyncStatusSchema>;
+
+export const feedResponseSchema = z.object({
+	ok: z.literal(true),
+	kind: feedItemKindSchema,
+	items: z.array(feedItemSchema),
+	total: z.number().int().nonnegative(),
+	status: feedSyncStatusSchema,
+});
+export type FeedResponse = z.infer<typeof feedResponseSchema>;
+
+export const feedSyncResponseSchema = z.object({
+	ok: z.literal(true),
+	results: z.array(
+		z.object({
+			kind: feedItemKindSchema,
+			seen: z.number().int().nonnegative(),
+			changed: z.number().int().nonnegative(),
+		}),
+	),
+});
+export type FeedSyncResponse = z.infer<typeof feedSyncResponseSchema>;
+
 const actionTransportSchema = z.looseObject({
 	ok: z.boolean().default(true),
 	output: z.string().optional(),
