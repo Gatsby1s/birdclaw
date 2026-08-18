@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 0.8.93 - 2026-08-18
+
+### Added
+
+- Sync private profile remarks, descriptions, tags, and deletions from BirdClaw back into X Remark, while retaining the existing X Remark-to-BirdClaw import path.
+- Add one-tap `交易员` and `分析师` profile tags plus custom tag entry and removal in the private-note editor.
+
+### Changed
+
+- Poll the paired Railway X Remark bridge every 30 seconds and write tag names through X Remark's real tag IDs, creating missing tag records without duplicating existing names.
+- Queue existing and backup-restored BirdClaw notes for outbound sync when a stable X identifier is available; clearly keep unresolved handle-only notes local until they can be linked.
+
+### Fixed
+
+- Preserve newer X Remark edits during conflicts, chain rapid BirdClaw edits across in-flight revisions, and acknowledge only exact revisions after a post-apply full snapshot has reached BirdClaw.
+- Prevent recycled handles, stale local-cloud snapshots, partial acknowledgements, or an older in-flight acknowledgement from deleting or misattributing a newer private note.
+
 ## 0.8.92 - 2026-08-17
 
 ### Added
