@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 0.9.3 - 2026-08-18
+
+### Added
+
+- Fetch and persistently cache Tiger article full text from the official detail endpoint, with strict article identity, authentication-state, response-size, and content-integrity validation.
+- Read complete articles inside Feed through a mobile-safe on-demand expander while retaining the canonical Tiger source link.
+
+### Changed
+
+- Use cached full article bodies in Feed-enabled Today summaries, with per-article and total prompt budgets while keeping full text out of history and portable backups.
+- Refresh Today digest cache versions so earlier excerpt-only summaries cannot be reused after full-text support is deployed.
+
+### Fixed
+
+- Bound article hydration to 25 seconds and degrade individual failures without blocking Feed synchronization, background scheduling, or Today generation.
+- Reject corrupt or mismatched cached article bodies before they can reach the API, reader, or AI prompt.
+
 ## 0.9.2 - 2026-08-18
 
 ### Fixed
