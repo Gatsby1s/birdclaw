@@ -24,6 +24,8 @@ function resultForDate(date: string): PeriodDigestRunResult {
 		context: {
 			window: { label: date, ...window },
 			includeDms: false,
+			includeFeed: true,
+			twitterScope: "home",
 			counts: {
 				home: 4,
 				mentions: 1,
@@ -32,10 +34,30 @@ function resultForDate(date: string): PeriodDigestRunResult {
 				bookmarks: 0,
 				dms: 0,
 				links: 2,
+				feed: 1,
 			},
 			tweets: [],
 			dms: [],
 			links: [],
+			feedItems: [
+				{
+					id: "tiger:flash:history",
+					source: "tiger",
+					externalId: "history",
+					kind: "flash",
+					title: "Saved editorial item",
+					summary: "",
+					url: "https://www.laohu8.com/news/breaking?onlyImportant=true",
+					publisher: "Tiger News",
+					publishedAt: window.since,
+					market: "all",
+					language: "zh-CN",
+					symbols: [],
+					imageUrl: null,
+					isImportant: true,
+					updatedAt: window.since,
+				},
+			],
 			hash: `hash-${date}`,
 		},
 		digest: {
@@ -105,8 +127,29 @@ describe("daily period digest history", () => {
 		expect(detail?.result).toMatchObject({
 			markdown: "# Digest 2026-07-31\n\nSaved report.",
 			cached: true,
+			context: {
+				includeFeed: true,
+				twitterScope: "home",
+				feedItems: [{ id: "tiger:flash:history" }],
+			},
 		});
 		expect(listPeriodDigestHistory()).toHaveLength(1);
+	});
+
+	it("restores Home scope independently from the Feed toggle", () => {
+		const claim = claimPeriodDigestDate("2026-07-28");
+		if (!claim.claimed) throw new Error("Expected claim");
+		const result = resultForDate("2026-07-28");
+		result.context.includeFeed = false;
+		result.context.feedItems = [];
+		result.context.counts.feed = 0;
+		expect(
+			completePeriodDigestHistory(claim.id, claim.claimToken, result),
+		).toBe(true);
+		expect(getPeriodDigestHistory(claim.id)?.result.context).toMatchObject({
+			includeFeed: false,
+			twitterScope: "home",
+		});
 	});
 
 	it("prevents a stale worker from overwriting a reclaimed attempt", () => {

@@ -1022,7 +1022,7 @@ const definitions = {
 	period_digest_history: {
 		exportSql: `
       select id, digest_date, timezone, status, attempt_count, window_since,
-		window_until, include_dms, include_feed, provider, model, reasoning_effort,
+		window_until, include_dms, include_feed, twitter_scope, provider, model, reasoning_effort,
         service_tier, context_hash, counts_json, digest_json, markdown,
 		tweets_json, dms_json, links_json, feed_json, error, started_at, finished_at,
         created_at, updated_at
@@ -1036,11 +1036,11 @@ const definitions = {
 			sql: `
       insert into period_digest_history (
         id, digest_date, timezone, status, attempt_count, window_since,
-		window_until, include_dms, include_feed, provider, model, reasoning_effort,
+		window_until, include_dms, include_feed, twitter_scope, provider, model, reasoning_effort,
         service_tier, context_hash, counts_json, digest_json, markdown,
 		tweets_json, dms_json, links_json, feed_json, error, started_at, finished_at,
         created_at, updated_at
-	  ) values (?, ?, ?, 'ready', coalesce(?, 1), ?, ?, coalesce(?, 0), coalesce(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
+	  ) values (?, ?, ?, 'ready', coalesce(?, 1), ?, ?, coalesce(?, 0), coalesce(?, 0), coalesce(?, 'all'), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
       on conflict(digest_date) do update set
         timezone = excluded.timezone,
         status = 'ready',
@@ -1049,6 +1049,7 @@ const definitions = {
         window_until = excluded.window_until,
         include_dms = excluded.include_dms,
 		include_feed = excluded.include_feed,
+		twitter_scope = excluded.twitter_scope,
         provider = excluded.provider,
         model = excluded.model,
         reasoning_effort = excluded.reasoning_effort,
@@ -1077,6 +1078,7 @@ const definitions = {
 				"window_until",
 				"include_dms",
 				"include_feed",
+				"twitter_scope",
 				"provider",
 				"model",
 				"reasoning_effort",
@@ -1100,7 +1102,7 @@ const definitions = {
 	weekly_digest_history: {
 		exportSql: `
 		select id, week_start, week_end, timezone, status, attempt_count, format_version,
-		window_since, window_until, include_dms, include_feed, provider, model,
+		window_since, window_until, include_dms, include_feed, twitter_scope, provider, model,
         reasoning_effort, service_tier, context_hash, counts_json,
 		digest_json, markdown, tweets_json, dms_json, links_json, feed_json, error,
         started_at, finished_at, created_at, updated_at
@@ -1114,11 +1116,11 @@ const definitions = {
 			sql: `
       insert into weekly_digest_history (
 		id, week_start, week_end, timezone, status, attempt_count, format_version,
-		window_since, window_until, include_dms, include_feed, provider, model,
+		window_since, window_until, include_dms, include_feed, twitter_scope, provider, model,
         reasoning_effort, service_tier, context_hash, counts_json,
 		digest_json, markdown, tweets_json, dms_json, links_json, feed_json, error,
         started_at, finished_at, created_at, updated_at
-	  ) values (?, ?, ?, ?, 'ready', coalesce(?, 1), coalesce(?, 1), ?, ?, coalesce(?, 0), coalesce(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
+	  ) values (?, ?, ?, ?, 'ready', coalesce(?, 1), coalesce(?, 1), ?, ?, coalesce(?, 0), coalesce(?, 0), coalesce(?, 'all'), ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), coalesce(?, '[]'), ?, ?, ?, ?, ?)
       on conflict(week_start) do update set
 		week_end = excluded.week_end,
 		timezone = excluded.timezone,
@@ -1130,6 +1132,7 @@ const definitions = {
         window_until = excluded.window_until,
         include_dms = excluded.include_dms,
 		include_feed = excluded.include_feed,
+		twitter_scope = excluded.twitter_scope,
         provider = excluded.provider,
         model = excluded.model,
         reasoning_effort = excluded.reasoning_effort,
@@ -1164,6 +1167,7 @@ const definitions = {
 				"window_until",
 				"include_dms",
 				"include_feed",
+				"twitter_scope",
 				"provider",
 				"model",
 				"reasoning_effort",

@@ -36,6 +36,10 @@ import {
 	stopLocalTwitterCollector,
 } from "./local-twitter-collector";
 import {
+	startEditorialFeedScheduler,
+	stopEditorialFeedScheduler,
+} from "./editorial-feed-scheduler";
+import {
 	startPeriodDigestScheduler,
 	stopPeriodDigestScheduler,
 } from "./period-digest-scheduler";
@@ -723,6 +727,7 @@ export async function startProductionServer({
 		}
 	});
 	server.once("close", () => {
+		stopEditorialFeedScheduler();
 		stopPeriodDigestScheduler();
 		stopWeeklyDigestScheduler();
 		stopTwillotFollowScheduler();
@@ -736,6 +741,7 @@ export async function startProductionServer({
 		server.listen(port, host, resolve);
 	});
 	try {
+		startEditorialFeedScheduler();
 		startPeriodDigestScheduler();
 		startWeeklyDigestScheduler();
 		startTwillotFollowScheduler();
@@ -771,6 +777,7 @@ export async function runProductionServer(options: ProductionServerOptions) {
 		};
 		const stop = (signal: NodeJS.Signals) => {
 			removeHandlers();
+			stopEditorialFeedScheduler();
 			stopPeriodDigestScheduler();
 			stopWeeklyDigestScheduler();
 			stopTwillotFollowScheduler();

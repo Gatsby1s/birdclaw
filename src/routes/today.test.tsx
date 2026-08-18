@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PeriodDigestRunResult } from "#/lib/period-digest";
 import { validateTodaySearch } from "#/lib/route-search";
 import type { TweetMediaItem } from "#/lib/types";
 import { ndjsonResponse } from "#/test/ndjson";
@@ -51,7 +52,11 @@ function referenceTimestamp(value: string) {
 	)}`;
 }
 
-function digestResult(label: string, markdown: string, includeDms = false) {
+function digestResult(
+	label: string,
+	markdown: string,
+	includeDms = false,
+): PeriodDigestRunResult {
 	return {
 		context: {
 			window: {
@@ -221,6 +226,9 @@ describe("today route", () => {
 			await screen.findByRole("heading", { name: "Today", level: 1 }),
 		).toBeInTheDocument();
 		expect(
+			urls.some((url) => url.searchParams.get("includeFeed") === "true"),
+		).toBe(true);
+		expect(
 			screen.getByRole("heading", {
 				name: "What people are talking about",
 				level: 2,
@@ -264,6 +272,13 @@ describe("today route", () => {
 		expect(screen.getByRole("img", { name: "Alice Fresh" })).toHaveAttribute(
 			"src",
 			expect.stringContaining("/api/avatar?profileId=profile_alice&v="),
+		);
+
+		fireEvent.click(screen.getByLabelText("Feed"));
+		await waitFor(() =>
+			expect(
+				urls.some((url) => url.searchParams.get("includeFeed") === "false"),
+			).toBe(true),
 		);
 
 		fireEvent.click(screen.getByRole("button", { name: "Week" }));
@@ -705,6 +720,22 @@ describe("today route", () => {
 				);
 				expect(referenceText).not.toContain("3 home · 2 mentions · 4 links");
 				expect(referenceText).not.toContain("8:00 PM");
+				expect(
+					within(referencePdf).getByRole("heading", {
+						name: "Feed 编辑来源",
+						level: 2,
+					}),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getByText("Important feed source"),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getByRole("link", { name: "查看发布方原文" }),
+				).toHaveAttribute(
+					"href",
+					"https://www.laohu8.com/news/breaking?onlyImportant=true",
+				);
+				expect(referenceText).toContain("BirdClaw 已独立核实");
 			} finally {
 				window.dispatchEvent(new Event("afterprint"));
 			}
@@ -741,6 +772,29 @@ describe("today route", () => {
 				const result = digestResult("Today", markdown);
 				result.digest.summary =
 					"Structured summary must not replace the webpage.";
+				result.digest.sourceFeedItemIds = ["tiger:flash:pdf"];
+				result.context.includeFeed = true;
+				result.context.twitterScope = "home";
+				result.context.counts.feed = 1;
+				result.context.feedItems = [
+					{
+						id: "tiger:flash:pdf",
+						source: "tiger",
+						externalId: "pdf",
+						kind: "flash",
+						title: "Important feed source",
+						summary: "A short editorial summary.",
+						url: "https://www.laohu8.com/news/breaking?onlyImportant=true",
+						publisher: "Tiger News",
+						publishedAt: "2026-05-16T09:00:00.000Z",
+						market: "all",
+						language: "zh-CN",
+						symbols: [],
+						imageUrl: null,
+						isImportant: true,
+						updatedAt: "2026-05-16T09:00:01.000Z",
+					},
+				];
 				Object.assign(result.context.tweets[0]!, {
 					replyToTweet: {
 						id: "tweet_parent",
@@ -796,6 +850,45 @@ describe("today route", () => {
 		expect(digestRequests).toHaveLength(1);
 		expect(document.title).toBe("birdclaw");
 		expect(document.body.dataset.todayPrintMode).toBeUndefined();
+	});
+
+	it("describes a Feed-off reference PDF as Home-only", async () => {
+		const printMock = vi.spyOn(window, "print").mockImplementation(() => {
+			try {
+				const referencePdf = screen.getByTestId("today-reference-pdf");
+				expect(referencePdf).toHaveTextContent("引用原文（Home）");
+				expect(referencePdf).not.toHaveTextContent("Home + Feed");
+				expect(referencePdf).not.toHaveTextContent("Feed 编辑来源");
+			} finally {
+				window.dispatchEvent(new Event("afterprint"));
+			}
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return new Response(JSON.stringify({ ok: true, results: [] }), {
+						headers: { "content-type": "application/json" },
+					});
+				}
+				const markdown = "# Today\n\nHome-only summary. (tweet_1)";
+				const result = digestResult("Today", markdown);
+				result.context.includeFeed = false;
+				result.context.twitterScope = "home";
+				result.context.counts.feed = 0;
+				result.context.feedItems = [];
+				return ndjsonResponse([
+					{ type: "delta", delta: markdown },
+					{ type: "done", result },
+				]);
+			}),
+		);
+
+		render(<TodayRoute />);
+		await screen.findByRole("heading", { name: "Today", level: 1 });
+		fireEvent.click(screen.getByRole("button", { name: "导出完整 PDF" }));
+		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
 	});
 
 	it("renders generated citations as source links without coloring the prose", async () => {

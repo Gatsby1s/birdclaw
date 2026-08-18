@@ -79,6 +79,24 @@ describe("period digest", () => {
 		);
 	});
 
+	it("does not refresh mentions or threads for a Home-only digest", () => {
+		expect(
+			__test__.resolveRefreshScope(
+				{ twitterScope: "home" },
+				{ timeline: true, mentions: true, threads: true },
+			),
+		).toEqual({
+			includeTimeline: true,
+			includeMentions: false,
+			includeThreads: false,
+		});
+		expect(__test__.resolveRefreshScope({}, {})).toEqual({
+			includeTimeline: true,
+			includeMentions: true,
+			includeThreads: true,
+		});
+	});
+
 	it("collects a deterministic local context hash that tracks prompt inputs", () => {
 		const first = collectPeriodDigestContext({
 			since: "2026-01-01T00:00:00.000Z",
@@ -129,6 +147,69 @@ describe("period digest", () => {
 			"exactly match one corresponding keyTopics[].title",
 		);
 		expect(prompt).toContain(context.tweets[0]?.text);
+	});
+
+	it("builds Today from Home plus an optional editorial feed", () => {
+		const db = getNativeDb();
+		db.prepare(
+			`insert into feed_items (
+			 id, source, external_id, kind, title, summary, url, publisher,
+			 published_at, market, language, symbols_json, image_url, is_important,
+			 content_hash, first_seen_at, updated_at
+			) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, 1, ?, ?, ?)`,
+		).run(
+			"tiger:flash:test-feed",
+			"tiger",
+			"test-feed",
+			"flash",
+			"Important verified editorial update",
+			"",
+			"https://www.laohu8.com/news/breaking?onlyImportant=true",
+			"Tiger News",
+			"2026-08-18T08:00:00.000Z",
+			"all",
+			"zh-CN",
+			"[]",
+			"feed-hash",
+			"2026-08-18T08:00:00.000Z",
+			"2026-08-18T08:00:00.000Z",
+		);
+
+		const withFeed = collectPeriodDigestContext({
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			maxTweets: 20,
+			includeFeed: true,
+			twitterScope: "home",
+		});
+		const withoutFeed = collectPeriodDigestContext({
+			since: "2026-01-01T00:00:00.000Z",
+			until: "2027-01-01T00:00:00.000Z",
+			maxTweets: 20,
+			includeFeed: false,
+			twitterScope: "home",
+		});
+
+		expect(withFeed).toMatchObject({
+			includeFeed: true,
+			twitterScope: "home",
+			counts: { mentions: 0, authored: 0, likes: 0, bookmarks: 0, feed: 1 },
+		});
+		expect(withFeed.feedItems?.[0]).toMatchObject({
+			id: "tiger:flash:test-feed",
+			isImportant: true,
+		});
+		expect(withoutFeed.counts.feed).toBe(0);
+		expect(withoutFeed.feedItems).toEqual([]);
+		expect(withFeed.hash).not.toBe(withoutFeed.hash);
+		expect(__test__.digestCacheKey(withFeed, { includeFeed: true })).not.toBe(
+			__test__.digestCacheKey(withoutFeed, { includeFeed: false }),
+		);
+		const prompt = __test__.buildPrompt(withFeed);
+		expect(prompt).toContain("tiger:flash:test-feed");
+		expect(prompt).toContain(
+			"editorial reports, not as automatically verified truth",
+		);
 	});
 
 	it("keeps an older special-follow post ahead of newer posts at every cap", () => {
@@ -1016,7 +1097,7 @@ describe("period digest", () => {
 				`
 				update sync_cache
 				set updated_at = '2020-01-01T00:00:00.000Z'
-				where cache_key like 'period-digest:v4:%'
+				where cache_key like 'period-digest:v5:%'
 				`,
 			)
 			.run();

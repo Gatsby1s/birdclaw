@@ -19,13 +19,17 @@ const errorEventSchema = z.object({
 
 const periodContextSchema = z.looseObject({
 	includeDms: z.boolean(),
+	includeFeed: z.boolean().optional().default(false),
+	twitterScope: z.enum(["home", "all"]).optional().default("all"),
 	counts: z.looseObject({
 		home: z.number(),
 		mentions: z.number(),
 		links: z.number(),
 		dms: z.number(),
+		feed: z.number().optional().default(0),
 	}),
 	tweets: z.array(z.unknown()),
+	feedItems: z.array(z.unknown()).optional().default([]),
 });
 const discussionContextSchema = z.looseObject({
 	includeDms: z.boolean(),

@@ -77,7 +77,7 @@ afterEach(() => {
 });
 
 describe("database init", () => {
-	it("keeps the schema at v19 while fresh installs include X Remark sync state", () => {
+	it("keeps the schema at v20 with X Remark sync and editorial feed storage", () => {
 		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-"));
 		tempDirs.push(tempDir);
 		process.env.BIRDCLAW_HOME = tempDir;
@@ -141,7 +141,16 @@ describe("database init", () => {
 		expect(
 			db.prepare("select * from xremark_outbound_state where id = 1").get(),
 		).toEqual({ id: 1, next_revision: 0, last_acked_revision: 0 });
-		expect(db.pragma("user_version", { simple: true })).toBe(19);
+		expect(
+			db
+				.prepare(
+					`select name from sqlite_master
+					 where type = 'table' and name in ('feed_items', 'feed_sync_state')
+					 order by name`,
+				)
+				.all(),
+		).toEqual([{ name: "feed_items" }, { name: "feed_sync_state" }]);
+		expect(db.pragma("user_version", { simple: true })).toBe(20);
 	});
 
 	it.each([17, 18])(
@@ -228,7 +237,7 @@ describe("database init", () => {
 			expect(
 				db.prepare("select next_revision from xremark_outbound_state").get(),
 			).toEqual({ next_revision: 2 });
-			expect(db.pragma("user_version", { simple: true })).toBe(19);
+			expect(db.pragma("user_version", { simple: true })).toBe(20);
 		},
 	);
 
@@ -263,6 +272,55 @@ describe("database init", () => {
 				)
 				.get(),
 		).toEqual({ is_special_follow: 0 });
+	});
+
+	it("migrates a v19 database to editorial feed storage without losing data", () => {
+		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-db-feed-"));
+		tempDirs.push(tempDir);
+		process.env.BIRDCLAW_HOME = tempDir;
+		resetBirdclawPathsForTests();
+
+		const previous = getNativeDb({ seedDemoData: false });
+		previous.exec(`
+			create table migration_sentinel (value text not null);
+			insert into migration_sentinel (value) values ('keep-me');
+			drop table feed_sync_state;
+			drop table feed_items;
+			alter table period_digest_history drop column twitter_scope;
+			alter table period_digest_history drop column feed_json;
+			alter table period_digest_history drop column include_feed;
+			alter table weekly_digest_history drop column twitter_scope;
+			alter table weekly_digest_history drop column feed_json;
+			alter table weekly_digest_history drop column include_feed;
+			pragma user_version = 19;
+		`);
+		resetDatabaseForTests();
+
+		const db = getNativeDb({ seedDemoData: false });
+		expect(db.prepare("select value from migration_sentinel").get()).toEqual({
+			value: "keep-me",
+		});
+		expect(
+			db
+				.prepare(
+					`select name from sqlite_master
+					 where type = 'table' and name in ('feed_items', 'feed_sync_state')
+					 order by name`,
+				)
+				.all(),
+		).toEqual([{ name: "feed_items" }, { name: "feed_sync_state" }]);
+		for (const table of ["period_digest_history", "weekly_digest_history"]) {
+			const columns = db.prepare(`pragma table_info(${table})`).all() as Array<{
+				name: string;
+			}>;
+			expect(columns.map((column) => column.name)).toEqual(
+				expect.arrayContaining(["include_feed", "feed_json", "twitter_scope"]),
+			);
+		}
+		expect(
+			db.prepare("select * from xremark_outbound_state where id = 1").get(),
+		).toEqual({ id: 1, next_revision: 0, last_acked_revision: 0 });
+		expect(db.pragma("user_version", { simple: true })).toBe(20);
 	});
 
 	it("seeds demo data after an initial unseeded open", () => {
@@ -618,7 +676,7 @@ describe("database init", () => {
 				.all()
 				.map((column) => (column as { name: string }).name),
 		).toContain("format_version");
-		expect(db.pragma("user_version", { simple: true })).toBe(19);
+		expect(db.pragma("user_version", { simple: true })).toBe(20);
 	});
 
 	it("normalizes legacy tweet timestamps during startup migration", () => {
@@ -647,7 +705,7 @@ describe("database init", () => {
 				.prepare("select created_at from tweets where id = ?")
 				.get("tweet_legacy_date"),
 		).toEqual({ created_at: "2026-06-23T06:06:01.000Z" });
-		expect(db.pragma("user_version", { simple: true })).toBe(19);
+		expect(db.pragma("user_version", { simple: true })).toBe(20);
 	});
 
 	it("migrates v12 profile notes without overriding imported descriptions", () => {
@@ -684,7 +742,7 @@ describe("database init", () => {
 				)
 				.get(),
 		).toEqual({ remark: "Legacy local remark", description: null });
-		expect(db.pragma("user_version", { simple: true })).toBe(19);
+		expect(db.pragma("user_version", { simple: true })).toBe(20);
 	});
 
 	it("does not request a write lock for completed startup backfills", async () => {

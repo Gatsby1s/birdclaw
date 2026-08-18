@@ -9,7 +9,9 @@ import {
 	resolveAnalysisModelSettings,
 } from "./analysis-runtime";
 import { maybeAutoSyncBackupEffect } from "./backup";
+import type { FeedItem } from "./api-contracts";
 import { runEffectPromise } from "./effect-runtime";
+import { listFeedItems } from "./editorial-feed";
 import { getLinkInsights } from "./link-insights";
 import { syncMentionThreadsEffect } from "./mention-threads-live";
 import { syncMentionsEffect } from "./mentions-live";
@@ -52,6 +54,8 @@ export interface PeriodDigestOptions {
 	until?: string;
 	account?: string;
 	includeDms?: boolean;
+	includeFeed?: boolean;
+	twitterScope?: "home" | "all";
 	refresh?: boolean;
 	model?: string;
 	language?: string;
@@ -60,6 +64,7 @@ export interface PeriodDigestOptions {
 	signal?: AbortSignal;
 	maxTweets?: number;
 	maxLinks?: number;
+	maxFeedItems?: number;
 	liveSync?: boolean;
 	liveSyncMode?: HomeTimelineMode;
 	liveTimelineLimit?: number;
@@ -112,6 +117,7 @@ const PeriodDigestSchema = z.object({
 			summary: z.string().min(1),
 			tweetIds: z.array(z.string()).default([]),
 			handles: z.array(z.string()).default([]),
+			feedItemIds: z.array(z.string()).optional(),
 		}),
 	),
 	notableLinks: z.array(
@@ -120,6 +126,7 @@ const PeriodDigestSchema = z.object({
 			url: z.string().min(1),
 			why: z.string().min(1),
 			sourceTweetIds: z.array(z.string()).default([]),
+			sourceFeedItemIds: z.array(z.string()).optional(),
 		}),
 	),
 	people: z.array(
@@ -138,6 +145,7 @@ const PeriodDigestSchema = z.object({
 		}),
 	),
 	sourceTweetIds: z.array(z.string()).default([]),
+	sourceFeedItemIds: z.array(z.string()).optional(),
 });
 
 const MAX_DIGEST_LANGUAGE_LENGTH = 64;
@@ -231,16 +239,20 @@ export interface PeriodDigestContext {
 	window: PeriodDigestWindow;
 	account?: string;
 	includeDms: boolean;
-	counts: Record<PeriodDigestSourceKind | "links", number>;
+	includeFeed?: boolean;
+	twitterScope?: "home" | "all";
+	counts: Record<PeriodDigestSourceKind | "links", number> & { feed?: number };
 	tweets: CompactTweet[];
 	dms: CompactDm[];
 	links: CompactLink[];
+	feedItems?: FeedItem[];
 	priorityFingerprint?: string;
 	hash: string;
 }
 
 const DEFAULT_MAX_TWEETS = 2_500;
 const DEFAULT_MAX_LINKS = 12;
+const DEFAULT_MAX_FEED_ITEMS = 200;
 const DEFAULT_LIVE_TIMELINE_MAX_PAGES = undefined;
 const DEFAULT_LIVE_MENTIONS_LIMIT = 100;
 const DEFAULT_LIVE_MENTIONS_MAX_PAGES = undefined;
@@ -555,7 +567,9 @@ function compactLinks(options: {
 	account?: string;
 	window: PeriodDigestWindow;
 	limit: number;
+	allowedTweetIds?: ReadonlySet<string>;
 }) {
+	const allowedTweetIds = options.allowedTweetIds;
 	return getLinkInsights({
 		account: options.account,
 		range: "today",
@@ -565,27 +579,41 @@ function compactLinks(options: {
 		until: options.window.until,
 		limit: options.limit,
 		commentsLimit: 5,
-	}).items.map(
-		(item): CompactLink => ({
-			title: item.title ?? item.displayUrl,
-			url: item.url,
-			displayUrl: item.displayUrl,
-			description: item.description,
-			shareCount: item.shareCount,
-			commentCount: item.commentCount,
-			lastSeenAt: item.lastSeenAt,
-			mentions: item.mentions.slice(0, 5).map((mention) => ({
-				id: mention.id,
-				sourceKind: mention.sourceKind,
-				sourceId: mention.sourceId,
-				createdAt: mention.createdAt,
-				author: mention.sharedBy?.handle,
-				text:
-					mention.commentText || mention.sharedContentText || mention.rawText,
-				tweetId: mention.timelineTweetId ?? mention.contentTweetId,
-			})),
-		}),
-	);
+	}).items.flatMap((item): CompactLink[] => {
+		const mentions = item.mentions
+			.filter((mention) => {
+				if (!allowedTweetIds) return true;
+				const id = mention.timelineTweetId ?? mention.contentTweetId;
+				return Boolean(
+					id &&
+					(allowedTweetIds.has(id) ||
+						allowedTweetIds.has(id.replace(/^tweet_/, ""))),
+				);
+			})
+			.slice(0, 5);
+		if (allowedTweetIds && mentions.length === 0) return [];
+		return [
+			{
+				title: item.title ?? item.displayUrl,
+				url: item.url,
+				displayUrl: item.displayUrl,
+				description: item.description,
+				shareCount: item.shareCount,
+				commentCount: item.commentCount,
+				lastSeenAt: item.lastSeenAt,
+				mentions: mentions.map((mention) => ({
+					id: mention.id,
+					sourceKind: mention.sourceKind,
+					sourceId: mention.sourceId,
+					createdAt: mention.createdAt,
+					author: mention.sharedBy?.handle,
+					text:
+						mention.commentText || mention.sharedContentText || mention.rawText,
+					tweetId: mention.timelineTweetId ?? mention.contentTweetId,
+				})),
+			},
+		];
+	});
 }
 
 function contextHash(context: Omit<PeriodDigestContext, "hash">) {
@@ -598,6 +626,8 @@ function contextHash(context: Omit<PeriodDigestContext, "hash">) {
 				},
 				account: context.account,
 				includeDms: context.includeDms,
+				includeFeed: context.includeFeed,
+				twitterScope: context.twitterScope,
 				priorityFingerprint: context.priorityFingerprint,
 				tweets: context.tweets.map((tweet) => [
 					tweet.id,
@@ -630,6 +660,19 @@ function contextHash(context: Omit<PeriodDigestContext, "hash">) {
 					link.commentCount,
 					link.lastSeenAt,
 				]),
+				feedItems: (context.feedItems ?? []).map((item) => [
+					item.id,
+					item.kind,
+					item.title,
+					item.summary,
+					item.url,
+					item.publisher,
+					item.publishedAt,
+					item.market,
+					item.symbols,
+					item.isImportant,
+					item.updatedAt,
+				]),
 			}),
 		)
 		.digest("hex");
@@ -652,6 +695,12 @@ export function collectPeriodDigestContext(
 		3,
 		Math.trunc(options.maxLinks ?? DEFAULT_MAX_LINKS),
 	);
+	const maxFeedItems = Math.max(
+		1,
+		Math.min(500, Math.trunc(options.maxFeedItems ?? DEFAULT_MAX_FEED_ITEMS)),
+	);
+	const includeFeed = Boolean(options.includeFeed);
+	const twitterScope = options.twitterScope ?? "all";
 	const home = collectTweetsForDigestSource("home", {
 		account: options.account,
 		window,
@@ -659,34 +708,46 @@ export function collectPeriodDigestContext(
 		balanceAcrossDays,
 		prioritySnapshot,
 	});
-	const mentions = collectTweetsForDigestSource("mentions", {
-		account: options.account,
-		window,
-		limit: maxTweets,
-		balanceAcrossDays,
-		prioritySnapshot,
-	});
-	const authored = collectTweetsForDigestSource("authored", {
-		account: options.account,
-		window,
-		limit: maxTweets,
-		balanceAcrossDays,
-		prioritySnapshot,
-	});
-	const likes = collectTweetsForDigestSource("likes", {
-		account: options.account,
-		window,
-		limit: maxTweets,
-		balanceAcrossDays,
-		prioritySnapshot,
-	});
-	const bookmarks = collectTweetsForDigestSource("bookmarks", {
-		account: options.account,
-		window,
-		limit: maxTweets,
-		balanceAcrossDays,
-		prioritySnapshot,
-	});
+	const mentions =
+		twitterScope === "home"
+			? []
+			: collectTweetsForDigestSource("mentions", {
+					account: options.account,
+					window,
+					limit: maxTweets,
+					balanceAcrossDays,
+					prioritySnapshot,
+				});
+	const authored =
+		twitterScope === "home"
+			? []
+			: collectTweetsForDigestSource("authored", {
+					account: options.account,
+					window,
+					limit: maxTweets,
+					balanceAcrossDays,
+					prioritySnapshot,
+				});
+	const likes =
+		twitterScope === "home"
+			? []
+			: collectTweetsForDigestSource("likes", {
+					account: options.account,
+					window,
+					limit: maxTweets,
+					balanceAcrossDays,
+					prioritySnapshot,
+				});
+	const bookmarks =
+		twitterScope === "home"
+			? []
+			: collectTweetsForDigestSource("bookmarks", {
+					account: options.account,
+					window,
+					limit: maxTweets,
+					balanceAcrossDays,
+					prioritySnapshot,
+				});
 	const dms = collectDms({
 		account: options.account,
 		includeDms: Boolean(options.includeDms),
@@ -697,7 +758,30 @@ export function collectPeriodDigestContext(
 		account: options.account,
 		window,
 		limit: maxLinks,
+		...(twitterScope === "home"
+			? { allowedTweetIds: new Set(home.map((tweet) => tweet.id)) }
+			: {}),
 	});
+	const feedItems = includeFeed
+		? [
+				...listFeedItems({
+					kind: "flash",
+					since: window.since,
+					until: window.until,
+					limit: maxFeedItems,
+				}),
+				...listFeedItems({
+					kind: "article",
+					since: window.since,
+					until: window.until,
+					limit: maxFeedItems,
+				}),
+			]
+				.sort((left, right) =>
+					right.publishedAt.localeCompare(left.publishedAt),
+				)
+				.slice(0, maxFeedItems)
+		: [];
 	const candidateTweets = dedupeTweets([
 		...home,
 		...mentions,
@@ -725,6 +809,8 @@ export function collectPeriodDigestContext(
 		window,
 		...(options.account ? { account: options.account } : {}),
 		includeDms: Boolean(options.includeDms),
+		includeFeed,
+		twitterScope,
 		counts: {
 			home: home.length,
 			mentions: mentions.length,
@@ -733,10 +819,12 @@ export function collectPeriodDigestContext(
 			bookmarks: bookmarks.length,
 			dms: dms.length,
 			links: links.length,
+			feed: feedItems.length,
 		},
 		tweets,
 		dms,
 		links,
+		feedItems,
 		priorityFingerprint: prioritySnapshot.fingerprint,
 	} satisfies Omit<PeriodDigestContext, "hash">;
 	return {
@@ -845,22 +933,35 @@ function formatPageDetail({
 		.join(" · ");
 }
 
+interface PeriodDigestRefreshPhase {
+	timeline?: boolean;
+	mentions?: boolean;
+	threads?: boolean;
+	threadTweetIds?: string[];
+}
+
+function resolveRefreshScope(
+	options: PeriodDigestOptions,
+	phase: PeriodDigestRefreshPhase,
+) {
+	const homeOnly = options.twitterScope === "home";
+	return {
+		includeTimeline: phase.timeline ?? true,
+		includeMentions: homeOnly ? false : (phase.mentions ?? true),
+		includeThreads: homeOnly ? false : (phase.threads ?? true),
+	};
+}
+
 function refreshPeriodDigestInputsEffect(
 	options: PeriodDigestOptions,
-	phase: {
-		timeline?: boolean;
-		mentions?: boolean;
-		threads?: boolean;
-		threadTweetIds?: string[];
-	} = {},
+	phase: PeriodDigestRefreshPhase = {},
 	handlers: PeriodDigestStreamHandlers = {},
 ): Effect.Effect<void, unknown> {
 	if (!options.liveSync) {
 		return Effect.void;
 	}
-	const includeTimeline = phase.timeline ?? true;
-	const includeMentions = phase.mentions ?? true;
-	const includeThreads = phase.threads ?? true;
+	const { includeTimeline, includeMentions, includeThreads } =
+		resolveRefreshScope(options, phase);
 	const window = resolvePeriodDigestWindow(options);
 	const liveStartTime = floorIsoToHour(window.since);
 	const mode = options.liveSyncMode ?? "xurl";
@@ -1037,7 +1138,7 @@ function digestCacheKey(
 	options: PeriodDigestOptions,
 ) {
 	const parts = [
-		"period-digest:v4",
+		"period-digest:v5",
 		providerFromOptions(options),
 		modelFromOptions(options),
 		reasoningEffortFromOptions(options),
@@ -1064,11 +1165,17 @@ function latestDigestCacheKey(options: PeriodDigestOptions) {
 		until: options.until?.trim() || null,
 		account: options.account?.trim() || null,
 		includeDms: Boolean(options.includeDms),
+		includeFeed: Boolean(options.includeFeed),
+		twitterScope: options.twitterScope ?? "all",
 		maxTweets: Math.max(
 			20,
 			Math.trunc(options.maxTweets ?? DEFAULT_MAX_TWEETS),
 		),
 		maxLinks: Math.max(3, Math.trunc(options.maxLinks ?? DEFAULT_MAX_LINKS)),
+		maxFeedItems: Math.max(
+			1,
+			Math.min(500, Math.trunc(options.maxFeedItems ?? DEFAULT_MAX_FEED_ITEMS)),
+		),
 		provider: providerFromOptions(options),
 		model: modelFromOptions(options),
 		language: languageFromOptions(options) ?? null,
@@ -1080,7 +1187,7 @@ function latestDigestCacheKey(options: PeriodDigestOptions) {
 			options.prioritySnapshot?.fingerprint ??
 			createProfilePrioritySnapshot().fingerprint,
 	};
-	return `period-digest-latest:v3:${createHash("sha1")
+	return `period-digest-latest:v4:${createHash("sha1")
 		.update(JSON.stringify(identity))
 		.digest("hex")}`;
 }
@@ -1279,6 +1386,25 @@ function buildPrompt(
 		replyToId: tweet.replyToId,
 		replyToTweet: tweet.replyToTweet,
 	}));
+	const promptFeedItems = [...(context.feedItems ?? [])]
+		.sort((left, right) => {
+			if (left.isImportant !== right.isImportant) {
+				return left.isImportant ? -1 : 1;
+			}
+			return right.publishedAt.localeCompare(left.publishedAt);
+		})
+		.map((item) => ({
+			id: item.id,
+			kind: item.kind,
+			title: item.title,
+			summary: item.summary,
+			url: item.url,
+			publisher: item.publisher,
+			publishedAt: item.publishedAt,
+			market: item.market,
+			symbols: item.symbols,
+			isImportant: item.isImportant,
+		}));
 	const fitDataset = () => {
 		const maxPromptDataChars = weeklyDeepDive
 			? MAX_WEEKLY_PROMPT_DATA_CHARS
@@ -1286,13 +1412,24 @@ function buildPrompt(
 		let tweetCount = promptTweets.length;
 		let dmCount = context.dms.length;
 		let linkCount = context.links.length;
-		const datasetFor = (tweets: number, dms: number, links: number) => ({
+		let feedCount = promptFeedItems.length;
+		const datasetFor = (
+			tweets: number,
+			dms: number,
+			links: number,
+			feed: number,
+		) => ({
 			tweets: promptTweets.slice(0, tweets),
 			dms: context.dms.slice(0, dms),
 			links: context.links.slice(0, links),
+			feedItems: promptFeedItems.slice(0, feed),
 		});
-		const lengthFor = (tweets: number, dms: number, links: number) =>
-			JSON.stringify(datasetFor(tweets, dms, links)).length;
+		const lengthFor = (
+			tweets: number,
+			dms: number,
+			links: number,
+			feed: number,
+		) => JSON.stringify(datasetFor(tweets, dms, links, feed)).length;
 		const fitCount = (max: number, fits: (count: number) => boolean) => {
 			let low = 0;
 			let high = max;
@@ -1308,31 +1445,57 @@ function buildPrompt(
 			}
 			return best;
 		};
-		if (lengthFor(tweetCount, dmCount, linkCount) <= maxPromptDataChars) {
+		if (
+			lengthFor(tweetCount, dmCount, linkCount, feedCount) <= maxPromptDataChars
+		) {
 			return {
-				dataset: datasetFor(tweetCount, dmCount, linkCount),
+				dataset: datasetFor(tweetCount, dmCount, linkCount, feedCount),
 				tweetCount,
+				feedCount,
 			};
 		}
 		dmCount = fitCount(
 			dmCount,
-			(count) => lengthFor(tweetCount, count, linkCount) <= maxPromptDataChars,
+			(count) =>
+				lengthFor(tweetCount, count, linkCount, feedCount) <=
+				maxPromptDataChars,
 		);
-		if (lengthFor(tweetCount, dmCount, linkCount) > maxPromptDataChars) {
+		if (
+			lengthFor(tweetCount, dmCount, linkCount, feedCount) > maxPromptDataChars
+		) {
 			linkCount = fitCount(
 				linkCount,
-				(count) => lengthFor(tweetCount, dmCount, count) <= maxPromptDataChars,
+				(count) =>
+					lengthFor(tweetCount, dmCount, count, feedCount) <=
+					maxPromptDataChars,
 			);
 		}
-		if (lengthFor(tweetCount, dmCount, linkCount) > maxPromptDataChars) {
+		if (
+			lengthFor(tweetCount, dmCount, linkCount, feedCount) > maxPromptDataChars
+		) {
 			tweetCount = fitCount(
 				tweetCount,
-				(count) => lengthFor(count, dmCount, linkCount) <= maxPromptDataChars,
+				(count) =>
+					lengthFor(count, dmCount, linkCount, feedCount) <= maxPromptDataChars,
 			);
 		}
-		return { dataset: datasetFor(tweetCount, dmCount, linkCount), tweetCount };
+		if (
+			lengthFor(tweetCount, dmCount, linkCount, feedCount) > maxPromptDataChars
+		) {
+			feedCount = fitCount(
+				feedCount,
+				(count) =>
+					lengthFor(tweetCount, dmCount, linkCount, count) <=
+					maxPromptDataChars,
+			);
+		}
+		return {
+			dataset: datasetFor(tweetCount, dmCount, linkCount, feedCount),
+			tweetCount,
+			feedCount,
+		};
 	};
-	const { dataset, tweetCount } = fitDataset();
+	const { dataset, tweetCount, feedCount } = fitDataset();
 
 	const reportRequirements = weeklyDeepDive
 		? `- This is a weekly deep-dive, not a daily digest. When the dataset is substantial, target 7,000-10,000 Chinese characters for zh-CN, or 2,500-3,500 words for other languages, supported by roughly 50-100 unique tweet citations. Do not pad thin datasets or repeat points merely to hit a length target.
@@ -1357,8 +1520,9 @@ Since: ${context.window.since}
 Until: ${context.window.until}
 Sources: ${JSON.stringify(context.counts)}
 Prompt tweets: ${String(tweetCount)} of ${String(context.tweets.length)} selected context tweets
+Prompt feed items: ${String(feedCount)} of ${String(context.feedItems?.length ?? 0)} selected editorial items
 
-Write a high-signal "what happened" report from this local Twitter/X dataset.
+Write a high-signal "what happened" report from the user's Home timeline and optional editorial feed dataset.
 
 Requirements:
 - Stream one readable Markdown report first. The UI will show this text directly; do not rely on separate cards or structured summaries.
@@ -1370,6 +1534,9 @@ ${reportRequirements}
 - In the main topic section ("What people are talking about" or "Main themes"), group related bullets beneath concise Markdown level-3 topic headings (\`### Topic title\`).
 - Every level-3 topic heading must exactly match one corresponding keyTopics[].title in the JSON, and keyTopics must follow the same order. Do not replace these headings with bold-only bullet prefixes.
 - For tweets: cite every claim with inline tweet ids at the end of the relevant sentence or bullet, e.g. (tweet_123, tweet_456). These citations become hoverable source links.
+- For editorial feed items: cite the canonical source as a normal Markdown link and put the exact feed id into feedItemIds/sourceFeedItemIds in the JSON. Do not invent a separate citation syntax.
+- Treat important flashes and publisher articles as editorial reports, not as automatically verified truth. Distinguish reported facts, analysis, uncertainty, and social-media opinion. Never present a publisher's claim as independently confirmed unless the dataset contains corroboration.
+- Prefer important flashes for timely factual developments. Article summaries may be intentionally absent for restricted, high-risk, or analysis-tagged content; in that case use only the title, publisher, timestamp, and canonical link without inferring missing details.
 - For links: emit normal Markdown links with no space between the label and URL, e.g. [title](https://example.com), then cite the sharing tweet ids in the same bullet.
 - Prefer synthesis over chronology. Group repeated chatter into one bullet.
 - Mention handles when useful, but do not make the report a list of handles.
@@ -1379,7 +1546,7 @@ ${reportRequirements}
 - After the Markdown, output a blank line, then a line containing only three hyphens, then one compact JSON object.
 - Keep actionItems empty unless you wrote a "Worth replying to" section.
 - Put every tweet id cited in the Markdown into sourceTweetIds.
-- JSON shape: { "title": string, "summary": string, "keyTopics": [{ "title": string, "summary": string, "tweetIds": string[], "handles": string[] }], "notableLinks": [{ "title": string, "url": string, "why": string, "sourceTweetIds": string[] }], "people": [{ "handle": string, "name"?: string, "why": string }], "actionItems": [{ "kind": "reply"|"follow_up"|"read"|"sync", "label": string, "tweetId"?: string, "dmConversationId"?: string }], "sourceTweetIds": string[] }
+- JSON shape: { "title": string, "summary": string, "keyTopics": [{ "title": string, "summary": string, "tweetIds": string[], "handles": string[], "feedItemIds": string[] }], "notableLinks": [{ "title": string, "url": string, "why": string, "sourceTweetIds": string[], "sourceFeedItemIds": string[] }], "people": [{ "handle": string, "name"?: string, "why": string }], "actionItems": [{ "kind": "reply"|"follow_up"|"read"|"sync", "label": string, "tweetId"?: string, "dmConversationId"?: string }], "sourceTweetIds": string[], "sourceFeedItemIds": string[] }
 ${language ? `- Write all human-readable prose, including section titles and JSON prose fields, in ${language}.\n- Preserve handles, URLs, tweet ids, and JSON property names exactly.` : ""}
 
 Dataset:
@@ -1411,6 +1578,9 @@ function fallbackDigest(
 		people: [],
 		actionItems: [],
 		sourceTweetIds: context.tweets.slice(0, 20).map((tweet) => tweet.id),
+		sourceFeedItemIds: (context.feedItems ?? [])
+			.slice(0, 20)
+			.map((item) => item.id),
 	};
 }
 
@@ -1465,7 +1635,7 @@ function createOpenAIRequestBody(
 	return createAnalysisRequestBody({
 		settings: resolveSummaryModelSettings(options),
 		system:
-			"You are a precise local Twitter archive analyst. Stream Markdown first, then emit the requested JSON object after the delimiter. Do not invent events not present in the dataset.",
+			"You are a precise analyst of a private Home timeline plus an optional editorial news feed. Stream Markdown first, then emit the requested JSON object after the delimiter. Separate reported facts, opinion, and inference, and do not invent events not present in the dataset.",
 		prompt: buildPrompt(context, {
 			language: languageFromOptions(options),
 			reportProfile: reportProfileFromOptions(options),
@@ -1691,6 +1861,7 @@ export const __test__ = {
 	normalizeDigestLanguage,
 	readOpenAIStreamEffect,
 	parseDigestFromHybridText,
+	resolveRefreshScope,
 	processSseChunk,
 	resolvePeriodDigestWindow,
 	selectWeeklyPromptTweets,

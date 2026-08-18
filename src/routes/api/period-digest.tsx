@@ -27,6 +27,11 @@ function parseOptions(url: URL): PeriodDigestOptions {
 		until: url.searchParams.get("until") ?? undefined,
 		account: url.searchParams.get("account") ?? undefined,
 		includeDms: parseBoolean(url.searchParams.get("includeDms")),
+		includeFeed:
+			url.searchParams.get("includeFeed") === null
+				? true
+				: parseBoolean(url.searchParams.get("includeFeed")),
+		twitterScope: "home",
 		refresh: parseBoolean(url.searchParams.get("refresh")),
 		model: url.searchParams.get("model") === "gpt-5.5" ? "gpt-5.5" : undefined,
 		language: normalizeDigestLanguage(
@@ -37,6 +42,9 @@ function parseOptions(url: URL): PeriodDigestOptions {
 		}),
 		maxLinks: parseBoundedInteger(url.searchParams.get("maxLinks"), {
 			max: 25,
+		}),
+		maxFeedItems: parseBoundedInteger(url.searchParams.get("maxFeedItems"), {
+			max: 500,
 		}),
 		liveSync: url.searchParams.get("liveSync") !== "false",
 		liveSyncMode: "xurl",

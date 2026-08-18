@@ -14,6 +14,7 @@ import {
 	Mail,
 	Menu,
 	MessagesSquare,
+	Rss,
 	Settings,
 	ShieldOff,
 	UserSearch,
@@ -42,6 +43,8 @@ import { BirdclawMark } from "./BrandMark";
 import { ThemeSlider } from "./ThemeSlider";
 
 const links = [
+	{ to: "/", label: "Home", icon: Home },
+	{ to: "/feed", label: "Feed", icon: Rss },
 	{ to: "/inbox", label: "Inbox", icon: Inbox },
 	{ to: "/today", label: "Today", icon: CalendarDays },
 	{ to: "/discuss", label: "Discuss", icon: MessagesSquare },
@@ -49,7 +52,6 @@ const links = [
 	{ to: "/network-map", label: "Map", icon: Globe2 },
 	{ to: "/data-sources", label: "Sources", icon: Database },
 	{ to: "/settings", label: "Settings", icon: Settings },
-	{ to: "/", label: "Home", icon: Home },
 	{ to: "/mentions", label: "Mentions", icon: Bell },
 	{ to: "/likes", label: "Likes", icon: Heart },
 	{ to: "/bookmarks", label: "Bookmarks", icon: Bookmark },
@@ -61,9 +63,9 @@ const links = [
 
 const mobilePrimaryLinks = [
 	{ to: "/", label: "Home", icon: Home },
+	{ to: "/feed", label: "Feed", icon: Rss },
 	{ to: "/today", label: "Today", icon: CalendarDays },
 	{ to: "/discuss", label: "Discuss", icon: MessagesSquare },
-	{ to: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
 export function AppNav({ compact = false }: { compact?: boolean }) {

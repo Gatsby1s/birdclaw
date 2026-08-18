@@ -18,6 +18,7 @@ import { Route as MentionsRouteImport } from './routes/mentions'
 import { Route as LinksRouteImport } from './routes/links'
 import { Route as LikesRouteImport } from './routes/likes'
 import { Route as InboxRouteImport } from './routes/inbox'
+import { Route as FeedRouteImport } from './routes/feed'
 import { Route as DmsRouteImport } from './routes/dms'
 import { Route as DiscussRouteImport } from './routes/discuss'
 import { Route as DataSourcesRouteImport } from './routes/data-sources'
@@ -50,6 +51,8 @@ import { Route as ApiNetworkMapRouteImport } from './routes/api/network-map'
 import { Route as ApiLinkPreviewRouteImport } from './routes/api/link-preview'
 import { Route as ApiLinkInsightsRouteImport } from './routes/api/link-insights'
 import { Route as ApiInboxRouteImport } from './routes/api/inbox'
+import { Route as ApiFeedSyncRouteImport } from './routes/api/feed-sync'
+import { Route as ApiFeedRouteImport } from './routes/api/feed'
 import { Route as ApiDiscussionHistoryRouteImport } from './routes/api/discussion-history'
 import { Route as ApiDataSourcesRouteImport } from './routes/api/data-sources'
 import { Route as ApiConversationRouteImport } from './routes/api/conversation'
@@ -106,6 +109,11 @@ const LikesRoute = LikesRouteImport.update({
 const InboxRoute = InboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FeedRoute = FeedRouteImport.update({
+  id: '/feed',
+  path: '/feed',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DmsRoute = DmsRouteImport.update({
@@ -269,6 +277,16 @@ const ApiInboxRoute = ApiInboxRouteImport.update({
   path: '/api/inbox',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiFeedSyncRoute = ApiFeedSyncRouteImport.update({
+  id: '/api/feed-sync',
+  path: '/api/feed-sync',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiFeedRoute = ApiFeedRouteImport.update({
+  id: '/api/feed',
+  path: '/api/feed',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiDiscussionHistoryRoute = ApiDiscussionHistoryRouteImport.update({
   id: '/api/discussion-history',
   path: '/api/discussion-history',
@@ -341,6 +359,7 @@ export interface FileRoutesByFullPath {
   '/data-sources': typeof DataSourcesRoute
   '/discuss': typeof DiscussRoute
   '/dms': typeof DmsRoute
+  '/feed': typeof FeedRoute
   '/inbox': typeof InboxRoute
   '/likes': typeof LikesRoute
   '/links': typeof LinksRoute
@@ -357,6 +376,8 @@ export interface FileRoutesByFullPath {
   '/api/conversation': typeof ApiConversationRoute
   '/api/data-sources': typeof ApiDataSourcesRoute
   '/api/discussion-history': typeof ApiDiscussionHistoryRoute
+  '/api/feed': typeof ApiFeedRoute
+  '/api/feed-sync': typeof ApiFeedSyncRoute
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
@@ -396,6 +417,7 @@ export interface FileRoutesByTo {
   '/data-sources': typeof DataSourcesRoute
   '/discuss': typeof DiscussRoute
   '/dms': typeof DmsRoute
+  '/feed': typeof FeedRoute
   '/inbox': typeof InboxRoute
   '/likes': typeof LikesRoute
   '/links': typeof LinksRoute
@@ -412,6 +434,8 @@ export interface FileRoutesByTo {
   '/api/conversation': typeof ApiConversationRoute
   '/api/data-sources': typeof ApiDataSourcesRoute
   '/api/discussion-history': typeof ApiDiscussionHistoryRoute
+  '/api/feed': typeof ApiFeedRoute
+  '/api/feed-sync': typeof ApiFeedSyncRoute
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
@@ -452,6 +476,7 @@ export interface FileRoutesById {
   '/data-sources': typeof DataSourcesRoute
   '/discuss': typeof DiscussRoute
   '/dms': typeof DmsRoute
+  '/feed': typeof FeedRoute
   '/inbox': typeof InboxRoute
   '/likes': typeof LikesRoute
   '/links': typeof LinksRoute
@@ -468,6 +493,8 @@ export interface FileRoutesById {
   '/api/conversation': typeof ApiConversationRoute
   '/api/data-sources': typeof ApiDataSourcesRoute
   '/api/discussion-history': typeof ApiDiscussionHistoryRoute
+  '/api/feed': typeof ApiFeedRoute
+  '/api/feed-sync': typeof ApiFeedSyncRoute
   '/api/inbox': typeof ApiInboxRoute
   '/api/link-insights': typeof ApiLinkInsightsRoute
   '/api/link-preview': typeof ApiLinkPreviewRoute
@@ -509,6 +536,7 @@ export interface FileRouteTypes {
     | '/data-sources'
     | '/discuss'
     | '/dms'
+    | '/feed'
     | '/inbox'
     | '/likes'
     | '/links'
@@ -525,6 +553,8 @@ export interface FileRouteTypes {
     | '/api/conversation'
     | '/api/data-sources'
     | '/api/discussion-history'
+    | '/api/feed'
+    | '/api/feed-sync'
     | '/api/inbox'
     | '/api/link-insights'
     | '/api/link-preview'
@@ -564,6 +594,7 @@ export interface FileRouteTypes {
     | '/data-sources'
     | '/discuss'
     | '/dms'
+    | '/feed'
     | '/inbox'
     | '/likes'
     | '/links'
@@ -580,6 +611,8 @@ export interface FileRouteTypes {
     | '/api/conversation'
     | '/api/data-sources'
     | '/api/discussion-history'
+    | '/api/feed'
+    | '/api/feed-sync'
     | '/api/inbox'
     | '/api/link-insights'
     | '/api/link-preview'
@@ -619,6 +652,7 @@ export interface FileRouteTypes {
     | '/data-sources'
     | '/discuss'
     | '/dms'
+    | '/feed'
     | '/inbox'
     | '/likes'
     | '/links'
@@ -635,6 +669,8 @@ export interface FileRouteTypes {
     | '/api/conversation'
     | '/api/data-sources'
     | '/api/discussion-history'
+    | '/api/feed'
+    | '/api/feed-sync'
     | '/api/inbox'
     | '/api/link-insights'
     | '/api/link-preview'
@@ -675,6 +711,7 @@ export interface RootRouteChildren {
   DataSourcesRoute: typeof DataSourcesRoute
   DiscussRoute: typeof DiscussRoute
   DmsRoute: typeof DmsRoute
+  FeedRoute: typeof FeedRoute
   InboxRoute: typeof InboxRoute
   LikesRoute: typeof LikesRoute
   LinksRoute: typeof LinksRoute
@@ -691,6 +728,8 @@ export interface RootRouteChildren {
   ApiConversationRoute: typeof ApiConversationRoute
   ApiDataSourcesRoute: typeof ApiDataSourcesRoute
   ApiDiscussionHistoryRoute: typeof ApiDiscussionHistoryRoute
+  ApiFeedRoute: typeof ApiFeedRoute
+  ApiFeedSyncRoute: typeof ApiFeedSyncRoute
   ApiInboxRoute: typeof ApiInboxRoute
   ApiLinkInsightsRoute: typeof ApiLinkInsightsRoute
   ApiLinkPreviewRoute: typeof ApiLinkPreviewRoute
@@ -785,6 +824,13 @@ declare module '@tanstack/react-router' {
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/feed': {
+      id: '/feed'
+      path: '/feed'
+      fullPath: '/feed'
+      preLoaderRoute: typeof FeedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dms': {
@@ -1011,6 +1057,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiInboxRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/feed-sync': {
+      id: '/api/feed-sync'
+      path: '/api/feed-sync'
+      fullPath: '/api/feed-sync'
+      preLoaderRoute: typeof ApiFeedSyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/feed': {
+      id: '/api/feed'
+      path: '/api/feed'
+      fullPath: '/api/feed'
+      preLoaderRoute: typeof ApiFeedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/discussion-history': {
       id: '/api/discussion-history'
       path: '/api/discussion-history'
@@ -1121,6 +1181,7 @@ const rootRouteChildren: RootRouteChildren = {
   DataSourcesRoute: DataSourcesRoute,
   DiscussRoute: DiscussRoute,
   DmsRoute: DmsRoute,
+  FeedRoute: FeedRoute,
   InboxRoute: InboxRoute,
   LikesRoute: LikesRoute,
   LinksRoute: LinksRoute,
@@ -1137,6 +1198,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiConversationRoute: ApiConversationRoute,
   ApiDataSourcesRoute: ApiDataSourcesRoute,
   ApiDiscussionHistoryRoute: ApiDiscussionHistoryRoute,
+  ApiFeedRoute: ApiFeedRoute,
+  ApiFeedSyncRoute: ApiFeedSyncRoute,
   ApiInboxRoute: ApiInboxRoute,
   ApiLinkInsightsRoute: ApiLinkInsightsRoute,
   ApiLinkPreviewRoute: ApiLinkPreviewRoute,
