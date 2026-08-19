@@ -1429,8 +1429,10 @@ export function TodayRouteView({
 		result?.context.window.label ??
 		context?.window.label ??
 		periodLabel(period);
-	const canExportPdf = Boolean(markdown.trim()) && !loading;
-	const canExportReferencePdf = Boolean(result) && !loading;
+	const canExportPdf =
+		Boolean(markdown.trim()) && !loading && !historyRestoreLoading;
+	const canExportReferencePdf =
+		Boolean(result) && !loading && !historyRestoreLoading;
 	const exportTitle = `BirdClaw ${digestLabel} digest`;
 	const referenceExportTitle = `BirdClaw ${digestLabel} reference collection`;
 	const exportUpdatedAt = result
@@ -1458,43 +1460,50 @@ export function TodayRouteView({
 	}, [canExportPdf, exportTitle]);
 	const handleExportReferencePdf = useCallback(() => {
 		if (!canExportReferencePdf || !result || referencePdfActive) return;
-		flushSync(() => setReferencePdfActive(true));
+		flushSync(() => {
+			setReferenceScores({});
+			setReferencePdfActive(true);
+		});
 		setReferencePdfError(null);
 		void (async () => {
 			try {
-				const groups = collectReferenceGroups(result, displayMarkdown);
-				const lookup = buildReferenceTweetLookup(result.context);
-				const tweets = [
-					...new Map(
-						groups
-							.flatMap((group) => group.tweetIds)
-							.map((tweetId) => referenceTweetFor(lookup, tweetId))
-							.filter((tweet): tweet is ReferenceTweet => Boolean(tweet))
-							.map((tweet) => [normalizeReferenceTweetId(tweet.id), tweet]),
-					).values(),
-				];
-				const scores = await fetchTweetScores(
-					tweets.map((tweet) => ({
-						tweetId: tweet.id,
-						text: tweet.text,
-						createdAt: tweet.createdAt,
-						author: {
-							handle: tweet.author,
-							displayName: tweet.name,
-							bio: tweet.authorProfile.bio,
-						},
-					})),
-				);
-				flushSync(() =>
-					setReferenceScores(
-						Object.fromEntries(
-							scores.map((score) => [
-								normalizeReferenceTweetId(score.tweetId),
-								score.score,
-							]),
+				if (!(activeHistoryId && historyKind === "intraday")) {
+					const groups = collectReferenceGroups(result, displayMarkdown);
+					const lookup = buildReferenceTweetLookup(result.context);
+					const tweets = [
+						...new Map(
+							groups
+								.flatMap((group) => group.tweetIds)
+								.map((tweetId) => referenceTweetFor(lookup, tweetId))
+								.filter((tweet): tweet is ReferenceTweet => Boolean(tweet))
+								.map((tweet) => [normalizeReferenceTweetId(tweet.id), tweet]),
+						).values(),
+					];
+					const scores = await fetchTweetScores(
+						tweets.map((tweet) => ({
+							tweetId: tweet.id,
+							text: tweet.text,
+							createdAt: tweet.createdAt,
+							author: {
+								handle: tweet.author,
+								displayName: tweet.name,
+								bio: tweet.authorProfile.bio,
+							},
+						})),
+					);
+					flushSync(() =>
+						setReferenceScores(
+							Object.fromEntries(
+								scores.map((score) => [
+									normalizeReferenceTweetId(score.tweetId),
+									score.score,
+								]),
+							),
 						),
-					),
-				);
+					);
+				}
+				// Let the busy state paint before image preparation and Paged.js start.
+				await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 				if (
 					typeof CSS === "undefined" ||
 					typeof CSS.supports !== "function" ||
@@ -1511,13 +1520,15 @@ export function TodayRouteView({
 					onCleanup: () => setReferencePdfActive(false),
 				});
 			} catch {
-				setReferencePdfError("评分暂时不可用，完整 PDF 未导出");
+				setReferencePdfError("完整 PDF 暂时无法导出，请重试");
 				setReferencePdfActive(false);
 			}
 		})();
 	}, [
+		activeHistoryId,
 		canExportReferencePdf,
 		displayMarkdown,
+		historyKind,
 		referenceExportTitle,
 		referencePdfActive,
 		result,
@@ -1582,7 +1593,7 @@ export function TodayRouteView({
 								) : (
 									<FileText className="size-4" aria-hidden="true" />
 								)}
-								导出完整 PDF
+								{referencePdfActive ? "正在准备完整 PDF…" : "导出完整 PDF"}
 							</button>
 							<button
 								type="button"
