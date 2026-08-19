@@ -873,6 +873,7 @@ describe("today route", () => {
 		fireEvent.click(referenceButton);
 
 		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
+		expect(fetchTweetScoresMock).toHaveBeenCalledTimes(1);
 		expect(digestRequests).toHaveLength(1);
 		expect(document.title).toBe("birdclaw");
 		expect(document.body.dataset.todayPrintMode).toBeUndefined();
@@ -1148,6 +1149,9 @@ describe("today route", () => {
 	});
 
 	it("restores an 8-hour intraday overview without starting a model stream", async () => {
+		const printMock = vi.spyOn(window, "print").mockImplementation(() => {
+			window.dispatchEvent(new Event("afterprint"));
+		});
 		const saved = digestResult(
 			"2026-08-18 · 08:00–16:00",
 			"# Intraday overview\n\n## What people are talking about\n\n- Restored window (tweet_1)",
@@ -1221,6 +1225,19 @@ describe("today route", () => {
 					new URL(String(input), "http://localhost").pathname ===
 					"/api/period-digest",
 			),
+		).toBe(false);
+
+		fireEvent.click(screen.getByRole("button", { name: "导出完整 PDF" }));
+
+		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
+		expect(fetchTweetScoresMock).not.toHaveBeenCalled();
+		expect(
+			fetchMock.mock.calls.some(([input]) => {
+				const pathname = new URL(String(input), "http://localhost").pathname;
+				return (
+					pathname === "/api/period-digest" || pathname === "/api/tweet-scores"
+				);
+			}),
 		).toBe(false);
 	});
 
