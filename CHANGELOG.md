@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.10.2 - 2026-08-19
+
+### Fixed
+
+- Open the full PDF export for saved intraday overviews without waiting for hidden AI tweet scoring.
+- Show a clear preparation state and keep PDF actions disabled while a saved digest is still restoring.
+
 ## 0.10.1 - 2026-08-18
 
 ### Added
