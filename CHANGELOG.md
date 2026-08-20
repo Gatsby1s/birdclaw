@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.10.3 - 2026-08-20
+
+### Fixed
+
+- Fetch a deeper 600-item Following window once when the Mac collector starts, then return to the lightweight 100-item poll.
+- Keep retrying the deeper startup catch-up until Home succeeds, with an independent environment override that cannot reduce a larger regular poll.
+
 ## 0.10.2 - 2026-08-19
 
 ### Fixed
