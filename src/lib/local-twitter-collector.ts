@@ -11,6 +11,7 @@ import type { XurlMentionsResponse } from "./types";
 
 const DEFAULT_INTERVAL_SECONDS = 2 * 60;
 const DEFAULT_MAX_RESULTS = 100;
+const DEFAULT_STARTUP_MAX_RESULTS = 600;
 const DEFAULT_MAX_PAGES = 3;
 const FRESHNESS_MULTIPLIER = 1.5;
 
@@ -67,6 +68,10 @@ function localCollectorConfig() {
 			process.env.BIRDCLAW_LOCAL_COLLECTOR_MAX_RESULTS,
 			DEFAULT_MAX_RESULTS,
 		),
+		startupMaxResults: positiveNumber(
+			process.env.BIRDCLAW_LOCAL_COLLECTOR_STARTUP_MAX_RESULTS,
+			DEFAULT_STARTUP_MAX_RESULTS,
+		),
 		maxPages: positiveNumber(
 			process.env.BIRDCLAW_LOCAL_COLLECTOR_MAX_PAGES,
 			DEFAULT_MAX_PAGES,
@@ -116,6 +121,7 @@ export class LocalTwitterCollector {
 	private timer: ReturnType<typeof setInterval> | null = null;
 	private stopped = false;
 	private running = false;
+	private initialTimelineSyncPending = true;
 	private readonly config = localCollectorConfig();
 	private status: LocalTwitterCollectorStatus = {
 		enabled: this.config.enabled,
@@ -172,13 +178,17 @@ export class LocalTwitterCollector {
 			let ingested = 0;
 			if (this.config.timelineEnabled) {
 				try {
+					const timelineLimit = this.initialTimelineSyncPending
+						? Math.max(this.config.maxResults, this.config.startupMaxResults)
+						: this.config.maxResults;
 					const result = await syncHomeTimeline({
 						account: accountId,
 						mode: "bird",
-						limit: this.config.maxResults,
+						limit: timelineLimit,
 						following: true,
 						refresh: true,
 					});
+					this.initialTimelineSyncPending = false;
 					ingested += result.count;
 					this.status = {
 						...this.status,

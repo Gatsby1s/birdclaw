@@ -70,6 +70,7 @@ describe("local Twitter collector home timeline sync", () => {
 		delete process.env.BIRDCLAW_6551_TARGET_TWEETS;
 		delete process.env.BIRDCLAW_LOCAL_COLLECTOR_INTERVAL_SECONDS;
 		delete process.env.BIRDCLAW_LOCAL_COLLECTOR_MAX_RESULTS;
+		delete process.env.BIRDCLAW_LOCAL_COLLECTOR_STARTUP_MAX_RESULTS;
 		birdMocks.listThread.mockReset();
 		birdMocks.listUserTweets.mockReset();
 		birdMocks.searchTweets.mockReset();
@@ -83,13 +84,21 @@ describe("local Twitter collector home timeline sync", () => {
 		restoreEnvironment();
 	});
 
-	it("refreshes the full Following timeline with the documented defaults", async () => {
+	it("deep-fetches Following once at startup, then returns to the light poll", async () => {
 		syncHomeTimelineMock.mockResolvedValue({ count: 7, source: "bird" });
 		const collector = new LocalTwitterCollector();
 
 		await collector.runOnce();
+		await collector.runOnce();
 
-		expect(syncHomeTimelineMock).toHaveBeenCalledWith({
+		expect(syncHomeTimelineMock).toHaveBeenNthCalledWith(1, {
+			account: "account:test",
+			mode: "bird",
+			limit: 600,
+			following: true,
+			refresh: true,
+		});
+		expect(syncHomeTimelineMock).toHaveBeenNthCalledWith(2, {
 			account: "account:test",
 			mode: "bird",
 			limit: 100,
@@ -102,11 +111,59 @@ describe("local Twitter collector home timeline sync", () => {
 			lastSuccessAt: "2026-08-09T12:00:00.000Z",
 			lastTimelineSuccessAt: "2026-08-09T12:00:00.000Z",
 			lastError: null,
-			ingestedCount: 7,
+			ingestedCount: 14,
 			intervalSeconds: 120,
 		});
 		expect(collector.isFresh()).toBe(true);
 		expect(collector.isFresh(new Date("2026-08-09T12:03:00.001Z"))).toBe(false);
+	});
+
+	it("retries the deep startup fetch until the Home timeline succeeds", async () => {
+		syncHomeTimelineMock
+			.mockRejectedValueOnce(new Error("bird home failed"))
+			.mockResolvedValue({ count: 5, source: "bird" });
+		const collector = new LocalTwitterCollector();
+
+		await collector.runOnce();
+		await collector.runOnce();
+		await collector.runOnce();
+
+		expect(
+			syncHomeTimelineMock.mock.calls.map(([options]) => options.limit),
+		).toEqual([600, 600, 100]);
+		expect(collector.getStatus()).toMatchObject({
+			lastTimelineSuccessAt: "2026-08-09T12:00:00.000Z",
+			lastError: null,
+			ingestedCount: 10,
+		});
+	});
+
+	it("lets the Mac tune startup depth independently from regular polling", async () => {
+		process.env.BIRDCLAW_LOCAL_COLLECTOR_MAX_RESULTS = "150";
+		process.env.BIRDCLAW_LOCAL_COLLECTOR_STARTUP_MAX_RESULTS = "750";
+		syncHomeTimelineMock.mockResolvedValue({ count: 1, source: "bird" });
+		const collector = new LocalTwitterCollector();
+
+		await collector.runOnce();
+		await collector.runOnce();
+
+		expect(
+			syncHomeTimelineMock.mock.calls.map(([options]) => options.limit),
+		).toEqual([750, 150]);
+	});
+
+	it("never lets startup depth reduce a larger regular poll", async () => {
+		process.env.BIRDCLAW_LOCAL_COLLECTOR_MAX_RESULTS = "700";
+		process.env.BIRDCLAW_LOCAL_COLLECTOR_STARTUP_MAX_RESULTS = "600";
+		syncHomeTimelineMock.mockResolvedValue({ count: 1, source: "bird" });
+		const collector = new LocalTwitterCollector();
+
+		await collector.runOnce();
+		await collector.runOnce();
+
+		expect(
+			syncHomeTimelineMock.mock.calls.map(([options]) => options.limit),
+		).toEqual([700, 700]);
 	});
 
 	it("preserves watched-user-only collection when timeline sync is disabled", async () => {

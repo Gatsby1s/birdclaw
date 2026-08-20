@@ -54,12 +54,15 @@ BIRDCLAW_LOCAL_COLLECTOR_WATCH_USERS=TingHu888
 BIRDCLAW_LOCAL_COLLECTOR_TARGET_TWEETS=2082353480547660173
 BIRDCLAW_LOCAL_COLLECTOR_INTERVAL_SECONDS=120
 BIRDCLAW_LOCAL_COLLECTOR_MAX_RESULTS=100
+BIRDCLAW_LOCAL_COLLECTOR_STARTUP_MAX_RESULTS=600
 ```
 
-While the Mac is online, its BirdClaw production server refreshes the complete
-Following home timeline, watched account, target thread, and quote tweets
-through the local `bird` session every 120 seconds without depending on an open
-browser tab. Normalized timeline increments continue uploading when a
+When the Mac-side BirdClaw process starts, it first requests a deeper 600-item
+Following window so an offline gap can be replayed before regular polling
+returns to the lighter 100-item request. While the Mac is online, its BirdClaw
+production server refreshes the Following home timeline, watched account,
+target thread, and quote tweets through the local `bird` session every 120
+seconds without depending on an open browser tab. Normalized timeline increments continue uploading when a
 supplemental target fails, so one partial failure cannot freeze the cloud Home
 feed. The cloud accepts a heartbeat when it carries a fresh successful full
 timeline attestation; supplemental watched-account or target failures stay
