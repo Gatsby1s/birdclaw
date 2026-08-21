@@ -4,6 +4,7 @@ import { fetchJson } from "#/lib/api-client";
 import { tweetTranslationResponseSchema } from "#/lib/api-contracts";
 import { shouldAutoTranslateTweetText } from "#/lib/tweet-language";
 import { rebaseTweetEntitiesForText } from "#/lib/tweet-render";
+import { scheduleTimelineRequest } from "#/lib/timeline-request-scheduler";
 import type { EmbeddedTweet } from "#/lib/types";
 import {
 	embeddedCardBodyClass,
@@ -25,30 +26,36 @@ export function EmbeddedTweetCard({
 	item,
 	label,
 	translationEnabled = false,
+	translationSignal,
 }: {
 	item: EmbeddedTweet;
 	label: string;
 	translationEnabled?: boolean;
+	translationSignal?: AbortSignal;
 }) {
 	const [showTranslation, setShowTranslation] = useState(true);
 	const translationCandidate = shouldAutoTranslateTweetText(item.text);
 	const translationQuery = useQuery({
 		queryKey: ["tweet-translation", "zh-CN", item.id, item.text],
 		queryFn: ({ signal }) =>
-			fetchJson(
-				"/api/tweet-translation",
-				{
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({
-						tweetId: item.id,
-						text: item.text,
-						targetLanguage: "zh-CN",
-					}),
-					signal,
-				},
-				tweetTranslationResponseSchema,
-				"Translation unavailable",
+			scheduleTimelineRequest(
+				(requestSignal) =>
+					fetchJson(
+						"/api/tweet-translation",
+						{
+							method: "POST",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify({
+								tweetId: item.id,
+								text: item.text,
+								targetLanguage: "zh-CN",
+							}),
+							signal: requestSignal,
+						},
+						tweetTranslationResponseSchema,
+						"Translation unavailable",
+					),
+				[signal, translationSignal],
 			),
 		enabled: translationEnabled && translationCandidate,
 		staleTime: Number.POSITIVE_INFINITY,

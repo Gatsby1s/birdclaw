@@ -10,17 +10,33 @@ import {
 	runRouteEffect,
 	sensitiveRequestErrorResponse,
 } from "#/lib/http-effect";
+import { createRequestAdmission } from "#/lib/request-admission";
 import { scoreTweetsEffect } from "#/lib/tweet-score";
+
+const scoreRequestAdmission = createRequestAdmission(1);
+const SCORE_REQUEST_TIMEOUT_MS = 90_000;
 
 export const Route = createFileRoute("/api/tweet-scores")({
 	server: {
 		handlers: {
-			POST: ({ request }) =>
-				runRouteEffect(
+			POST: ({ request }) => {
+				const denied = sensitiveRequestErrorResponse(request);
+				if (denied) return Promise.resolve(denied);
+				const release = scoreRequestAdmission.tryAcquire();
+				if (!release) {
+					return Promise.resolve(
+						jsonResponse(
+							{ ok: false, message: "评分请求繁忙，请稍后再试" },
+							{ status: 429, headers: { "retry-after": "2" } },
+						),
+					);
+				}
+				const workSignal = AbortSignal.any([
+					request.signal,
+					AbortSignal.timeout(SCORE_REQUEST_TIMEOUT_MS),
+				]);
+				return runRouteEffect(
 					Effect.gen(function* () {
-						const denied = sensitiveRequestErrorResponse(request);
-						if (denied) return denied;
-
 						const input = yield* requestJsonEffect<unknown>(request, null);
 						const parsed = tweetScoresRequestSchema.safeParse(input);
 						if (!parsed.success) {
@@ -31,7 +47,7 @@ export const Route = createFileRoute("/api/tweet-scores")({
 						}
 
 						const scores = yield* scoreTweetsEffect(parsed.data.tweets, {
-							signal: request.signal,
+							signal: workSignal,
 						});
 						return jsonResponse(
 							tweetScoresResponseSchema.parse({ ok: true, scores }),
@@ -46,7 +62,8 @@ export const Route = createFileRoute("/api/tweet-scores")({
 							),
 						),
 					),
-				),
+				).finally(release);
+			},
 		},
 	},
 });

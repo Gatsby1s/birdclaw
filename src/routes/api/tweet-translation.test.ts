@@ -101,4 +101,47 @@ describe("api tweet translation route", () => {
 			message: "Translation temporarily unavailable",
 		});
 	});
+
+	it("caps overlapping translations instead of retaining unlimited waiters", async () => {
+		let resolvePending!: (value: {
+			targetLanguage: "zh-CN";
+			sourceLanguage: string;
+			translated: boolean;
+			translatedText: string;
+			cached: boolean;
+		}) => void;
+		const pending = new Promise<Parameters<typeof resolvePending>[0]>(
+			(resolve) => {
+				resolvePending = resolve;
+			},
+		);
+		translateTweetTextEffectMock.mockReturnValue(Effect.promise(() => pending));
+		const request = (tweetId: string) =>
+			new Request("http://localhost/api/tweet-translation", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ tweetId, text: `Translate ${tweetId}.` }),
+			});
+
+		const active = ["tweet_1", "tweet_2", "tweet_3"].map((tweetId) =>
+			POST({ request: request(tweetId) }),
+		);
+		await vi.waitFor(() =>
+			expect(translateTweetTextEffectMock).toHaveBeenCalledTimes(3),
+		);
+		const overflow = await POST({ request: request("tweet_4") });
+
+		expect(overflow.status).toBe(429);
+		expect(overflow.headers.get("retry-after")).toBe("2");
+		expect(translateTweetTextEffectMock).toHaveBeenCalledTimes(3);
+
+		resolvePending({
+			targetLanguage: "zh-CN",
+			sourceLanguage: "English",
+			translated: true,
+			translatedText: "已翻译。",
+			cached: false,
+		});
+		await Promise.all(active);
+	});
 });

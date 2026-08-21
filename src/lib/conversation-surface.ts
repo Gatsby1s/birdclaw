@@ -26,16 +26,17 @@ const ConversationSurfaceContext =
 export function conversationQueryOptions(tweetId: string) {
 	return queryOptions({
 		queryKey: [...queryKeys.conversations, tweetId] as const,
-		queryFn: () =>
+		queryFn: ({ signal }) =>
 			runEffectPromise(
 				fetchJsonEffect(
 					`/api/conversation?tweetId=${encodeURIComponent(tweetId)}`,
-					undefined,
+					{ signal },
 					tweetConversationResponseSchema,
 					"Conversation unavailable",
 				),
 			).then((data) => data.items),
 		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
 	});
 }
 

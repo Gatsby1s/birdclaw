@@ -10,17 +10,36 @@ import {
 	runRouteEffect,
 	sensitiveRequestErrorResponse,
 } from "#/lib/http-effect";
+import { createRequestAdmission } from "#/lib/request-admission";
 import { translateTweetTextEffect } from "#/lib/tweet-translation";
+
+const translationRequestAdmission = createRequestAdmission(3);
+const TRANSLATION_REQUEST_TIMEOUT_MS = 45_000;
 
 export const Route = createFileRoute("/api/tweet-translation")({
 	server: {
 		handlers: {
-			POST: ({ request }) =>
-				runRouteEffect(
+			POST: ({ request }) => {
+				const denied = sensitiveRequestErrorResponse(request);
+				if (denied) return Promise.resolve(denied);
+				const release = translationRequestAdmission.tryAcquire();
+				if (!release) {
+					return Promise.resolve(
+						jsonResponse(
+							{
+								ok: false,
+								message: "Translation queue is busy. Please retry shortly.",
+							},
+							{ status: 429, headers: { "retry-after": "2" } },
+						),
+					);
+				}
+				const workSignal = AbortSignal.any([
+					request.signal,
+					AbortSignal.timeout(TRANSLATION_REQUEST_TIMEOUT_MS),
+				]);
+				return runRouteEffect(
 					Effect.gen(function* () {
-						const denied = sensitiveRequestErrorResponse(request);
-						if (denied) return denied;
-
 						const input = yield* requestJsonEffect<unknown>(request, null);
 						const parsed = tweetTranslationRequestSchema.safeParse(input);
 						if (!parsed.success) {
@@ -31,7 +50,7 @@ export const Route = createFileRoute("/api/tweet-translation")({
 						}
 
 						const result = yield* translateTweetTextEffect(parsed.data.text, {
-							signal: request.signal,
+							signal: workSignal,
 						});
 						return jsonResponse(
 							tweetTranslationResponseSchema.parse({
@@ -50,7 +69,8 @@ export const Route = createFileRoute("/api/tweet-translation")({
 							),
 						),
 					),
-				),
+				).finally(release);
+			},
 		},
 	},
 });

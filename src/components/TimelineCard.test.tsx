@@ -1,4 +1,5 @@
 import {
+	act,
 	cleanup,
 	fireEvent,
 	screen,
@@ -8,6 +9,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { ConversationSurfaceScope } from "#/lib/conversation-surface";
+import { __test__ as timelineRequestSchedulerTest } from "#/lib/timeline-request-scheduler";
 import { renderWithQueryClient } from "#/test/render";
 import { TimelineCard } from "./TimelineCard";
 
@@ -15,7 +17,9 @@ const { exportReferenceCollectionPdfMock } = vi.hoisted(() => ({
 	exportReferenceCollectionPdfMock: vi.fn(),
 }));
 const { requestTweetScoreMock } = vi.hoisted(() => ({
-	requestTweetScoreMock: vi.fn(() => new Promise(() => {})),
+	requestTweetScoreMock: vi.fn(
+		(_input?: unknown, _signal?: AbortSignal) => new Promise(() => {}),
+	),
 }));
 
 vi.mock("#/lib/pdf-export-client", () => ({
@@ -135,6 +139,7 @@ const item = {
 describe("TimelineCard", () => {
 	afterEach(() => {
 		cleanup();
+		timelineRequestSchedulerTest.reset();
 		exportReferenceCollectionPdfMock.mockReset();
 		requestTweetScoreMock.mockReset();
 		requestTweetScoreMock.mockImplementation(() => new Promise(() => {}));
@@ -446,6 +451,111 @@ describe("TimelineCard", () => {
 		fireEvent.click(screen.getByRole("button", { name: "显示引用翻译" }));
 		expect(screen.getByText("这是一条引用帖子。")).toBeInTheDocument();
 		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
+	it("cancels queued timeline work outside the viewport and on unmount", async () => {
+		let emitIntersection: ((isIntersecting: boolean) => void) | undefined;
+		class ControlledIntersectionObserver {
+			private target: Element | undefined;
+
+			constructor(private readonly callback: IntersectionObserverCallback) {
+				emitIntersection = (isIntersecting) => this.emit(isIntersecting);
+			}
+
+			observe(target: Element) {
+				this.target = target;
+			}
+
+			emit(isIntersecting: boolean) {
+				if (!this.target) throw new Error("Timeline target was not observed");
+				this.callback(
+					[
+						{
+							isIntersecting,
+							target: this.target,
+						} as IntersectionObserverEntry,
+					],
+					this as unknown as IntersectionObserver,
+				);
+			}
+
+			disconnect() {}
+			unobserve() {}
+			takeRecords() {
+				return [];
+			}
+			readonly root = null;
+			readonly rootMargin = "320px 0px";
+			readonly thresholds = [0];
+		}
+		vi.stubGlobal("IntersectionObserver", ControlledIntersectionObserver);
+		const translationSignals: AbortSignal[] = [];
+		const scoreSignals: AbortSignal[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+				const signal = init?.signal;
+				if (!signal)
+					throw new Error("Translation did not receive an AbortSignal");
+				translationSignals.push(signal);
+				return new Promise<Response>((_resolve, reject) => {
+					signal.addEventListener(
+						"abort",
+						() => reject(new DOMException("cancelled", "AbortError")),
+						{ once: true },
+					);
+				});
+			}),
+		);
+		requestTweetScoreMock.mockImplementation(
+			(_input: unknown, signal?: AbortSignal) => {
+				if (!signal) throw new Error("Score did not receive an AbortSignal");
+				scoreSignals.push(signal);
+				return new Promise((_resolve, reject) => {
+					signal.addEventListener(
+						"abort",
+						() => reject(new DOMException("cancelled", "AbortError")),
+						{ once: true },
+					);
+				});
+			},
+		);
+
+		const rendered = render(
+			<TimelineCard
+				item={{
+					...item,
+					id: "tweet_viewport_cancel",
+					text: "새 소식입니다.",
+					entities: {},
+					media: [],
+					mediaCount: 0,
+					replyToTweet: null,
+					quotedTweet: null,
+				}}
+				onReply={vi.fn()}
+			/>,
+		);
+		act(() => emitIntersection?.(true));
+		await waitFor(() => {
+			expect(translationSignals).toHaveLength(1);
+			expect(scoreSignals).toHaveLength(1);
+		});
+
+		act(() => emitIntersection?.(false));
+		await waitFor(() => {
+			expect(translationSignals[0]?.aborted).toBe(true);
+			expect(scoreSignals[0]?.aborted).toBe(true);
+		});
+
+		act(() => emitIntersection?.(true));
+		await waitFor(() => {
+			expect(translationSignals).toHaveLength(2);
+			expect(scoreSignals).toHaveLength(2);
+		});
+		rendered.unmount();
+		expect(translationSignals[1]?.aborted).toBe(true);
+		expect(scoreSignals[1]?.aborted).toBe(true);
 	});
 
 	it("links the displayed avatar to a local author timeline without opening the thread", () => {
@@ -808,6 +918,7 @@ describe("TimelineCard", () => {
 		fireEvent.click(row);
 		expect(fetchMock).toHaveBeenCalledWith(
 			"/api/conversation?tweetId=tweet_original",
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 	});
 
@@ -874,6 +985,7 @@ describe("TimelineCard", () => {
 		fireEvent.click(row);
 		expect(fetchMock).toHaveBeenCalledWith(
 			"/api/conversation?tweetId=tweet_manual",
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 	});
 
@@ -1105,6 +1217,7 @@ describe("TimelineCard", () => {
 
 		expect(fetchMock).toHaveBeenCalledWith(
 			"/api/conversation?tweetId=tweet_original",
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 		expect(
 			within(first as HTMLElement).getByRole("button", {
@@ -1820,13 +1933,16 @@ describe("TimelineCard", () => {
 
 		fireEvent.click(row);
 
-		expect(fetchMock).toHaveBeenCalledWith("/api/conversation?tweetId=tweet_1");
+		expect(fetchMock).toHaveBeenCalledWith(
+			"/api/conversation?tweetId=tweet_1",
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
 		expect(await screen.findByText("Parent in thread")).toBeInTheDocument();
 		expect(screen.getByText("2 tweets in conversation")).toBeInTheDocument();
 		expect(screen.getByText("selected")).toBeInTheDocument();
 	});
 
-	it("prefetches conversation context on hover and keeps one thread open", async () => {
+	it("loads conversations only when explicitly opened and keeps one thread open", async () => {
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const tweetId = new URL(
 				String(input),
@@ -1873,9 +1989,14 @@ describe("TimelineCard", () => {
 		if (!first || !second) throw new Error("timeline cards missing");
 
 		fireEvent.mouseEnter(first);
-		expect(fetchMock).toHaveBeenCalledWith("/api/conversation?tweetId=tweet_a");
+		fireEvent.focus(first);
+		expect(fetchMock).not.toHaveBeenCalled();
 
 		fireEvent.click(first);
+		expect(fetchMock).toHaveBeenCalledWith(
+			"/api/conversation?tweetId=tweet_a",
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
 		expect(
 			await screen.findByText("Conversation for tweet_a"),
 		).toBeInTheDocument();
