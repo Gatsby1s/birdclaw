@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 0.10.5 - 2026-08-21
+
+### Fixed
+
+- Prevent timeline translation, scoring, and conversation request storms from exhausting Railway memory when many cards enter the viewport.
+- Cancel off-screen enrichment work, serialize score batches, and load conversations only after an explicit open action.
+- Bound server-side score and translation concurrency, shed overload with retry guidance, and release model slots after hard timeouts.
+
 ## 0.10.4 - 2026-08-21
 
 ### Added
