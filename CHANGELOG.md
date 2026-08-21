@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 0.10.4 - 2026-08-21
+
+### Added
+
+- Show expandable topic-level source details in Today for flashes, articles, ordinary posts, and special-follow posts, with safe links back to each original source.
+
+### Changed
+
+- Build Today and weekly digests around events and themes that synthesize tweets, editorial flashes, and publisher articles while preserving reported-fact, opinion, and inference boundaries.
+- Integrate editorial sources into the complete PDF's topic groups, shared source numbering, matrix, and index instead of placing them in a separate Feed appendix.
+
+### Fixed
+
+- Recover uniquely matched editorial citations from Markdown when model JSON is malformed or omits a nested source reference, without guessing ambiguous URLs.
+- Preserve title-only context for restricted editorial articles without hydrating or reusing their cached full text, and stop complete PDF export from making hidden tweet-scoring requests.
+
 ## 0.10.3 - 2026-08-20
 
 ### Fixed
