@@ -597,8 +597,7 @@ describe("today route", () => {
 				const printedScores = referencePdf.querySelectorAll(
 					".today-reference-score",
 				);
-				expect(printedScores).toHaveLength(1);
-				expect(printedScores[0]).toHaveTextContent(/^8$/);
+				expect(printedScores).toHaveLength(0);
 				expect(referenceText).not.toContain("评分依据");
 				expect(referenceText).not.toContain("判断理由");
 				expect(referenceText).not.toContain("通俗解释");
@@ -706,7 +705,7 @@ describe("today route", () => {
 				).not.toHaveLength(0);
 				expect(
 					within(referencePdf).getAllByRole("columnheader", {
-						name: "作者 / 账号 ID",
+						name: "类型 / 来源",
 					}),
 				).not.toHaveLength(0);
 				expect(
@@ -725,7 +724,7 @@ describe("today route", () => {
 				);
 				expect(
 					within(referencePdf).getByRole("columnheader", {
-						name: "发帖时间",
+						name: "发布时间",
 					}),
 				).toBeInTheDocument();
 				expect(within(referencePdf).queryByText(/12 likes|12 赞/)).toBeNull();
@@ -746,21 +745,36 @@ describe("today route", () => {
 				expect(referenceText).not.toContain("3 home · 2 mentions · 4 links");
 				expect(referenceText).not.toContain("8:00 PM");
 				expect(
-					within(referencePdf).getByRole("heading", {
+					within(referencePdf).queryByRole("heading", {
 						name: "Feed 编辑来源",
+						level: 2,
+					}),
+				).toBeNull();
+				expect(
+					within(referencePdf).getByText("Important feed source"),
+				).toBeInTheDocument();
+				expect(
+					within(referencePdf).getByRole("heading", {
+						name: "重点事件",
 						level: 2,
 					}),
 				).toBeInTheDocument();
 				expect(
-					within(referencePdf).getByText("Important feed source"),
-				).toBeInTheDocument();
+					within(referencePdf).getAllByText("Article-only event source"),
+				).not.toHaveLength(0);
+				expect(
+					within(referencePdf).getAllByText("文章 · Tiger Research"),
+				).not.toHaveLength(0);
+				expect(
+					within(referencePdf).getAllByText("快讯 · Tiger News"),
+				).not.toHaveLength(0);
 				expect(
 					within(referencePdf).getByRole("link", { name: "查看发布方原文" }),
 				).toHaveAttribute(
 					"href",
 					"https://www.laohu8.com/news/breaking?onlyImportant=true",
 				);
-				expect(referenceText).toContain("BirdClaw 已独立核实");
+				expect(referenceText).not.toContain("BirdClaw 已独立核实");
 			} finally {
 				window.dispatchEvent(new Event("afterprint"));
 			}
@@ -797,10 +811,21 @@ describe("today route", () => {
 				const result = digestResult("Today", markdown);
 				result.digest.summary =
 					"Structured summary must not replace the webpage.";
-				result.digest.sourceFeedItemIds = ["tiger:flash:pdf"];
+				result.digest.sourceFeedItemIds = [
+					"tiger:flash:pdf",
+					"tiger:article:pdf",
+				];
+				result.digest.keyTopics[0]!.feedItemIds = ["tiger:flash:pdf"];
+				result.digest.keyTopics.push({
+					title: "Article-only event",
+					summary: "An important article can establish a topic without tweets.",
+					tweetIds: [],
+					handles: [],
+					feedItemIds: ["tiger:article:pdf"],
+				});
 				result.context.includeFeed = true;
 				result.context.twitterScope = "home";
-				result.context.counts.feed = 1;
+				result.context.counts.feed = 2;
 				result.context.feedItems = [
 					{
 						id: "tiger:flash:pdf",
@@ -818,6 +843,23 @@ describe("today route", () => {
 						imageUrl: null,
 						isImportant: true,
 						updatedAt: "2026-05-16T09:00:01.000Z",
+					},
+					{
+						id: "tiger:article:pdf",
+						source: "tiger",
+						externalId: "article-pdf",
+						kind: "article",
+						title: "Article-only event source",
+						summary: "Full editorial context for an important event.",
+						url: "javascript:alert('article')",
+						publisher: "Tiger Research",
+						publishedAt: "2026-05-16T08:30:00.000Z",
+						market: "us",
+						language: "zh-CN",
+						symbols: ["AAPL"],
+						imageUrl: null,
+						isImportant: true,
+						updatedAt: "2026-05-16T08:30:01.000Z",
 					},
 				];
 				Object.assign(result.context.tweets[0]!, {
@@ -873,7 +915,7 @@ describe("today route", () => {
 		fireEvent.click(referenceButton);
 
 		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
-		expect(fetchTweetScoresMock).toHaveBeenCalledTimes(1);
+		expect(fetchTweetScoresMock).not.toHaveBeenCalled();
 		expect(digestRequests).toHaveLength(1);
 		expect(document.title).toBe("birdclaw");
 		expect(document.body.dataset.todayPrintMode).toBeUndefined();
@@ -915,6 +957,246 @@ describe("today route", () => {
 		render(<TodayRoute />);
 		generateSummary();
 		await screen.findByRole("heading", { name: "Today", level: 1 });
+		fireEvent.click(screen.getByRole("button", { name: "导出完整 PDF" }));
+		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
+	});
+
+	it("does not dump unmapped legacy feed items into the reference PDF", async () => {
+		const printMock = vi.spyOn(window, "print").mockImplementation(() => {
+			try {
+				const referencePdf = screen.getByTestId("today-reference-pdf");
+				expect(referencePdf).toHaveTextContent("1 条引用原文（Home + Feed）");
+				expect(referencePdf).not.toHaveTextContent("Unmapped legacy feed");
+				expect(referencePdf).not.toHaveTextContent("Feed 编辑来源");
+			} finally {
+				window.dispatchEvent(new Event("afterprint"));
+			}
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return Response.json({ ok: true, results: [] });
+				}
+				const markdown =
+					"# Today\n\n## What happened\n\n### Useful signal\n\n- A cited tweet remains available (tweet_1).";
+				const result = digestResult("Today", markdown);
+				result.context.includeFeed = true;
+				result.context.twitterScope = "home";
+				result.context.counts.feed = 1;
+				result.context.feedItems = [
+					{
+						id: "tiger:flash:legacy-unmapped",
+						source: "tiger",
+						externalId: "legacy-unmapped",
+						kind: "flash",
+						title: "Unmapped legacy feed",
+						summary: "Must not be guessed into a topic.",
+						url: "https://example.com/legacy-unmapped",
+						publisher: "Legacy Publisher",
+						publishedAt: "2026-05-16T08:00:00.000Z",
+						market: "us",
+						language: "zh-CN",
+						symbols: [],
+						imageUrl: null,
+						isImportant: true,
+						updatedAt: "2026-05-16T08:00:01.000Z",
+					},
+				];
+				return ndjsonResponse([{ type: "done", result }]);
+			}),
+		);
+
+		render(<TodayRoute />);
+		generateSummary();
+		await screen.findByRole("heading", { name: "Today", level: 1 });
+		fireEvent.click(screen.getByRole("button", { name: "导出完整 PDF" }));
+		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
+		expect(fetchTweetScoresMock).not.toHaveBeenCalled();
+	});
+
+	it("shows topic-level flash, article, tweet, and special-follow source details", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return Response.json({ ok: true, results: [] });
+				}
+				const flashUrl = "https://example.com/topic-flash";
+				const articleUrl = "https://example.com/topic-article";
+				const markdown = [
+					"# Today",
+					"",
+					"## Key events and themes",
+					"",
+					"### Useful signal",
+					"",
+					`- [Flash report](${flashUrl}) and [Article report](${articleUrl}) establish the reported facts; two posts add opinion. (tweet_1, tweet_2)`,
+				].join("\n");
+				const result = digestResult("Today", markdown);
+				result.context.includeFeed = true;
+				result.context.counts.feed = 2;
+				result.context.feedItems = [
+					{
+						id: "tiger:flash:screen",
+						source: "tiger",
+						externalId: "screen-flash",
+						kind: "flash",
+						title: "Flash report",
+						summary: "A concise event update.",
+						url: flashUrl,
+						publisher: "Tiger News",
+						publishedAt: "2026-05-16T09:30:00.000Z",
+						market: "us",
+						language: "zh-CN",
+						symbols: [],
+						imageUrl: null,
+						isImportant: true,
+						updatedAt: "2026-05-16T09:31:00.000Z",
+					},
+					{
+						id: "tiger:article:screen",
+						source: "tiger",
+						externalId: "screen-article",
+						kind: "article",
+						title: "Article report",
+						summary: "Longer context for the same event.",
+						url: articleUrl,
+						publisher: "Tiger Research",
+						publishedAt: "2026-05-16T09:00:00.000Z",
+						market: "us",
+						language: "zh-CN",
+						symbols: [],
+						imageUrl: null,
+						isImportant: false,
+						updatedAt: "2026-05-16T09:01:00.000Z",
+					},
+				];
+				result.context.tweets[0]!.specialFollow = true;
+				result.context.tweets.push({
+					...result.context.tweets[0]!,
+					id: "tweet_2",
+					url: "https://x.com/bob/status/tweet_2",
+					author: "bob",
+					name: "Bob",
+					authorProfile: {
+						...authorProfile,
+						id: "profile_bob",
+						handle: "bob",
+						displayName: "Bob",
+					},
+					text: "An ordinary post adds market opinion.",
+					specialFollow: false,
+				});
+				result.digest.keyTopics[0] = {
+					title: "Useful signal",
+					summary: "A mixed-source topic.",
+					tweetIds: ["tweet_1", "tweet_2"],
+					handles: ["alice", "bob"],
+					feedItemIds: ["tiger:flash:screen", "tiger:article:screen"],
+				};
+				result.digest.sourceTweetIds = ["tweet_1", "tweet_2"];
+				result.digest.sourceFeedItemIds = [
+					"tiger:flash:screen",
+					"tiger:article:screen",
+				];
+				return ndjsonResponse([{ type: "done", result }]);
+			}),
+		);
+
+		render(<TodayRoute />);
+		generateSummary();
+		const panel = await screen.findByRole("region", {
+			name: "Useful signal sources",
+		});
+		expect(within(panel).getByText("快讯")).toBeInTheDocument();
+		expect(within(panel).getByText("文章")).toBeInTheDocument();
+		expect(within(panel).getByText("特别关注")).toBeInTheDocument();
+		expect(within(panel).getByText("推文")).toBeInTheDocument();
+		expect(within(panel).getByText("Tiger News")).toBeInTheDocument();
+		expect(within(panel).getByText("Tiger Research")).toBeInTheDocument();
+
+		const flashDetails = within(panel).getByText("快讯").closest("details");
+		if (!flashDetails) throw new Error("Expected flash source details");
+		fireEvent.click(flashDetails.querySelector("summary")!);
+		expect(
+			within(flashDetails).getByRole("link", {
+				name: "打开快讯原文：Flash report",
+			}),
+		).toHaveAttribute("href", "https://example.com/topic-flash");
+
+		const followDetails = within(panel)
+			.getByText("特别关注")
+			.closest("details");
+		if (!followDetails) throw new Error("Expected special-follow details");
+		fireEvent.click(followDetails.querySelector("summary")!);
+		expect(
+			within(followDetails).getByRole("link", {
+				name: "打开特别关注原文：alice",
+			}),
+		).toHaveAttribute("href", "https://x.com/alice/status/tweet_1");
+	});
+
+	it("recovers an exact feed link for screen details and PDF after JSON fallback", async () => {
+		const feedUrl = "https://example.com/fallback-feed-source";
+		const printMock = vi.spyOn(window, "print").mockImplementation(() => {
+			try {
+				const referencePdf = screen.getByTestId("today-reference-pdf");
+				expect(referencePdf).toHaveTextContent("Fallback feed source");
+				expect(referencePdf).toHaveTextContent("1 条引用原文（Home + Feed）");
+				expect(referencePdf).not.toHaveTextContent("Feed 编辑来源");
+			} finally {
+				window.dispatchEvent(new Event("afterprint"));
+			}
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = new URL(String(input));
+				if (url.pathname === "/api/profile-hydrate") {
+					return Response.json({ ok: true, results: [] });
+				}
+				const markdown = `# Today\n\n## Key events and themes\n\n### Fallback event\n\n- [Fallback feed source](${feedUrl}) reports the event.`;
+				const result = digestResult("Today", markdown);
+				result.context.includeFeed = true;
+				result.context.counts.feed = 1;
+				result.context.feedItems = [
+					{
+						id: "tiger:article:fallback",
+						source: "tiger",
+						externalId: "fallback",
+						kind: "article",
+						title: "Fallback feed source",
+						summary: "Recovered from an exact Markdown link.",
+						url: feedUrl,
+						publisher: "Tiger News",
+						publishedAt: "2026-05-16T09:00:00.000Z",
+						market: "us",
+						language: "zh-CN",
+						symbols: [],
+						imageUrl: null,
+						isImportant: false,
+						updatedAt: "2026-05-16T09:01:00.000Z",
+					},
+				];
+				result.context.tweets = [];
+				result.digest.keyTopics = [];
+				result.digest.notableLinks = [];
+				result.digest.actionItems = [];
+				result.digest.sourceTweetIds = [];
+				result.digest.sourceFeedItemIds = [];
+				return ndjsonResponse([{ type: "done", result }]);
+			}),
+		);
+
+		render(<TodayRoute />);
+		generateSummary();
+		const panel = await screen.findByRole("region", {
+			name: "Fallback event sources",
+		});
+		expect(within(panel).getByText("文章")).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "导出完整 PDF" }));
 		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
 	});
