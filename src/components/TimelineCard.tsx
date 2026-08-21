@@ -25,6 +25,7 @@ import { exportReferenceCollectionPdf } from "#/lib/pdf-export-client";
 import { queryKeys } from "#/lib/query-client";
 import { requestTweetScore } from "#/lib/tweet-score-client";
 import { shouldAutoTranslateTweetText } from "#/lib/tweet-language";
+import { scheduleTimelineRequest } from "#/lib/timeline-request-scheduler";
 import {
 	isTweetArticleUrlEntity,
 	normalizeTweetUrlEntityRangeForText,
@@ -272,25 +273,62 @@ function likelyTruncatedText(text: string) {
 function useNearViewport() {
 	const ref = useRef<HTMLElement | null>(null);
 	const [nearViewport, setNearViewport] = useState(false);
+	const [requestSignal, setRequestSignal] = useState<AbortSignal>();
+	const nearViewportRef = useRef(false);
+	const intersectsViewportRef = useRef(false);
+	const requestControllerRef = useRef<AbortController | null>(null);
+	const activationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
 		const node = ref.current;
-		if (!node || nearViewport || typeof IntersectionObserver === "undefined") {
+		if (!node || typeof IntersectionObserver === "undefined") {
 			return;
 		}
 		const observer = new IntersectionObserver(
 			(entries) => {
-				if (!entries.some((entry) => entry.isIntersecting)) return;
-				setNearViewport(true);
-				observer.disconnect();
+				const nextNearViewport = entries.some((entry) => entry.isIntersecting);
+				intersectsViewportRef.current = nextNearViewport;
+				if (nextNearViewport) {
+					if (nearViewportRef.current || activationTimerRef.current) return;
+					activationTimerRef.current = setTimeout(() => {
+						activationTimerRef.current = null;
+						if (!intersectsViewportRef.current) return;
+						nearViewportRef.current = true;
+						const controller = new AbortController();
+						requestControllerRef.current = controller;
+						setRequestSignal(controller.signal);
+						setNearViewport(true);
+					}, 100);
+					return;
+				}
+				if (activationTimerRef.current) {
+					clearTimeout(activationTimerRef.current);
+					activationTimerRef.current = null;
+				}
+				if (!nearViewportRef.current) return;
+				nearViewportRef.current = false;
+				requestControllerRef.current?.abort();
+				requestControllerRef.current = null;
+				setRequestSignal(undefined);
+				setNearViewport(false);
 			},
-			{ rootMargin: "320px 0px" },
+			{ rootMargin: "80px 0px" },
 		);
 		observer.observe(node);
-		return () => observer.disconnect();
-	}, [nearViewport]);
+		return () => {
+			observer.disconnect();
+			intersectsViewportRef.current = false;
+			nearViewportRef.current = false;
+			if (activationTimerRef.current) {
+				clearTimeout(activationTimerRef.current);
+				activationTimerRef.current = null;
+			}
+			requestControllerRef.current?.abort();
+			requestControllerRef.current = null;
+		};
+	}, []);
 
-	return { nearViewport, ref };
+	return { nearViewport, ref, requestSignal };
 }
 
 function translatedHiddenUrlRanges(
@@ -329,6 +367,7 @@ function TweetPresentation({
 	mediaViewerPermalink,
 	translatedText,
 	translateQuotedTweet = false,
+	translationSignal,
 	afterText,
 }: {
 	tweet: TimelineItem | EmbeddedTweet;
@@ -339,6 +378,7 @@ function TweetPresentation({
 	mediaViewerPermalink?: string | null;
 	translatedText?: string;
 	translateQuotedTweet?: boolean;
+	translationSignal?: AbortSignal;
 	afterText?: ReactNode;
 }) {
 	const translatedEntities = translatedText
@@ -387,6 +427,7 @@ function TweetPresentation({
 						item={quotedTweet}
 						label="Quoted tweet"
 						translationEnabled={translateQuotedTweet}
+						translationSignal={translationSignal}
 					/>
 				</div>
 			) : null}
@@ -463,20 +504,24 @@ export function TimelineCard({
 			presentedTweet.text,
 		],
 		queryFn: ({ signal }) =>
-			fetchJson(
-				"/api/tweet-translation",
-				{
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({
-						tweetId: presentedTweet.id,
-						text: presentedTweet.text,
-						targetLanguage: "zh-CN",
-					}),
-					signal,
-				},
-				tweetTranslationResponseSchema,
-				"Translation unavailable",
+			scheduleTimelineRequest(
+				(requestSignal) =>
+					fetchJson(
+						"/api/tweet-translation",
+						{
+							method: "POST",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify({
+								tweetId: presentedTweet.id,
+								text: presentedTweet.text,
+								targetLanguage: "zh-CN",
+							}),
+							signal: requestSignal,
+						},
+						tweetTranslationResponseSchema,
+						"Translation unavailable",
+					),
+				[signal, translationViewport.requestSignal],
 			),
 		enabled: translationViewport.nearViewport && translationCandidate,
 		staleTime: Number.POSITIVE_INFINITY,
@@ -489,17 +534,24 @@ export function TimelineCard({
 			presentedTweet.text,
 			presentedTweet.createdAt,
 		],
-		queryFn: () =>
-			requestTweetScore({
-				tweetId: presentedTweet.id,
-				text: presentedTweet.text,
-				createdAt: presentedTweet.createdAt,
-				author: {
-					handle: presentedTweet.author.handle,
-					displayName: presentedTweet.author.displayName,
-					bio: presentedTweet.author.bio,
-				},
-			}),
+		queryFn: ({ signal }) =>
+			scheduleTimelineRequest(
+				(requestSignal) =>
+					requestTweetScore(
+						{
+							tweetId: presentedTweet.id,
+							text: presentedTweet.text,
+							createdAt: presentedTweet.createdAt,
+							author: {
+								handle: presentedTweet.author.handle,
+								displayName: presentedTweet.author.displayName,
+								bio: presentedTweet.author.bio,
+							},
+						},
+						requestSignal,
+					),
+				[signal, translationViewport.requestSignal],
+			),
 		enabled: translationViewport.nearViewport,
 		staleTime: Number.POSITIVE_INFINITY,
 		retry: false,
@@ -639,8 +691,6 @@ export function TimelineCard({
 			)}
 			data-perf="timeline-card"
 			ref={translationViewport.ref}
-			onFocus={conversation.prefetch}
-			onMouseEnter={conversation.prefetch}
 			onClick={(event) => {
 				if (isInteractiveTarget(event.target)) return;
 				conversation.toggle();
@@ -873,6 +923,7 @@ export function TimelineCard({
 					replyToTweet={item.retweetedTweet ? null : item.replyToTweet}
 					translatedText={translatedText}
 					translateQuotedTweet={translationViewport.nearViewport}
+					translationSignal={translationViewport.requestSignal}
 					tweet={presentedTweet}
 					visibleUrlCards={visibleUrlCards}
 				/>

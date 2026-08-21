@@ -95,4 +95,33 @@ describe("api tweet scores route", () => {
 			message: "评分暂时不可用",
 		});
 	});
+
+	it("rejects overlapping model batches instead of building an unbounded queue", async () => {
+		let resolveFirst!: (value: never[]) => void;
+		const firstPending = new Promise<never[]>((resolve) => {
+			resolveFirst = resolve;
+		});
+		scoreTweetsEffectMock.mockReturnValue(Effect.promise(() => firstPending));
+		const request = () =>
+			new Request("http://localhost/api/tweet-scores", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					tweets: [{ tweetId: "tweet_1", text: "A specific claim" }],
+				}),
+			});
+
+		const first = POST({ request: request() });
+		await vi.waitFor(() =>
+			expect(scoreTweetsEffectMock).toHaveBeenCalledOnce(),
+		);
+		const overflow = await POST({ request: request() });
+
+		expect(overflow.status).toBe(429);
+		expect(overflow.headers.get("retry-after")).toBe("2");
+		expect(scoreTweetsEffectMock).toHaveBeenCalledOnce();
+
+		resolveFirst([]);
+		await first;
+	});
 });

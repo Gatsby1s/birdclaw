@@ -84,4 +84,88 @@ describe("tweet score client", () => {
 		await expect(Promise.all([first, second])).resolves.toHaveLength(2);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
+
+	it("keeps later score batches behind an in-flight batch", async () => {
+		vi.useFakeTimers();
+		let releaseFirst!: () => void;
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const fetchMock = vi
+			.fn()
+			.mockImplementationOnce(async () => {
+				await firstGate;
+				return Response.json({ ok: true, scores: [score("tweet_1", 2)] });
+			})
+			.mockResolvedValueOnce(
+				Response.json({ ok: true, scores: [score("tweet_2", 3)] }),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+		const first = requestTweetScore({ tweetId: "tweet_1", text: "One" });
+
+		await vi.advanceTimersByTimeAsync(24);
+		expect(fetchMock).toHaveBeenCalledOnce();
+		const second = requestTweetScore({ tweetId: "tweet_2", text: "Two" });
+		await vi.advanceTimersByTimeAsync(100);
+		expect(fetchMock).toHaveBeenCalledOnce();
+
+		releaseFirst();
+		await expect(first).resolves.toMatchObject({ tweetId: "tweet_1" });
+		await vi.advanceTimersByTimeAsync(24);
+		await expect(second).resolves.toMatchObject({ tweetId: "tweet_2" });
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("removes an aborted queued score before a batch reaches the server", async () => {
+		vi.useFakeTimers();
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		const controller = new AbortController();
+		const request = requestTweetScore(
+			{ tweetId: "tweet_cancelled", text: "Do not send" },
+			controller.signal,
+		);
+
+		controller.abort();
+		await expect(request).rejects.toMatchObject({ name: "AbortError" });
+		await vi.runAllTimersAsync();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("aborts the batch fetch after every participating score is cancelled", async () => {
+		vi.useFakeTimers();
+		let fetchSignal: AbortSignal | undefined;
+		const fetchMock = vi.fn(
+			async (_input: RequestInfo | URL, init?: RequestInit) => {
+				fetchSignal = init?.signal ?? undefined;
+				return new Promise<Response>((_resolve, reject) => {
+					fetchSignal?.addEventListener(
+						"abort",
+						() => reject(new DOMException("cancelled", "AbortError")),
+						{ once: true },
+					);
+				});
+			},
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const firstController = new AbortController();
+		const secondController = new AbortController();
+		const first = requestTweetScore(
+			{ tweetId: "tweet_1", text: "One" },
+			firstController.signal,
+		);
+		const second = requestTweetScore(
+			{ tweetId: "tweet_2", text: "Two" },
+			secondController.signal,
+		);
+
+		await vi.runAllTimersAsync();
+		expect(fetchMock).toHaveBeenCalledOnce();
+		firstController.abort();
+		expect(fetchSignal?.aborted).toBe(false);
+		secondController.abort();
+		await expect(first).rejects.toMatchObject({ name: "AbortError" });
+		await expect(second).rejects.toMatchObject({ name: "AbortError" });
+		expect(fetchSignal?.aborted).toBe(true);
+	});
 });

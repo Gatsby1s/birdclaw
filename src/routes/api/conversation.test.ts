@@ -1,21 +1,13 @@
 // @vitest-environment node
-import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getRouteHandler } from "#/test/route-handlers";
 
 const getTweetConversationMock = vi.fn();
-const maybeAutoUpdateBackupMock = vi.fn();
 
 vi.mock("#/lib/timeline-read-model", () => ({
 	getTweetConversation: (...args: unknown[]) =>
 		getTweetConversationMock(...args),
 }));
-vi.mock("#/lib/backup", () => ({
-	maybeAutoUpdateBackup: () => maybeAutoUpdateBackupMock(),
-	maybeAutoUpdateBackupEffect: () =>
-		Effect.promise(() => Promise.resolve(maybeAutoUpdateBackupMock())),
-}));
-
 import { Route } from "./conversation";
 
 const GET = getRouteHandler(Route, "GET");
@@ -23,8 +15,6 @@ const GET = getRouteHandler(Route, "GET");
 describe("api conversation route", () => {
 	beforeEach(() => {
 		getTweetConversationMock.mockReset();
-		maybeAutoUpdateBackupMock.mockReset();
-		maybeAutoUpdateBackupMock.mockResolvedValue({ skipped: true });
 	});
 
 	it("returns a tweet conversation", async () => {

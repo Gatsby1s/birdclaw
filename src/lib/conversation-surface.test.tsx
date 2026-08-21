@@ -141,6 +141,7 @@ describe("conversation surface", () => {
 
 		expect(fetchMock).toHaveBeenCalledWith(
 			"/api/conversation?tweetId=tweet_original",
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 		expect(screen.getByTestId("row_a-open")).toHaveTextContent("open");
 		expect(screen.getByTestId("row_b-open")).toHaveTextContent("closed");
@@ -163,7 +164,10 @@ describe("conversation surface", () => {
 
 		expect(fetchMock).not.toHaveBeenCalled();
 		await expect(queryClient.fetchQuery(options)).resolves.toEqual([tweet]);
-		expect(fetchMock).toHaveBeenCalledWith("/api/conversation?tweetId=tweet_1");
+		expect(fetchMock).toHaveBeenCalledWith(
+			"/api/conversation?tweetId=tweet_1",
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
+		);
 	});
 
 	it("stores load errors and retries failed prefetches", async () => {
