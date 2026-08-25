@@ -40,42 +40,11 @@ function isCoarseSectionHeading(line: string) {
 	return /^##(?!#)\s+\S/.test(trimmed) || /^\*\*[^*]+\*\*$/.test(trimmed);
 }
 
-const topicSectionTitles = new Set(
-	[
-		"Key events and themes",
-		"Main themes",
-		"What people are talking about",
-		"重点事件与主题",
-		"关键事件与主题",
-		"主要主题",
-		"热议主题",
-		"大家在聊什么",
-	].map(comparableTitle),
-);
-
-function coarseSectionTitle(line: string) {
-	const trimmed = line.trim();
-	const markdown = /^##(?!#)\s+(.+?)\s*#*\s*$/.exec(trimmed);
-	if (markdown?.[1]) return markdown[1];
-	return /^\*\*([^*]+)\*\*$/.exec(trimmed)?.[1] ?? "";
-}
-
 function topicSectionRange(lines: string[]) {
 	const boundaries = lines.flatMap((line, index) =>
 		isCoarseSectionHeading(line) ? [index] : [],
 	);
 	if (boundaries.length === 0) return { start: 0, end: lines.length };
-	const topicBoundaryIndex = boundaries.findIndex((index) =>
-		topicSectionTitles.has(
-			comparableTitle(coarseSectionTitle(lines[index] ?? "")),
-		),
-	);
-	if (topicBoundaryIndex >= 0) {
-		return {
-			start: (boundaries[topicBoundaryIndex] ?? -1) + 1,
-			end: boundaries[topicBoundaryIndex + 1] ?? lines.length,
-		};
-	}
 	return {
 		start: boundaries[0] + 1,
 		end: boundaries[1] ?? lines.length,

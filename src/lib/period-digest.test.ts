@@ -151,37 +151,6 @@ describe("period digest", () => {
 		expect(prompt).toContain(context.tweets[0]?.text);
 	});
 
-	it("frames standard Today as one event-centered report across source types", () => {
-		const context = collectPeriodDigestContext({
-			since: "2026-01-01T00:00:00.000Z",
-			until: "2027-01-01T00:00:00.000Z",
-			maxTweets: 20,
-		});
-		const prompt = __test__.buildPrompt(context);
-
-		expect(prompt).toContain(
-			'Use these level-2 sections in this order: "At a glance", "Key events and themes", "Worth reading", and "Watch next"',
-		);
-		expect(prompt).toContain(
-			'Organize "Key events and themes" by real-world event or subject, never by source type',
-		);
-		expect(prompt).toContain(
-			"An important editorial flash or article may form a key topic even when no tweet mentions it",
-		);
-		expect(prompt).toContain(
-			"what is reported to have happened, what participants or commentators think, then your clearly labeled synthesis or inference",
-		);
-		expect(prompt).toContain(
-			"Do not create a separate feed summary, editorial-feed section, feed-only block, or feed appendix",
-		);
-		expect(prompt).toContain(
-			"Deduplicate repeated coverage of the same development across publishers and tweets",
-		);
-		expect(prompt).not.toContain(
-			'Use sections named "What people are talking about"',
-		);
-	});
-
 	it("builds Today from Home plus an optional editorial feed", () => {
 		const db = getNativeDb();
 		db.prepare(
@@ -243,12 +212,6 @@ describe("period digest", () => {
 		expect(prompt).toContain(
 			"editorial reports, not as automatically verified truth",
 		);
-		expect(prompt).toContain(
-			"every tweet and editorial item used in a topic must appear in that topic's tweetIds/feedItemIds",
-		);
-		expect(prompt).toContain(
-			"every source used anywhere in the Markdown must appear once in the corresponding top-level sourceTweetIds/sourceFeedItemIds",
-		);
 	});
 
 	it("uses cached full article text in the Today prompt and hash", () => {
@@ -267,7 +230,7 @@ describe("period digest", () => {
 			"1234567890",
 			"article",
 			"Full company filing",
-			"A filing summary approved for editorial digest use.",
+			"Short excerpt",
 			"https://www.laohu8.com/news/1234567890",
 			"Tiger News",
 			"2026-08-18T08:00:00.000Z",
@@ -278,7 +241,7 @@ describe("period digest", () => {
 			"2026-08-18T08:00:00.000Z",
 			"2026-08-18T08:00:00.000Z",
 		);
-		const fullText = `Full article body\n\n${"Material filing detail ".repeat(80)}`;
+		const fullText = `Short excerpt\n\n${"Material filing detail ".repeat(80)}`;
 		writeSyncCache(`editorial-feed:article-content:v1:${itemId}`, {
 			itemId,
 			externalId: "1234567890",
@@ -295,18 +258,9 @@ describe("period digest", () => {
 			twitterScope: "home",
 		});
 		const prompt = __test__.buildPrompt(context);
-		expect(context.feedItems?.[0]?.summary).toContain("approved");
 		expect(prompt).toContain("Material filing detail");
 		expect(prompt).toContain('"contentSource":"full_text"');
 		expect(prompt).toContain("fetched article body");
-
-		const parsed = __test__.parseDigestFromHybridText(
-			context,
-			`## Key events and themes\n\n### Full company filing\n\n- [Read the filing](https://www.laohu8.com/news/1234567890) alongside the related tweet. (tweet_1)\n\n---\n{"title":"Today","summary":"Filing update","keyTopics":[{"title":"Full company filing","summary":"Reported filing update plus social reaction","tweetIds":["tweet_1"],"handles":["alice"]}],"notableLinks":[{"title":"Full company filing","url":"https://www.laohu8.com/news/1234567890","why":"Primary editorial source","sourceTweetIds":["tweet_1"]}],"people":[],"actionItems":[],"sourceTweetIds":["tweet_1"],"sourceFeedItemIds":["root-only-orphan"]}`,
-		);
-		expect(parsed.digest.keyTopics[0]?.feedItemIds).toEqual([itemId]);
-		expect(parsed.digest.notableLinks[0]?.sourceFeedItemIds).toEqual([itemId]);
-		expect(parsed.digest.sourceFeedItemIds).toEqual([itemId]);
 
 		const correctedText = `${fullText} corrected`;
 		writeSyncCache(`editorial-feed:article-content:v1:${itemId}`, {
@@ -324,203 +278,6 @@ describe("period digest", () => {
 			twitterScope: "home",
 		});
 		expect(corrected.hash).not.toBe(context.hash);
-	});
-
-	it("recovers a Worth reading feed link when otherwise valid JSON omits it", () => {
-		const db = getNativeDb();
-		const itemId = "tiger:article:worth-reading-omission";
-		const articleUrl = "https://www.laohu8.com/news/worth-reading-omission";
-		db.prepare(
-			`insert into feed_items (
-			 id, source, external_id, kind, title, summary, url, publisher,
-			 published_at, market, language, symbols_json, image_url, is_important,
-			 content_hash, first_seen_at, updated_at
-			) values (?, 'tiger', 'worth-reading-omission', 'article', ?, ?, ?,
-			 'Tiger News', '2026-08-18T08:00:00.000Z', 'us', 'zh-CN', '[]',
-			 null, 0, 'worth-reading-hash', '2026-08-18T08:00:00.000Z',
-			 '2026-08-18T08:00:00.000Z')`,
-		).run(
-			itemId,
-			"Worth reading report",
-			"Approved editorial context.",
-			articleUrl,
-		);
-		const context = collectPeriodDigestContext({
-			since: "2026-01-01T00:00:00.000Z",
-			until: "2027-01-01T00:00:00.000Z",
-			includeFeed: true,
-		});
-		const parsed = __test__.parseDigestFromHybridText(
-			context,
-			`# Today\n\n## Key events and themes\n\n### Social topic\n\n- The timeline discusses the event. (tweet_1)\n\n## Worth reading\n\n- [Worth reading report](${articleUrl}) adds primary context.\n\n---\n{"title":"Today","summary":"Mixed update","keyTopics":[{"title":"Social topic","summary":"Social discussion","tweetIds":["tweet_1"],"handles":["alice"],"feedItemIds":[]}],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":["tweet_1"],"sourceFeedItemIds":["${itemId}"]}`,
-		);
-
-		expect(parsed.digest.keyTopics[0]).toMatchObject({
-			title: "Social topic",
-			feedItemIds: [],
-		});
-		expect(parsed.digest.keyTopics[1]).toMatchObject({
-			title: "Worth reading report",
-			feedItemIds: [itemId],
-		});
-		expect(parsed.digest.sourceFeedItemIds).toEqual([itemId]);
-	});
-
-	it("does not hydrate or reuse full text for an editorial-policy empty article", async () => {
-		const db = getNativeDb();
-		const externalId = "9876543210";
-		const itemId = `tiger:article:${externalId}`;
-		const sourceHash = "empty-summary-source-hash";
-		const articleUrl = `https://www.laohu8.com/news/${externalId}`;
-		db.prepare(
-			`insert into feed_items (
-			 id, source, external_id, kind, title, summary, url, publisher,
-			 published_at, market, language, symbols_json, image_url, is_important,
-			 content_hash, first_seen_at, updated_at
-			) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, 0, ?, ?, ?)`,
-		).run(
-			itemId,
-			"tiger",
-			externalId,
-			"article",
-			"Empty-summary article",
-			"",
-			articleUrl,
-			"Tiger News",
-			"2026-08-18T08:00:00.000Z",
-			"us",
-			"zh-CN",
-			"[]",
-			sourceHash,
-			"2026-08-18T08:00:00.000Z",
-			"2026-08-18T08:00:00.000Z",
-		);
-		const fullText = "EMPTY_SUMMARY_FULL_BODY with material filing details.";
-		const streamed = [
-			sseFrame({
-				type: "response.output_text.delta",
-				delta: `## Key events and themes\n\n### Empty-summary article\n\n- [Tiger News](${articleUrl}) reports the filing.\n\n---\n{"title":"Today","summary":"Filing update","keyTopics":[{"title":"Empty-summary article","summary":"Reported filing update","tweetIds":[],"handles":[],"feedItemIds":["${itemId}"]}],"notableLinks":[],"people":[],"actionItems":[],"sourceTweetIds":[],"sourceFeedItemIds":["${itemId}"]}`,
-			}),
-			"data: [DONE]\n\n",
-		].join("");
-		const requestedUrls: string[] = [];
-		const fetchMock = vi.fn(
-			async (input: string | URL | Request, _init?: RequestInit) => {
-				const url = String(input);
-				requestedUrls.push(url);
-				if (new URL(url).pathname.endsWith("/v2/news")) {
-					return new Response(
-						JSON.stringify({
-							code: 200_060_000,
-							status: 200,
-							data: {
-								code: "91000000",
-								status: "200",
-								id: externalId,
-								article_id: externalId,
-								content_text: fullText,
-								need_auth: false,
-								need_login_tip: false,
-								rights: null,
-							},
-						}),
-						{ status: 200, headers: { "content-type": "application/json" } },
-					);
-				}
-				return streamResponse(streamed);
-			},
-		);
-		vi.stubGlobal("fetch", fetchMock);
-
-		const result = await streamPeriodDigest({
-			since: "2026-01-01T00:00:00.000Z",
-			until: "2027-01-01T00:00:00.000Z",
-			includeFeed: true,
-			twitterScope: "home",
-			refresh: true,
-		});
-
-		expect(requestedUrls.some((url) => url.includes("/v2/news"))).toBe(false);
-		const openAiCall = fetchMock.mock.calls.find(
-			([input]) => !String(input).includes("/v2/news"),
-		);
-		expect(String(openAiCall?.[1]?.body)).toContain("Empty-summary article");
-		expect(String(openAiCall?.[1]?.body)).not.toContain(fullText);
-		expect(result.digest.keyTopics[0]?.feedItemIds).toEqual([itemId]);
-		expect(result.digest.sourceFeedItemIds).toEqual([itemId]);
-	});
-
-	it("reserves prompt context for articles when recent important flashes fill the cap", () => {
-		const db = getNativeDb();
-		const insert = db.prepare(
-			`insert into feed_items (
-			 id, source, external_id, kind, title, summary, url, publisher,
-			 published_at, market, language, symbols_json, image_url, is_important,
-			 content_hash, first_seen_at, updated_at
-			) values (?, 'tiger', ?, ?, ?, ?, ?, 'Tiger News', ?, 'us', 'zh-CN',
-			 '[]', null, ?, ?, ?, ?)`,
-		);
-		for (let index = 0; index < 5; index += 1) {
-			const publishedAt = new Date(
-				Date.parse("2026-08-18T10:00:00.000Z") + index * 60_000,
-			).toISOString();
-			insert.run(
-				`tiger:flash:cap-${String(index)}`,
-				`cap-${String(index)}`,
-				"flash",
-				`Important flash ${String(index)}`,
-				"",
-				"https://www.laohu8.com/news/breaking?market=us",
-				publishedAt,
-				1,
-				`flash-hash-${String(index)}`,
-				publishedAt,
-				publishedAt,
-			);
-		}
-		insert.run(
-			"tiger:article:1122334455",
-			"1122334455",
-			"article",
-			"Earlier article with a full report",
-			"A useful editorial article summary.",
-			"https://www.laohu8.com/news/1122334455",
-			"2026-08-18T08:00:00.000Z",
-			0,
-			"article-cap-hash",
-			"2026-08-18T08:00:00.000Z",
-			"2026-08-18T08:00:00.000Z",
-		);
-
-		const context = collectPeriodDigestContext({
-			since: "2026-08-18T00:00:00.000Z",
-			until: "2026-08-19T00:00:00.000Z",
-			includeFeed: true,
-			twitterScope: "home",
-			maxFeedItems: 3,
-		});
-
-		expect(context.feedItems).toHaveLength(3);
-		expect(context.feedItems?.some((item) => item.kind === "article")).toBe(
-			true,
-		);
-		expect(
-			context.feedItems?.filter((item) => item.kind === "flash"),
-		).toHaveLength(2);
-		const selectedFlash = context.feedItems?.find(
-			(item) => item.kind === "flash",
-		);
-		expect(selectedFlash).toBeDefined();
-		if (!selectedFlash) throw new Error("Expected a selected flash");
-		const parsed = __test__.parseDigestFromHybridText(
-			context,
-			`## Key events and themes\n\n### Flash event\n\n- [Tiger News](${selectedFlash.url}) reports the event.\n\n---\n{"title":"Today","summary":"Flash event","keyTopics":[{"title":"Flash event","summary":"Reported event","tweetIds":[],"handles":[],"feedItemIds":["${selectedFlash.id}","hallucinated-feed-id"]}],"notableLinks":[{"title":"Flash event","url":"${selectedFlash.url}","why":"Timely report","sourceTweetIds":[],"sourceFeedItemIds":["${selectedFlash.id}"]}],"people":[],"actionItems":[],"sourceTweetIds":[],"sourceFeedItemIds":["${selectedFlash.id}"]}`,
-		);
-		expect(parsed.digest.keyTopics[0]?.feedItemIds).toEqual([selectedFlash.id]);
-		expect(parsed.digest.notableLinks[0]?.sourceFeedItemIds).toEqual([
-			selectedFlash.id,
-		]);
-		expect(parsed.digest.sourceFeedItemIds).toEqual([selectedFlash.id]);
 	});
 
 	it("keeps an older special-follow post ahead of newer posts at every cap", () => {
@@ -595,8 +352,8 @@ describe("period digest", () => {
 		});
 		const prompt = __test__.buildPrompt(context);
 		expect(prompt).toContain('"specialFollow":true');
-		expect(prompt).toContain("priority in At a glance");
-		expect(prompt).toContain('"Worth reading"');
+		expect(prompt).toContain("opening/Executive brief");
+		expect(prompt).toContain('"Worth opening"');
 
 		const previousHash = context.hash;
 		setProfileSpecialFollow(
@@ -689,21 +446,6 @@ describe("period digest", () => {
 		expect(prompt).toContain('"Key turning points"');
 		expect(prompt).toContain('"Next week watchlist"');
 		expect(prompt).toContain("Cover evidence from every day");
-		expect(prompt).toContain(
-			"50-100 unique source citations across tweets, editorial flashes, and publisher articles",
-		);
-		expect(prompt).toContain(
-			'An important editorial flash or article may form a "Main themes" topic',
-		);
-		expect(prompt).toContain(
-			"source tweets, threads, editorial flashes, or publisher articles",
-		);
-		expect(prompt).toContain(
-			'Use these level-2 sections in this order: "Executive brief"',
-		);
-		expect(prompt).not.toContain(
-			'Use these level-2 sections in this order: "At a glance"',
-		);
 		expect(__test__.digestCacheKey(weeklyContext, {})).not.toBe(
 			__test__.digestCacheKey(weeklyContext, { period: "week" }),
 		);
@@ -883,18 +625,6 @@ describe("period digest", () => {
 
 		expect(first.window.until).not.toBe(second.window.until);
 		expect(first.hash).toBe(second.hash);
-	});
-
-	it("invalidates pre-unification exact and latest digest caches", () => {
-		const context = collectPeriodDigestContext({
-			since: "2026-01-01T00:00:00.000Z",
-			until: "2027-01-01T00:00:00.000Z",
-		});
-
-		expect(__test__.digestCacheKey(context, {})).toContain("period-digest:v7:");
-		expect(__test__.latestDigestCacheKey({ period: "yesterday" })).toContain(
-			"period-digest-latest:v6:",
-		);
 	});
 
 	it("canonicalizes Unicode locale identifiers", () => {
@@ -1435,7 +1165,7 @@ describe("period digest", () => {
 				`
 				update sync_cache
 				set updated_at = '2020-01-01T00:00:00.000Z'
-				where cache_key like 'period-digest:v7:%'
+				where cache_key like 'period-digest:v6:%'
 				`,
 			)
 			.run();
@@ -1611,58 +1341,6 @@ describe("period digest", () => {
 		expect(parsed.markdown).toContain("Solo Markdown");
 		expect(parsed.digest.title).toBe("Resumen");
 		expect(parsed.digest.summary).toContain("Solo Markdown");
-
-		const db = getNativeDb();
-		const feedItemId = "tiger:article:malformed-json-source";
-		const feedUrl = "https://www.laohu8.com/news/malformed-json-source";
-		const insertFallbackFeedItem = db.prepare(
-			`insert into feed_items (
-			 id, source, external_id, kind, title, summary, url, publisher,
-			 published_at, market, language, symbols_json, image_url, is_important,
-			 content_hash, first_seen_at, updated_at
-			) values (?, 'tiger', ?, 'article', ?, ?, ?,
-			 'Tiger News', '2026-08-18T08:00:00.000Z', 'us', 'zh-CN', '[]',
-			 null, 0, ?, '2026-08-18T08:00:00.000Z',
-			 '2026-08-18T08:00:00.000Z')`,
-		);
-		insertFallbackFeedItem.run(
-			feedItemId,
-			"malformed-json-source",
-			"Malformed JSON source",
-			"An approved editorial excerpt.",
-			feedUrl,
-			"malformed-json-hash",
-		);
-		const secondFeedItemId = "tiger:article:malformed-json-reading";
-		const secondFeedUrl = "https://www.laohu8.com/news/malformed-json-reading";
-		insertFallbackFeedItem.run(
-			secondFeedItemId,
-			"malformed-json-reading",
-			"Worth reading source",
-			"A second approved editorial excerpt.",
-			secondFeedUrl,
-			"malformed-json-reading-hash",
-		);
-		const feedFallback = __test__.parseDigestFromHybridText(
-			collectPeriodDigestContext({
-				since: "2026-01-01T00:00:00.000Z",
-				until: "2027-01-01T00:00:00.000Z",
-				includeFeed: true,
-			}),
-			`# Today\n\n## Key events and themes\n\n### Filing event\n\n- [Tiger report](${feedUrl}) reports the filing.\n\n## Worth reading\n\n- [Second report](${secondFeedUrl}) adds useful context.\n\n---\n{"title":`,
-		);
-		expect(feedFallback.digest.keyTopics[0]).toMatchObject({
-			title: "Filing event",
-			feedItemIds: [feedItemId],
-		});
-		expect(feedFallback.digest.keyTopics[1]).toMatchObject({
-			title: "Second report",
-			feedItemIds: [secondFeedItemId],
-		});
-		expect(feedFallback.digest.sourceFeedItemIds).toEqual([
-			feedItemId,
-			secondFeedItemId,
-		]);
 
 		const empty = __test__.parseDigestFromHybridText(
 			collectPeriodDigestContext({

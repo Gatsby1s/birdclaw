@@ -676,59 +676,11 @@ function contextHash(context: Omit<PeriodDigestContext, "hash">) {
 					item.symbols,
 					item.isImportant,
 					item.updatedAt,
-					item.kind === "article" && item.summary.trim()
-						? (readFeedArticleContent(item.id)?.contentHash ?? null)
-						: null,
+					readFeedArticleContent(item.id)?.contentHash ?? null,
 				]),
 			}),
 		)
 		.digest("hex");
-}
-
-function feedPublishedDescending(left: FeedItem, right: FeedItem) {
-	return right.publishedAt.localeCompare(left.publishedAt);
-}
-
-function selectDigestFeedItems(
-	flashes: FeedItem[],
-	articles: FeedItem[],
-	limit: number,
-) {
-	const reservedArticleCandidates = articles
-		.filter((item) => Boolean(item.summary.trim()))
-		.sort((left, right) => {
-			const leftHasFullText = Boolean(readFeedArticleContent(left.id));
-			const rightHasFullText = Boolean(readFeedArticleContent(right.id));
-			if (leftHasFullText !== rightHasFullText) return leftHasFullText ? -1 : 1;
-			if (left.isImportant !== right.isImportant) {
-				return left.isImportant ? -1 : 1;
-			}
-			return feedPublishedDescending(left, right);
-		});
-	const reservedArticleCount =
-		reservedArticleCandidates.length === 0
-			? 0
-			: limit === 1
-				? readFeedArticleContent(reservedArticleCandidates[0]!.id)
-					? 1
-					: 0
-				: Math.min(
-						reservedArticleCandidates.length,
-						Math.max(1, Math.floor(limit / 4)),
-					);
-	const selected = reservedArticleCandidates.slice(0, reservedArticleCount);
-	const selectedIds = new Set(selected.map((item) => item.id));
-	const remaining = [...flashes, ...articles]
-		.filter((item) => !selectedIds.has(item.id))
-		.sort((left, right) => {
-			if (left.isImportant !== right.isImportant) {
-				return left.isImportant ? -1 : 1;
-			}
-			return feedPublishedDescending(left, right);
-		});
-	return [...selected, ...remaining]
-		.slice(0, limit)
-		.sort(feedPublishedDescending);
 }
 
 export function collectPeriodDigestContext(
@@ -816,21 +768,24 @@ export function collectPeriodDigestContext(
 			: {}),
 	});
 	const feedItems = includeFeed
-		? selectDigestFeedItems(
-				listFeedItems({
+		? [
+				...listFeedItems({
 					kind: "flash",
 					since: window.since,
 					until: window.until,
 					limit: maxFeedItems,
 				}),
-				listFeedItems({
+				...listFeedItems({
 					kind: "article",
 					since: window.since,
 					until: window.until,
 					limit: maxFeedItems,
 				}),
-				maxFeedItems,
-			)
+			]
+				.sort((left, right) =>
+					right.publishedAt.localeCompare(left.publishedAt),
+				)
+				.slice(0, maxFeedItems)
 		: [];
 	const candidateTweets = dedupeTweets([
 		...home,
@@ -1188,7 +1143,7 @@ function digestCacheKey(
 	options: PeriodDigestOptions,
 ) {
 	const parts = [
-		"period-digest:v7",
+		"period-digest:v6",
 		providerFromOptions(options),
 		modelFromOptions(options),
 		reasoningEffortFromOptions(options),
@@ -1237,7 +1192,7 @@ function latestDigestCacheKey(options: PeriodDigestOptions) {
 			options.prioritySnapshot?.fingerprint ??
 			createProfilePrioritySnapshot().fingerprint,
 	};
-	return `period-digest-latest:v6:${createHash("sha1")
+	return `period-digest-latest:v5:${createHash("sha1")
 		.update(JSON.stringify(identity))
 		.digest("hex")}`;
 }
@@ -1288,11 +1243,7 @@ function cachedDigestResult(
 	cached: { value: CachedPeriodDigestValue; updatedAt: string },
 	context: PeriodDigestContext,
 ): PeriodDigestRunResult {
-	const digest = reconcileDigestFeedReferences(
-		context,
-		PeriodDigestSchema.parse(cached.value.digest),
-		cached.value.markdown,
-	);
+	const digest = PeriodDigestSchema.parse(cached.value.digest);
 	return {
 		context: enrichContextWithCitedTweets(context, digest),
 		digest,
@@ -1410,26 +1361,6 @@ function selectWeeklyPromptTweets(context: PeriodDigestContext) {
 	];
 }
 
-function isHydratableDigestFeedArticle(item: FeedItem) {
-	if (
-		item.kind !== "article" ||
-		!item.summary.trim() ||
-		item.source !== "tiger" ||
-		!/^\d{1,20}$/.test(item.externalId)
-	) {
-		return false;
-	}
-	try {
-		const url = new URL(item.url);
-		return (
-			(url.protocol === "https:" || url.protocol === "http:") &&
-			Boolean(url.hostname)
-		);
-	} catch {
-		return false;
-	}
-}
-
 function buildPrompt(
 	context: PeriodDigestContext,
 	options?: {
@@ -1470,7 +1401,7 @@ function buildPrompt(
 		})
 		.map((item) => {
 			const cached =
-				item.kind === "article" && item.summary.trim()
+				item.kind === "article" && item.summary
 					? readFeedArticleContent(item.id)
 					: null;
 			const availableContent = cached?.content ?? item.summary;
@@ -1588,37 +1519,22 @@ function buildPrompt(
 	const { dataset, tweetCount, feedCount } = fitDataset();
 
 	const reportRequirements = weeklyDeepDive
-		? `- This is a weekly deep-dive, not a daily digest. When the dataset is substantial, target 7,000-10,000 Chinese characters for zh-CN, or 2,500-3,500 words for other languages, supported by roughly 50-100 unique source citations across tweets, editorial flashes, and publisher articles as the evidence allows. Do not pad thin datasets or repeat points merely to hit a length target.
+		? `- This is a weekly deep-dive, not a daily digest. When the dataset is substantial, target 7,000-10,000 Chinese characters for zh-CN, or 2,500-3,500 words for other languages, supported by roughly 50-100 unique tweet citations. Do not pad thin datasets or repeat points merely to hit a length target.
 - Start with a 4-6 sentence executive lead that states the week's dominant narrative, the most consequential change, and the strongest counter-signal.
 - Use these level-2 sections in this order: "Executive brief", "What changed this week", "Main themes", "Key turning points", "Key people and viewpoints", "Disagreements and open questions", "Important links shared", "Worth opening", and "Next week watchlist". Add "Worth replying to" only for clearly high-signal replies. Translate the titles when a report language is requested.
 - Under "What changed this week", distinguish genuine developments from topics that merely stayed noisy. Use 4-8 evidence-rich bullets.
 - Under "Main themes", cover 6-10 distinct themes when supported by the data. Give each theme a level-3 heading and 2-4 substantive bullets covering the evidence, why it matters, and meaningful disagreement or uncertainty.
-- An important editorial flash or article may form a "Main themes" topic even when no tweet mentions it. Keep the publisher attribution and reported-status boundary explicit rather than omitting the event.
 - Under "Key turning points", reconstruct 3-7 dated or sequenced shifts from across the week; do not turn the entire report into a raw chronology.
 - Cover evidence from every day that has source data instead of over-weighting the end of the week.
 - Under "Key people and viewpoints", select 5-10 people for the distinct information or argument they contributed, not merely for popularity.
 - Under "Disagreements and open questions", surface 3-6 substantive conflicts, counterexamples, or unresolved claims without forcing a false consensus.
 - Under "Important links shared", include 8-15 of the most consequential external links when available and explain the value of each.
-- Under "Worth opening", select 8-12 source tweets, threads, editorial flashes, or publisher articles that best reward direct reading, with a concrete reason for each choice.
+- Under "Worth opening", select 8-12 source tweets or threads that best reward direct reading, with a concrete reason for each choice.
 - Under "Next week watchlist", give 5-8 falsifiable things to monitor. Clearly label forward-looking interpretation as inference and cite the observations supporting it.
 - Represent competing views fairly. Separate reported facts, participants' opinions, and your synthesis. Omit low-signal repetition even if it was popular.`
 		: `- Target 700-1100 words when there is enough data.
-- Start with a 2-3 sentence lead that immediately states what happened, the most consequential change, and why it matters. Do not frame the report as merely what people are talking about.
-- Use these level-2 sections in this order: "At a glance", "Key events and themes", "Worth reading", and "Watch next". Add "Worth replying to" only if there are clearly high-signal replies. Translate these section titles when a report language is requested.
-- Organize "Key events and themes" by real-world event or subject, never by source type. Within each theme, synthesize relevant tweets, editorial flashes, and publisher articles into one coherent account.
-- An important editorial flash or article may form a key topic even when no tweet mentions it. Do not require social-media corroboration for inclusion; instead label the publisher claim as reported rather than independently confirmed.
-- Explain each theme in this order when the evidence supports it: what is reported to have happened, what participants or commentators think, then your clearly labeled synthesis or inference.
-- Treat editorial items and tweets as peer inputs for topic selection while preserving their different evidentiary roles. Do not create a separate feed summary, editorial-feed section, feed-only block, or feed appendix.
-- Deduplicate repeated coverage of the same development across publishers and tweets. Preserve the most specific material facts and meaningful disagreement without repeating near-identical summaries.`;
-	const standardTopicSection = weeklyDeepDive
-		? '"Main themes"'
-		: '"Key events and themes"';
-	const priorityLeadSection = weeklyDeepDive
-		? "Executive brief"
-		: "At a glance";
-	const priorityReadingSection = weeklyDeepDive
-		? '"Worth opening"'
-		: '"Worth reading"';
+- Start with a 2-3 sentence lead that immediately says what people are talking about.
+- Use sections named "What people are talking about", "Important links shared", and "Worth opening". Add "Worth replying to" only if there are clearly high-signal replies. Translate these section titles when a report language is requested.`;
 
 	return `Window: ${context.window.label}
 Since: ${context.window.since}
@@ -1627,25 +1543,23 @@ Sources: ${JSON.stringify(context.counts)}
 Prompt tweets: ${String(tweetCount)} of ${String(context.tweets.length)} selected context tweets
 Prompt feed items: ${String(feedCount)} of ${String(context.feedItems?.length ?? 0)} selected editorial items
 
-Write a high-signal, event-centered "what happened and why it matters" report from the user's Home timeline and optional editorial feed dataset. Tweets, editorial flashes, and publisher articles are evidence inputs to one report, not separate reports.
+Write a high-signal "what happened" report from the user's Home timeline and optional editorial feed dataset.
 
 Requirements:
 - Stream one readable Markdown report first. The UI will show this text directly; do not rely on separate cards or structured summaries.
 ${reportRequirements}
-- Treat every tweet with specialFollow=true as an explicit user priority. Inspect those tweets before ordinary posts. Give their substantive updates priority in ${priorityLeadSection} and the main synthesis, and provide more individual context and direct citations for them in ${priorityReadingSection}. This rule applies to both standard and weekly reports. Low-information priority posts may be handled briefly, but must not be omitted merely because engagement is low and must never be made to sound more important than the evidence supports.
+- Treat every tweet with specialFollow=true as an explicit user priority. Inspect those tweets before ordinary posts. Give their substantive updates priority in the opening/Executive brief and the main synthesis, and provide more individual context and direct citations for them in "Worth opening". This rule applies to both standard and weekly reports. Low-information priority posts may be handled briefly, but must not be omitted merely because engagement is low and must never be made to sound more important than the evidence supports.
 - Format every section title as a Markdown level-2 heading (\`## Section title\`), never as bold-only text.
 - When a tweet has replyToTweet, use that parent context to understand what the author was replying to and whether Peter already joined the conversation.
 - Use bullets under each section. Each bullet should be specific and explain why it matters.
-- In the main topic section (${standardTopicSection}), group related bullets beneath concise Markdown level-3 topic headings (\`### Topic title\`).
+- In the main topic section ("What people are talking about" or "Main themes"), group related bullets beneath concise Markdown level-3 topic headings (\`### Topic title\`).
 - Every level-3 topic heading must exactly match one corresponding keyTopics[].title in the JSON, and keyTopics must follow the same order. Do not replace these headings with bold-only bullet prefixes.
 - For tweets: cite every claim with inline tweet ids at the end of the relevant sentence or bullet, e.g. (tweet_123, tweet_456). These citations become hoverable source links.
-- For editorial feed items: cite the canonical source as a normal Markdown link at the claim it supports and put the exact feed id into the matching keyTopics[].feedItemIds or notableLinks[].sourceFeedItemIds and the top-level sourceFeedItemIds. Do not invent a separate citation syntax.
-- Source arrays must be exhaustive rather than representative: every tweet and editorial item used in a topic must appear in that topic's tweetIds/feedItemIds, and every source used anywhere in the Markdown must appear once in the corresponding top-level sourceTweetIds/sourceFeedItemIds. Never leave a feed source only in prose or only in an appendix.
-- Every id in top-level sourceFeedItemIds must also appear in at least one keyTopics[].feedItemIds or notableLinks[].sourceFeedItemIds. Never emit a root-only orphan feed citation.
+- For editorial feed items: cite the canonical source as a normal Markdown link and put the exact feed id into feedItemIds/sourceFeedItemIds in the JSON. Do not invent a separate citation syntax.
 - Treat important flashes and publisher articles as editorial reports, not as automatically verified truth. Distinguish reported facts, analysis, uncertainty, and social-media opinion. Never present a publisher's claim as independently confirmed unless the dataset contains corroboration.
 - Prefer important flashes for timely factual developments. For publisher articles, contentSource=full_text means content contains the fetched article body; read and synthesize that body instead of relying only on the title or excerpt. contentTruncated=true means the body was bounded for prompt size, so do not imply unseen details. Article content may be intentionally absent for restricted, high-risk, or analysis-tagged items; in that case use only the title, publisher, timestamp, and canonical link without inferring missing details.
 - For links: emit normal Markdown links with no space between the label and URL, e.g. [title](https://example.com), then cite the sharing tweet ids in the same bullet.
-- Prefer synthesis over chronology. Merge repeated posts and duplicate publisher coverage of one event into one evidence-rich bullet, while retaining materially different facts or disagreement.
+- Prefer synthesis over chronology. Group repeated chatter into one bullet.
 - Mention handles when useful, but do not make the report a list of handles.
 - Do not include a generic "Action items" section.
 - If there is no data, say that plainly in one short paragraph.
@@ -1685,185 +1599,9 @@ function fallbackDigest(
 		people: [],
 		actionItems: [],
 		sourceTweetIds: context.tweets.slice(0, 20).map((tweet) => tweet.id),
-		sourceFeedItemIds: [],
-	};
-}
-
-function uniqueStrings(values: readonly string[]) {
-	return [...new Set(values.filter(Boolean))];
-}
-
-function markdownForKeyTopic(markdown: string, title: string) {
-	const lines = markdown.split(/\r?\n/);
-	const start = lines.findIndex((line) => {
-		const match = line.match(/^###\s+(.+?)\s*#*\s*$/);
-		return match?.[1]?.trim() === title.trim();
-	});
-	if (start < 0) return "";
-	let end = lines.length;
-	for (let index = start + 1; index < lines.length; index += 1) {
-		if (/^#{1,3}\s+/.test(lines[index] ?? "")) {
-			end = index;
-			break;
-		}
-	}
-	return lines.slice(start, end).join("\n");
-}
-
-function feedItemIdsForMarkdown(
-	markdown: string,
-	feedItems: readonly FeedItem[],
-) {
-	const itemsByUrl = new Map<string, FeedItem[]>();
-	for (const item of feedItems) {
-		const matches = itemsByUrl.get(item.url) ?? [];
-		matches.push(item);
-		itemsByUrl.set(item.url, matches);
-	}
-	const ids: string[] = [];
-	for (const match of markdown.matchAll(
-		/\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\)/g,
-	)) {
-		const url = match[1];
-		if (!url) continue;
-		const matches = itemsByUrl.get(url) ?? [];
-		if (matches.length !== 1 || ids.includes(matches[0]!.id)) continue;
-		ids.push(matches[0]!.id);
-	}
-	return ids;
-}
-
-function feedItemIdsForExactUrl(url: string, feedItems: readonly FeedItem[]) {
-	const matches = feedItems.filter((item) => item.url === url);
-	return matches.length === 1 ? [matches[0]!.id] : [];
-}
-
-function markdownFallbackFeedTopics(
-	markdown: string,
-	feedItems: readonly FeedItem[],
-) {
-	const topics: Array<
-		PeriodDigest["keyTopics"][number] & { feedItemIds: string[] }
-	> = [];
-	let topicTitle = "";
-	const lines = markdown.split(/\r?\n/);
-	for (let index = 0; index < lines.length; index += 1) {
-		const rawLine = lines[index] ?? "";
-		if (/^#{1,2}\s+/.test(rawLine.trim())) {
-			topicTitle = "";
-			continue;
-		}
-		const heading = /^###\s+(.+?)\s*#*\s*$/.exec(rawLine.trim());
-		if (heading?.[1]) {
-			topicTitle = heading[1].trim();
-			continue;
-		}
-		const bullet = /^\s*[-*+]\s+(.+)$/.exec(rawLine);
-		if (!bullet?.[1]) continue;
-		const bulletLines = [bullet[1].trim()];
-		let cursor = index + 1;
-		for (; cursor < lines.length; cursor += 1) {
-			const continuation = lines[cursor] ?? "";
-			if (
-				/^\s*[-*+]\s+/.test(continuation) ||
-				/^#{1,6}\s+/.test(continuation)
-			) {
-				break;
-			}
-			if (continuation.trim()) bulletLines.push(continuation.trim());
-		}
-		index = cursor - 1;
-		const bulletMarkdown = bulletLines.join(" ");
-		const feedItemIds = feedItemIdsForMarkdown(bulletMarkdown, feedItems);
-		if (feedItemIds.length === 0) continue;
-		const linkLabel = /\[([^\]\n]+)\]\(https?:\/\/[^\s)]+\)/.exec(
-			bulletMarkdown,
-		)?.[1];
-		const title = topicTitle || linkLabel?.trim() || "Editorial source";
-		const summary = bulletMarkdown
-			.replaceAll(/\[([^\]\n]+)\]\(https?:\/\/[^\s)]+\)/g, "$1")
-			.replaceAll(/\s+/g, " ")
-			.trim()
-			.slice(0, 500);
-		const existing = topics.find((topic) => topic.title === title);
-		if (existing) {
-			existing.feedItemIds = uniqueStrings([
-				...(existing.feedItemIds ?? []),
-				...feedItemIds,
-			]);
-			existing.summary = uniqueStrings([existing.summary, summary]).join(" ");
-			continue;
-		}
-		topics.push({
-			title,
-			summary,
-			tweetIds: [],
-			handles: [],
-			feedItemIds,
-		});
-	}
-	return topics;
-}
-
-function reconcileDigestFeedReferences(
-	context: PeriodDigestContext,
-	digest: PeriodDigest,
-	markdown: string,
-): PeriodDigest {
-	const feedItems = context.feedItems ?? [];
-	const knownFeedItemIds = new Set(feedItems.map((item) => item.id));
-	const keyTopics = digest.keyTopics.map((topic) => ({
-		...topic,
-		feedItemIds: uniqueStrings([
-			...(topic.feedItemIds ?? []).filter((id) => knownFeedItemIds.has(id)),
-			...feedItemIdsForMarkdown(
-				markdownForKeyTopic(markdown, topic.title),
-				feedItems,
-			),
-		]),
-	}));
-	const notableLinks = digest.notableLinks.map((link) => ({
-		...link,
-		sourceFeedItemIds: uniqueStrings([
-			...(link.sourceFeedItemIds ?? []).filter((id) =>
-				knownFeedItemIds.has(id),
-			),
-			...feedItemIdsForExactUrl(link.url, feedItems),
-		]),
-	}));
-	const nestedFeedItemIds = new Set([
-		...keyTopics.flatMap((topic) => topic.feedItemIds),
-		...notableLinks.flatMap((link) => link.sourceFeedItemIds),
-	]);
-	for (const markdownTopic of markdownFallbackFeedTopics(markdown, feedItems)) {
-		const unresolvedFeedItemIds = markdownTopic.feedItemIds.filter(
-			(id) => !nestedFeedItemIds.has(id),
-		);
-		if (unresolvedFeedItemIds.length === 0) continue;
-		const existing = keyTopics.find(
-			(topic) => topic.title.trim() === markdownTopic.title.trim(),
-		);
-		if (existing) {
-			existing.feedItemIds = uniqueStrings([
-				...existing.feedItemIds,
-				...unresolvedFeedItemIds,
-			]);
-		} else {
-			keyTopics.push({
-				...markdownTopic,
-				feedItemIds: unresolvedFeedItemIds,
-			});
-		}
-		for (const id of unresolvedFeedItemIds) nestedFeedItemIds.add(id);
-	}
-	return {
-		...digest,
-		keyTopics,
-		notableLinks,
-		sourceFeedItemIds: uniqueStrings([
-			...keyTopics.flatMap((topic) => topic.feedItemIds),
-			...notableLinks.flatMap((link) => link.sourceFeedItemIds),
-		]),
+		sourceFeedItemIds: (context.feedItems ?? [])
+			.slice(0, 20)
+			.map((item) => item.id),
 	};
 }
 
@@ -1894,14 +1632,7 @@ function parseDigestFromHybridText(
 		fallback: (markdown) => fallbackDigest(context, markdown, language),
 		delimiterPattern: DELIMITER_PATTERN,
 	});
-	return {
-		markdown: parsed.markdown,
-		digest: reconcileDigestFeedReferences(
-			context,
-			parsed.value,
-			parsed.markdown,
-		),
-	};
+	return { markdown: parsed.markdown, digest: parsed.value };
 }
 
 function processSseChunk(
@@ -1942,10 +1673,7 @@ function completeOpenAIStreamEffect(
 	handlers: PeriodDigestStreamHandlers,
 ): Effect.Effect<PeriodDigestRunResult, Error> {
 	return Effect.gen(function* () {
-		const digest = ensureSpecialFollowSourceTweets(
-			context,
-			reconcileDigestFeedReferences(context, stream.value, stream.markdown),
-		);
+		const digest = ensureSpecialFollowSourceTweets(context, stream.value);
 		const enrichedContext = yield* tryDigestSync(() =>
 			enrichContextWithCitedTweets(context, digest),
 		);
@@ -2068,7 +1796,9 @@ export function streamPeriodDigestEffect(
 			yield* Effect.tryPromise({
 				try: () =>
 					hydrateFeedArticleContents(
-						feedItems.filter(isHydratableDigestFeedArticle),
+						feedItems.filter(
+							(item) => item.kind === "article" && Boolean(item.summary),
+						),
 						resolvedOptions.signal ? { signal: resolvedOptions.signal } : {},
 					),
 				catch: (error) =>
@@ -2172,7 +1902,6 @@ export const __test__ = {
 	buildPrompt,
 	digestCacheKey,
 	languageFromOptions,
-	latestDigestCacheKey,
 	localDayWindows,
 	normalizeDigestLanguage,
 	readOpenAIStreamEffect,

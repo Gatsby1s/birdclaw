@@ -13,17 +13,12 @@ export function MarkdownViewer({
 	className,
 	markdownLinkClassName,
 	sourceOnlyCitations = false,
-	renderHeadingSupplement,
 }: {
 	markdown: string;
 	context?: CitationContext | null;
 	className?: string;
 	markdownLinkClassName?: string;
 	sourceOnlyCitations?: boolean;
-	renderHeadingSupplement?: (heading: {
-		level: 2 | 3;
-		text: string;
-	}) => ReactNode;
 }) {
 	const lookup = buildLookup(context, {
 		linkReadableCitationText: !sourceOnlyCitations,
@@ -60,46 +55,26 @@ export function MarkdownViewer({
 		}
 		if (trimmed.startsWith("### ")) {
 			flushList();
-			const headingText = trimmed.slice(4);
 			nodes.push(
 				<h3
 					className="mt-5 mb-1.5 text-[14px] font-bold uppercase tracking-wide text-[var(--ink-soft)] first:mt-0"
 					key={`h3-${String(nodes.length)}`}
 				>
-					{renderInline(headingText, lookup)}
+					{renderInline(trimmed.slice(4), lookup)}
 				</h3>,
 			);
-			const supplement = renderHeadingSupplement?.({
-				level: 3,
-				text: headingText,
-			});
-			if (supplement) {
-				nodes.push(
-					<div key={`h3-supplement-${String(nodes.length)}`}>{supplement}</div>,
-				);
-			}
 			continue;
 		}
 		if (trimmed.startsWith("## ")) {
 			flushList();
-			const headingText = trimmed.slice(3);
 			nodes.push(
 				<h2
 					className="mt-6 mb-2 text-[18px] font-bold text-[var(--ink)] first:mt-0"
 					key={`h2-${String(nodes.length)}`}
 				>
-					{renderInline(headingText, lookup)}
+					{renderInline(trimmed.slice(3), lookup)}
 				</h2>,
 			);
-			const supplement = renderHeadingSupplement?.({
-				level: 2,
-				text: headingText,
-			});
-			if (supplement) {
-				nodes.push(
-					<div key={`h2-supplement-${String(nodes.length)}`}>{supplement}</div>,
-				);
-			}
 			continue;
 		}
 		if (trimmed.startsWith("# ")) {

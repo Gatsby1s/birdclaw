@@ -36,34 +36,6 @@ describe("injectTopicHeadings", () => {
 		);
 	});
 
-	it("finds the event section after an at-a-glance lead", () => {
-		const markdown = [
-			"## At a glance",
-			"",
-			"- Lead signal (tweet_303030303030).",
-			"",
-			"## Key events and themes",
-			"",
-			"- Kimi event detail (tweet_101010101010).",
-			"",
-			"## Worth reading",
-			"",
-			"- Repeated Kimi source (tweet_101010101010).",
-		].join("\n");
-
-		const result = injectTopicHeadings(markdown, [topics[0]!]);
-
-		expect(result).toContain(
-			"## Key events and themes\n\n### Kimi K3\n\n- Kimi event detail",
-		);
-		expect(result.indexOf("### Kimi K3")).toBeGreaterThan(
-			result.indexOf("## Key events and themes"),
-		);
-		expect(result.indexOf("### Kimi K3")).toBeLessThan(
-			result.indexOf("## Worth reading"),
-		);
-	});
-
 	it("matches a citation on a bullet continuation line", () => {
 		const markdown =
 			"## What people are talking about\n\n- A wrapped discussion\n  with its citation (tweet_101010101010).";

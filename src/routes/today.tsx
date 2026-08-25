@@ -34,6 +34,7 @@ import {
 	exportCurrentPdf,
 	exportReferenceCollectionPdf,
 } from "#/lib/pdf-export-client";
+import { fetchTweetScores } from "#/lib/tweet-score-client";
 import {
 	hydrateProfileHandles,
 	normalizeProfileHydrationHandle as normalizeHandle,
@@ -44,7 +45,6 @@ import {
 	type TodayRouteSearch,
 	validateTodaySearch,
 } from "#/lib/route-search";
-import { safeHttpUrl } from "#/lib/url-safety";
 import {
 	cx,
 	errorCopyClass,
@@ -67,15 +67,11 @@ type PeriodOption = PeriodRouteSearch;
 type ReferenceTweet = PeriodDigestContext["tweets"][number];
 type ReferenceDm = PeriodDigestContext["dms"][number];
 type ReferenceFeedItem = NonNullable<PeriodDigestContext["feedItems"]>[number];
-type ReferenceSource =
-	| { kind: "tweet"; id: string }
-	| { kind: "feed"; id: string };
 type ReferenceGroup = {
 	section: string;
 	title: string;
 	summary: string;
 	tweetIds: string[];
-	feedItemIds: string[];
 };
 const PROFILE_HYDRATION_LIMIT = 12;
 const PROFILE_HYDRATION_DELAY_MS = 300;
@@ -97,11 +93,6 @@ const periods: Array<{ value: PeriodOption; label: string }> = [
 
 const referenceSectionLabels: Record<string, string> = {
 	"Opening summary": "开篇摘要",
-	"At a glance": "一览",
-	"Key events and themes": "重点事件与主题",
-	"Worth reading": "值得细读",
-	"Watch next": "后续观察",
-	"What happened": "重点事件",
 	"What people are talking about": "热议主题",
 	"Important links shared": "重要链接",
 	"Action items": "行动线索",
@@ -111,11 +102,6 @@ const referenceSectionLabels: Record<string, string> = {
 
 const referenceSectionNotes: Record<string, string> = {
 	"Opening summary": "先读总述，再按编号追原文。",
-	"At a glance": "先掌握最重要的变化与影响。",
-	"Key events and themes": "按事件融合快讯、文章与推文证据。",
-	"Worth reading": "集中阅读最值得打开的文章与推文。",
-	"Watch next": "核对后续可验证的观察点。",
-	"What happened": "按事件融合快讯、文章与推文证据。",
 	"What people are talking about": "按市场和产业主题逐组阅读。",
 	"Important links shared": "集中核对文章和外部材料的来源。",
 	"Action items": "按待处理事项回看对应原文。",
@@ -124,16 +110,6 @@ const referenceSectionNotes: Record<string, string> = {
 };
 
 const referenceSectionAliases: Record<string, string> = {
-	一览: "At a glance",
-	一眼看懂: "At a glance",
-	重点事件与主题: "Key events and themes",
-	关键事件与主题: "Key events and themes",
-	值得阅读: "Worth reading",
-	后续观察: "Watch next",
-	接下来关注: "Watch next",
-	发生了什么: "What happened",
-	重点事件: "What happened",
-	今日重点: "What happened",
 	大家在聊什么: "What people are talking about",
 	热议主题: "What people are talking about",
 	重要链接: "Important links shared",
@@ -198,18 +174,12 @@ function formatCounts(context: PeriodDigestContext | null) {
 	if (!context)
 		return "Local Twitter memory. Generate a summary only when needed.";
 	const counts = context.counts;
-	const feedItems = context.feedItems ?? [];
-	const flashCount = feedItems.filter((item) => item.kind === "flash").length;
-	const articleCount = feedItems.filter(
-		(item) => item.kind === "article",
-	).length;
 	return [
 		`${String(counts.home)} home`,
 		context.twitterScope === "home"
 			? null
 			: `${String(counts.mentions)} mentions`,
-		context.includeFeed ? `${String(flashCount)} flashes` : null,
-		context.includeFeed ? `${String(articleCount)} articles` : null,
+		context.includeFeed ? `${String(counts.feed ?? 0)} feed` : null,
 		`${String(counts.links)} links`,
 		context.includeDms ? `${String(counts.dms)} DMs` : null,
 	]
@@ -223,10 +193,6 @@ function markdownReferencePlainText(value: string) {
 		.replaceAll(/\*\*([^*]+)\*\*/g, "$1")
 		.replaceAll(/\s+/g, " ")
 		.trim();
-}
-
-function normalizeReferenceTitle(value: string) {
-	return markdownReferencePlainText(value).toLocaleLowerCase();
 }
 
 function markdownReferenceSectionHeading(line: string) {
@@ -341,77 +307,24 @@ function buildReferenceTweetLookup(context: PeriodDigestContext) {
 	return lookup;
 }
 
-function buildReferenceFeedLookup(context: PeriodDigestContext) {
-	return new Map((context.feedItems ?? []).map((item) => [item.id, item]));
-}
-
-function exactMarkdownFeedItemIds(
-	markdown: string,
-	feedItems: readonly ReferenceFeedItem[],
-) {
-	const itemsByUrl = new Map<string, ReferenceFeedItem[]>();
-	for (const item of feedItems) {
-		const url = safeHttpUrl(item.url);
-		if (!url) continue;
-		const matches = itemsByUrl.get(url) ?? [];
-		matches.push(item);
-		itemsByUrl.set(url, matches);
-	}
-	const ids: string[] = [];
-	for (const match of markdown.matchAll(
-		/\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\)/g,
-	)) {
-		const url = match[1] ? safeHttpUrl(match[1]) : null;
-		if (!url) continue;
-		const matches = itemsByUrl.get(url) ?? [];
-		if (matches.length !== 1 || ids.includes(matches[0]!.id)) continue;
-		ids.push(matches[0]!.id);
-	}
-	return ids;
-}
-
-function referenceSourceKey(source: ReferenceSource) {
-	return source.kind === "tweet"
-		? `tweet:${normalizeReferenceTweetId(source.id)}`
-		: `feed:${source.id.trim()}`;
-}
-
-function referenceSourcesForGroup(group: ReferenceGroup): ReferenceSource[] {
-	const sources: ReferenceSource[] = [
-		...group.feedItemIds.map((id) => ({ kind: "feed" as const, id })),
-		...group.tweetIds.map((id) => ({ kind: "tweet" as const, id })),
-	];
-	const seen = new Set<string>();
-	return sources.filter((source) => {
-		const key = referenceSourceKey(source);
-		if (seen.has(key)) return false;
-		seen.add(key);
-		return true;
-	});
-}
-
 function collectStructuredReferenceGroups(result: PeriodDigestRunResult) {
 	const groups: ReferenceGroup[] = [];
 	for (const topic of result.digest.keyTopics) {
-		const feedItemIds = topic.feedItemIds ?? [];
-		if (topic.tweetIds.length === 0 && feedItemIds.length === 0) continue;
+		if (topic.tweetIds.length === 0) continue;
 		groups.push({
-			section: "What happened",
+			section: "What people are talking about",
 			title: topic.title,
 			summary: topic.summary,
 			tweetIds: topic.tweetIds,
-			feedItemIds,
 		});
 	}
 	for (const link of result.digest.notableLinks) {
-		const feedItemIds = link.sourceFeedItemIds ?? [];
-		if (link.sourceTweetIds.length === 0 && feedItemIds.length === 0) continue;
+		if (link.sourceTweetIds.length === 0) continue;
 		groups.push({
 			section: "Important links shared",
 			title: link.title,
 			summary: link.why,
 			tweetIds: link.sourceTweetIds,
-			feedItemIds,
 		});
 	}
 	for (const action of result.digest.actionItems) {
@@ -421,7 +334,6 @@ function collectStructuredReferenceGroups(result: PeriodDigestRunResult) {
 			title: action.label,
 			summary: action.kind.replace("_", " "),
 			tweetIds: [action.tweetId],
-			feedItemIds: [],
 		});
 	}
 
@@ -437,7 +349,6 @@ function collectStructuredReferenceGroups(result: PeriodDigestRunResult) {
 			title: "未在正文主题里直接成组的来源",
 			summary: "这些来源来自当前 digest 的引用集合，单独列出便于补查。",
 			tweetIds: supplemental,
-			feedItemIds: [],
 		});
 	}
 	return groups;
@@ -446,7 +357,6 @@ function collectStructuredReferenceGroups(result: PeriodDigestRunResult) {
 function collectMarkdownReferenceGroups(
 	markdown: string,
 	sourceTweetIds: string[],
-	feedItems: readonly ReferenceFeedItem[],
 ) {
 	const groups: ReferenceGroup[] = [];
 	const lines = markdown.split(/\r?\n/);
@@ -488,7 +398,6 @@ function collectMarkdownReferenceGroups(
 		index = cursor - 1;
 		const bullet = bulletLines.join(" ");
 		const tweetIds = extractMarkdownCitationIds(bullet);
-		const feedItemIds = exactMarkdownFeedItemIds(bullet, feedItems);
 
 		const bold = bullet.match(/^\*\*([^*]+)\*\*\s*(.*)$/);
 		const link = bullet.match(/^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/);
@@ -531,19 +440,8 @@ function collectMarkdownReferenceGroups(
 					previous.tweetIds.push(tweetId);
 				}
 			}
-			for (const feedItemId of feedItemIds) {
-				if (!previous.feedItemIds.includes(feedItemId)) {
-					previous.feedItemIds.push(feedItemId);
-				}
-			}
 		} else {
-			groups.push({
-				section,
-				title,
-				summary,
-				tweetIds,
-				feedItemIds,
-			});
+			groups.push({ section, title, summary, tweetIds });
 		}
 	}
 
@@ -559,7 +457,6 @@ function collectMarkdownReferenceGroups(
 			title: "未在正文主题里直接成组的来源",
 			summary: "这些来源来自当前 digest 的引用集合，单独列出便于补查。",
 			tweetIds: supplemental,
-			feedItemIds: [],
 		});
 	}
 	return groups;
@@ -572,78 +469,27 @@ function collectReferenceGroups(
 	const markdownGroups = collectMarkdownReferenceGroups(
 		markdown,
 		result.digest.sourceTweetIds,
-		result.context.feedItems ?? [],
 	);
-	if (markdownGroups.length === 0)
-		return collectStructuredReferenceGroups(result);
-
-	const matchedTopicTitles = new Set<string>();
-	const matchedLinkTitles = new Set<string>();
-	for (const group of markdownGroups) {
-		const groupTitle = normalizeReferenceTitle(group.title);
-		const topic = result.digest.keyTopics.find(
-			(candidate) => normalizeReferenceTitle(candidate.title) === groupTitle,
-		);
-		if (topic) {
-			group.feedItemIds = [
-				...new Set([...group.feedItemIds, ...(topic.feedItemIds ?? [])]),
-			];
-			matchedTopicTitles.add(normalizeReferenceTitle(topic.title));
-			continue;
-		}
-		const link = result.digest.notableLinks.find(
-			(candidate) => normalizeReferenceTitle(candidate.title) === groupTitle,
-		);
-		if (link) {
-			group.feedItemIds = [
-				...new Set([...group.feedItemIds, ...(link.sourceFeedItemIds ?? [])]),
-			];
-			matchedLinkTitles.add(normalizeReferenceTitle(link.title));
-		}
-	}
-
-	for (const topic of result.digest.keyTopics) {
-		const title = normalizeReferenceTitle(topic.title);
-		const feedItemIds = topic.feedItemIds ?? [];
-		if (matchedTopicTitles.has(title) || feedItemIds.length === 0) continue;
-		markdownGroups.push({
-			section: "What happened",
-			title: topic.title,
-			summary: topic.summary,
-			tweetIds: topic.tweetIds,
-			feedItemIds,
-		});
-	}
-	for (const link of result.digest.notableLinks) {
-		const title = normalizeReferenceTitle(link.title);
-		const feedItemIds = link.sourceFeedItemIds ?? [];
-		if (matchedLinkTitles.has(title) || feedItemIds.length === 0) continue;
-		markdownGroups.push({
-			section: "Important links shared",
-			title: link.title,
-			summary: link.why,
-			tweetIds: link.sourceTweetIds,
-			feedItemIds,
-		});
-	}
-	return markdownGroups;
+	return markdownGroups.length > 0
+		? markdownGroups
+		: collectStructuredReferenceGroups(result);
 }
 
 function collectReferenceLabels(groups: ReferenceGroup[]) {
-	const orderedSources: ReferenceSource[] = [];
-	const labelsByKey = new Map<string, string>();
+	const orderedIds: string[] = [];
+	const labelsById = new Map<string, string>();
 	for (const group of groups) {
-		for (const source of referenceSourcesForGroup(group)) {
-			const key = referenceSourceKey(source);
-			if (labelsByKey.has(key)) continue;
-			orderedSources.push(source);
-			labelsByKey.set(
-				key,
-				`S${String(orderedSources.length).padStart(2, "0")}`,
+		for (const tweetId of group.tweetIds) {
+			const normalized = normalizeReferenceTweetId(tweetId);
+			if (labelsById.has(normalized)) continue;
+			orderedIds.push(normalized);
+			labelsById.set(
+				normalized,
+				`S${String(orderedIds.length).padStart(2, "0")}`,
 			);
 		}
 	}
-	return { orderedSources, labelsByKey };
+	return { orderedIds, labelsById };
 }
 
 function groupReferenceSections(groups: ReferenceGroup[]) {
@@ -654,11 +500,9 @@ function groupReferenceSections(groups: ReferenceGroup[]) {
 	}> = [];
 	for (const group of groups) {
 		const title = referenceSectionLabels[group.section] ?? group.section;
-		const section = sections.find(
-			(candidate) => candidate.key === group.section,
-		);
-		if (section) {
-			section.groups.push(group);
+		const current = sections.at(-1);
+		if (current?.key === group.section) {
+			current.groups.push(group);
 		} else {
 			sections.push({ key: group.section, title, groups: [group] });
 		}
@@ -711,11 +555,13 @@ function ReferenceTweetCard({
 	anchorId,
 	includeMedia,
 	label,
+	score,
 	tweet,
 }: {
 	anchorId?: string;
 	includeMedia: boolean;
 	label: string;
+	score?: number;
 	tweet: ReferenceTweet | null;
 }) {
 	if (!tweet) {
@@ -737,6 +583,9 @@ function ReferenceTweetCard({
 				<span className="today-reference-badge">{label}</span>
 				<strong className="today-reference-author">
 					<span>{formatReferenceAuthor(tweet)}</span>
+					{score === undefined ? null : (
+						<span className="today-reference-score">{score}</span>
+					)}
 				</strong>
 				{tweet.createdAt ? (
 					<time dateTime={tweet.createdAt}>
@@ -780,37 +629,17 @@ function ReferenceDmCard({ item }: { item: ReferenceDm }) {
 	);
 }
 
-function ReferenceFeedCard({
-	anchorId,
-	item,
-	label,
-}: {
-	anchorId?: string;
-	item: ReferenceFeedItem | null;
-	label: string;
-}) {
-	if (!item) {
-		return (
-			<section className="today-reference-source">
-				<div className="today-reference-source-head" id={anchorId}>
-					<span className="today-reference-badge">{label}</span>
-					<strong className="today-reference-author">缺失编辑来源</strong>
-				</div>
-				<p className="today-reference-source-body">
-					当前缓存结果里没有这条快讯或文章的正文。
-				</p>
-			</section>
-		);
-	}
-	const href = safeHttpUrl(item.url);
+function ReferenceFeedCard({ item }: { item: ReferenceFeedItem }) {
 	return (
 		<section className="today-reference-source">
-			<div className="today-reference-source-head" id={anchorId}>
-				<span className="today-reference-badge">{label}</span>
-				<strong className="today-reference-author">
-					<span>{item.kind === "flash" ? "快讯" : "文章"}</span>
-					<span>{item.publisher}</span>
-				</strong>
+			<div
+				className="today-reference-source-head"
+				id={`reference-feed-${item.id}`}
+			>
+				<span className="today-reference-badge">
+					{item.kind === "flash" ? "美股快讯" : "文章"}
+				</span>
+				<strong className="today-reference-author">{item.publisher}</strong>
 				<time dateTime={item.publishedAt}>
 					{formatReferenceTimestamp(item.publishedAt)}
 				</time>
@@ -819,139 +648,43 @@ function ReferenceFeedCard({
 				<strong>{item.title}</strong>
 				{item.summary ? `\n\n${item.summary}` : ""}
 			</p>
-			{href ? (
-				<p>
-					<a href={href} rel="noreferrer">
-						查看发布方原文
-					</a>
-				</p>
-			) : null}
+			<p>
+				<a href={item.url} rel="noreferrer">
+					查看发布方原文
+				</a>
+			</p>
 		</section>
 	);
 }
 
-function TodayTopicSources({
-	group,
-	result,
-}: {
-	group: ReferenceGroup;
-	result: PeriodDigestRunResult;
-}) {
-	const tweetLookup = buildReferenceTweetLookup(result.context);
-	const feedLookup = buildReferenceFeedLookup(result.context);
-	const sources = referenceSourcesForGroup(group);
-	if (sources.length === 0) return null;
-	return (
-		<section
-			aria-label={`${group.title} sources`}
-			className="today-screen-only my-2 rounded-xl border border-[var(--line)] bg-[var(--bg-hover)] p-2.5"
-			data-testid="today-topic-sources"
-		>
-			<p className="mb-2 text-[11px] font-bold tracking-[0.12em] text-[var(--ink-soft)] uppercase">
-				本主题来源
-			</p>
-			<div className="flex flex-col gap-1.5">
-				{sources.map((source) => {
-					const key = referenceSourceKey(source);
-					if (source.kind === "feed") {
-						const item = feedLookup.get(source.id) ?? null;
-						const label = item?.kind === "article" ? "文章" : "快讯";
-						const href = item ? safeHttpUrl(item.url) : null;
-						return (
-							<details
-								className="group rounded-lg border border-[var(--line)] bg-[var(--bg)] px-2.5 py-2"
-								key={key}
-							>
-								<summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-									<span className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-bold text-[var(--accent)]">
-										{label}
-									</span>
-									<span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--ink)]">
-										{item?.publisher || "编辑来源暂不可用"}
-									</span>
-									<span className="text-[11px] text-[var(--ink-soft)] group-open:hidden">
-										查看
-									</span>
-									<span className="hidden text-[11px] text-[var(--ink-soft)] group-open:inline">
-										收起
-									</span>
-								</summary>
-								<div className="mt-2 border-t border-[var(--line)] pt-2 text-[12px] leading-5 text-[var(--ink-soft)]">
-									<p className="whitespace-pre-wrap">
-										{item
-											? `${item.title}${item.summary ? `\n${item.summary}` : ""}`
-											: "当前缓存结果里没有这条编辑来源的正文。"}
-									</p>
-									{href ? (
-										<a
-											aria-label={`打开${label}原文：${item?.title ?? source.id}`}
-											className="mt-1.5 inline-flex font-semibold text-[var(--ink)] underline underline-offset-2"
-											href={href}
-											rel="noreferrer"
-											target="_blank"
-										>
-											打开发布方原文
-										</a>
-									) : null}
-								</div>
-							</details>
-						);
-					}
-
-					const tweet = referenceTweetFor(tweetLookup, source.id);
-					const label = tweet?.specialFollow ? "特别关注" : "推文";
-					const href = tweet ? safeHttpUrl(tweet.url) : null;
-					return (
-						<details
-							className="group rounded-lg border border-[var(--line)] bg-[var(--bg)] px-2.5 py-2"
-							key={key}
-						>
-							<summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-								<span className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-bold text-[var(--accent)]">
-									{label}
-								</span>
-								<span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--ink)]">
-									{tweet ? formatReferenceAuthor(tweet) : "推文原文暂不可用"}
-								</span>
-								<span className="text-[11px] text-[var(--ink-soft)] group-open:hidden">
-									查看
-								</span>
-								<span className="hidden text-[11px] text-[var(--ink-soft)] group-open:inline">
-									收起
-								</span>
-							</summary>
-							<div className="mt-2 border-t border-[var(--line)] pt-2 text-[12px] leading-5 text-[var(--ink-soft)]">
-								<p className="whitespace-pre-wrap">
-									{tweet?.text || "当前缓存结果里没有这条推文的正文。"}
-								</p>
-								{href ? (
-									<a
-										aria-label={`打开${label}原文：${tweet?.author ?? source.id}`}
-										className="mt-1.5 inline-flex font-semibold text-[var(--ink)] underline underline-offset-2"
-										href={href}
-										rel="noreferrer"
-										target="_blank"
-									>
-										打开 X 原文
-									</a>
-								) : null}
-							</div>
-						</details>
-					);
-				})}
-			</div>
-		</section>
-	);
+function referencedFeedItems(result: PeriodDigestRunResult) {
+	const feedItems = result.context.feedItems ?? [];
+	const referencedIds = new Set([
+		...(result.digest.sourceFeedItemIds ?? []),
+		...result.digest.keyTopics.flatMap((topic) => topic.feedItemIds ?? []),
+		...result.digest.notableLinks.flatMap(
+			(link) => link.sourceFeedItemIds ?? [],
+		),
+	]);
+	if (referencedIds.size === 0) {
+		return feedItems
+			.filter((item) => item.isImportant)
+			.concat(feedItems.filter((item) => !item.isImportant).slice(0, 20))
+			.slice(0, 40);
+	}
+	return feedItems.filter((item) => referencedIds.has(item.id));
 }
 
 function ReferenceDigestPrint({
 	generatedAt,
 	markdown,
 	result,
+	scores,
 }: {
 	generatedAt: string | null;
 	markdown: string;
 	result: PeriodDigestRunResult;
+	scores: Record<string, number>;
 }) {
 	const groups = collectReferenceGroups(result, markdown);
 	const documentMeta = markdownReferenceDocumentMeta(
@@ -961,9 +694,9 @@ function ReferenceDigestPrint({
 	);
 	const sections = groupReferenceSections(groups);
 	const tweetLookup = buildReferenceTweetLookup(result.context);
-	const feedLookup = buildReferenceFeedLookup(result.context);
-	const { labelsByKey, orderedSources } = collectReferenceLabels(groups);
-	const sourceCount = orderedSources.length;
+	const { labelsById, orderedIds } = collectReferenceLabels(groups);
+	const feedItems = referencedFeedItems(result);
+	const sourceCount = orderedIds.length + feedItems.length;
 	const sourceScopeLabel = result.context.includeFeed ? "Home + Feed" : "Home";
 	const groupAnchors = new Map(
 		groups.map((group, index) => [
@@ -974,16 +707,16 @@ function ReferenceDigestPrint({
 	const groupIndexes = new Map(groups.map((group, index) => [group, index]));
 	const firstGroupBySource = new Map<string, number>();
 	for (const [groupIndex, group] of groups.entries()) {
-		for (const source of referenceSourcesForGroup(group)) {
-			const key = referenceSourceKey(source);
-			if (!firstGroupBySource.has(key)) {
-				firstGroupBySource.set(key, groupIndex);
+		for (const tweetId of group.tweetIds) {
+			const normalized = normalizeReferenceTweetId(tweetId);
+			if (!firstGroupBySource.has(normalized)) {
+				firstGroupBySource.set(normalized, groupIndex);
 			}
 		}
 	}
 	const sourceLabelsFor = (group: ReferenceGroup) =>
-		referenceSourcesForGroup(group)
-			.map((source) => labelsByKey.get(referenceSourceKey(source)))
+		group.tweetIds
+			.map((tweetId) => labelsById.get(normalizeReferenceTweetId(tweetId)))
 			.filter((label): label is string => Boolean(label));
 	const windowSince = formatReferenceDate(result.context.window.since);
 	const windowUntil = formatReferenceDate(result.context.window.until);
@@ -1012,7 +745,7 @@ function ReferenceDigestPrint({
 						<tr>
 							<th>排版目标</th>
 							<td>
-								适合打印、逐条阅读和做边注；快讯、文章与推文按主题共同编排，推文图片使用紧凑网格保留。
+								适合打印、逐条阅读和做边注；推文图片使用紧凑网格完整保留，黑白打印仍能清楚区分主题、原文与回复上下文。
 							</td>
 						</tr>
 						<tr>
@@ -1025,7 +758,8 @@ function ReferenceDigestPrint({
 						<tr>
 							<th>作者信息</th>
 							<td>
-								每条原文标明来源类型、发布方或作者与精确时间；媒体报道和社交观点保持清楚边界。
+								每条原文突出显示作者昵称与账号
+								ID，保留精确到分钟的发帖时间，不显示点赞量和原文链接。
 							</td>
 						</tr>
 					</tbody>
@@ -1070,9 +804,9 @@ function ReferenceDigestPrint({
 				<h2>阅读说明</h2>
 				<p>
 					{result.context.includeFeed
-						? "这份合集不是网页截图，而是把总结实际引用的快讯、文章与 Home 推文按同一主题重新编排。每个主题先给出总结，再紧接支撑它的编辑来源与社交观点。"
-						: "这份合集不是网页截图，而是把总结引用的 Home 推文按主题重新编排。每个主题先保留网页上的标题和摘要，随后列出对应原文。"}
-					S01、S02 等是全册统一来源编号，类型标签用于区分快讯、文章和推文。
+						? "这份合集不是网页截图，而是把总结引用的 Home 推文和 Feed 编辑来源重新编成一份可打印文档。每个主题先保留网页上的标题和摘要，随后按尾注出现顺序列出推文；Feed 来源单独保留发布方、时间和原文链接。"
+						: "这份合集不是网页截图，而是把总结引用的 Home 推文重新编成一份可打印文档。每个主题先保留网页上的标题和摘要，随后按尾注出现顺序列出推文。"}
+					S01、S02 等是推文来源编号，方便在纸上做标记。
 				</p>
 				<h2>目录</h2>
 				{groups.length > 0 ? (
@@ -1142,43 +876,23 @@ function ReferenceDigestPrint({
 							<p>{group.summary}</p>
 							<p className="today-reference-source-list">
 								本主题原文：{sourceLabelsFor(group).join(", ")} · 共{" "}
-								{String(sourceLabelsFor(group).length)} 条
+								{String(group.tweetIds.length)} 条
 							</p>
-							{group.feedItemIds.map((feedItemId) => {
-								const source = { kind: "feed" as const, id: feedItemId };
-								const key = referenceSourceKey(source);
-								const item = feedLookup.get(feedItemId) ?? null;
-								const label = labelsByKey.get(key) ?? feedItemId;
-								const firstOccurrence =
-									firstGroupBySource.get(key) === groupIndexes.get(group);
-								if (!firstOccurrence) return null;
-								return (
-									<ReferenceFeedCard
-										anchorId={
-											firstOccurrence ? `reference-source-${label}` : undefined
-										}
-										item={item}
-										key={key}
-										label={label}
-									/>
-								);
-							})}
 							{group.tweetIds.map((tweetId) => {
 								const normalized = normalizeReferenceTweetId(tweetId);
-								const source = { kind: "tweet" as const, id: normalized };
-								const key = referenceSourceKey(source);
-								const label = labelsByKey.get(key) ?? normalized;
+								const label = labelsById.get(normalized) ?? normalized;
 								const firstOccurrence =
-									firstGroupBySource.get(key) === groupIndexes.get(group);
-								if (!firstOccurrence) return null;
+									firstGroupBySource.get(normalized) ===
+									groupIndexes.get(group);
 								return (
 									<ReferenceTweetCard
 										anchorId={
 											firstOccurrence ? `reference-source-${label}` : undefined
 										}
 										includeMedia={firstOccurrence}
-										key={key}
+										key={normalized}
 										label={label}
+										score={scores[normalized]}
 										tweet={referenceTweetFor(tweetLookup, tweetId)}
 									/>
 								);
@@ -1197,49 +911,51 @@ function ReferenceDigestPrint({
 				</section>
 			) : null}
 
-			{orderedSources.length > 0 ? (
+			{feedItems.length > 0 ? (
+				<section className="today-reference-section">
+					<h2>Feed 编辑来源</h2>
+					<p>
+						仅保留发布方、时间、短摘要和原文链接；快讯与文章是编辑来源，不等同于
+						BirdClaw 已独立核实。
+					</p>
+					{feedItems.map((item) => (
+						<ReferenceFeedCard item={item} key={item.id} />
+					))}
+				</section>
+			) : null}
+
+			{orderedIds.length > 0 ? (
 				<section className="today-reference-index today-reference-sheet">
 					<h2>来源索引</h2>
 					<p>
-						这里按全局编号统一列出快讯、文章和推文，便于从纸面快速反查来源与所在页。
+						这里按全局编号列出每条原文的作者、账号 ID、推文 ID
+						和发帖时间，便于从纸面快速反查。
 					</p>
 					<table>
 						<thead>
 							<tr>
 								<th>编号</th>
-								<th>类型 / 来源</th>
-								<th>标题或 ID</th>
-								<th>发布时间</th>
+								<th>作者 / 账号 ID</th>
+								<th>推文 ID</th>
+								<th>发帖时间</th>
 								<th>页码</th>
 							</tr>
 						</thead>
 						<tbody>
-							{orderedSources.map((source) => {
-								const key = referenceSourceKey(source);
-								const label = labelsByKey.get(key) ?? source.id;
-								const tweet =
-									source.kind === "tweet"
-										? referenceTweetFor(tweetLookup, source.id)
-										: null;
-								const feed =
-									source.kind === "feed" ? feedLookup.get(source.id) : null;
+							{orderedIds.map((tweetId) => {
+								const label = labelsById.get(tweetId) ?? tweetId;
+								const tweet = referenceTweetFor(tweetLookup, tweetId);
 								return (
-									<tr key={key}>
+									<tr key={tweetId}>
 										<td>
 											<a href={`#reference-source-${label}`}>{label}</a>
 										</td>
+										<td>{tweet ? formatReferenceAuthor(tweet) : "缺失原文"}</td>
+										<td>{tweet?.id ?? tweetId}</td>
 										<td>
-											{feed
-												? `${feed.kind === "flash" ? "快讯" : "文章"} · ${feed.publisher}`
-												: tweet
-													? `推文 · ${formatReferenceAuthor(tweet)}`
-													: "缺失原文"}
-										</td>
-										<td>{feed?.title ?? tweet?.id ?? source.id}</td>
-										<td>
-											{formatReferenceTimestamp(
-												feed?.publishedAt ?? tweet?.createdAt ?? "",
-											)}
+											{tweet?.createdAt
+												? formatReferenceTimestamp(tweet.createdAt)
+												: ""}
 										</td>
 										<td>
 											<a
@@ -1709,43 +1425,6 @@ export function TodayRouteView({
 				: markdown,
 		[markdown, result],
 	);
-	const screenReferenceGroups = useMemo(() => {
-		const groupsByTitle = new Map<string, ReferenceGroup>();
-		if (!result) return groupsByTitle;
-		for (const group of collectReferenceGroups(result, displayMarkdown)) {
-			if (
-				group.section === "Supplemental source list" ||
-				referenceSourcesForGroup(group).length === 0
-			) {
-				continue;
-			}
-			const key = normalizeReferenceTitle(group.title);
-			const existing = groupsByTitle.get(key);
-			if (existing) {
-				existing.tweetIds = [
-					...new Set([...existing.tweetIds, ...group.tweetIds]),
-				];
-				existing.feedItemIds = [
-					...new Set([...existing.feedItemIds, ...group.feedItemIds]),
-				];
-				continue;
-			}
-			groupsByTitle.set(key, {
-				...group,
-				tweetIds: [...group.tweetIds],
-				feedItemIds: [...group.feedItemIds],
-			});
-		}
-		return groupsByTitle;
-	}, [displayMarkdown, result]);
-	const renderDigestHeadingSupplement = useCallback(
-		({ level, text }: { level: 2 | 3; text: string }) => {
-			if (level !== 3 || !result) return null;
-			const group = screenReferenceGroups.get(normalizeReferenceTitle(text));
-			return group ? <TodayTopicSources group={group} result={result} /> : null;
-		},
-		[result, screenReferenceGroups],
-	);
 	const digestLabel =
 		result?.context.window.label ??
 		context?.window.label ??
@@ -1771,6 +1450,9 @@ export function TodayRouteView({
 	const [referencePdfError, setReferencePdfError] = useState<string | null>(
 		null,
 	);
+	const [referenceScores, setReferenceScores] = useState<
+		Record<string, number>
+	>({});
 	const refreshAfterHistoryRef = useRef(false);
 	const handleExportPdf = useCallback(() => {
 		if (!canExportPdf) return;
@@ -1779,11 +1461,47 @@ export function TodayRouteView({
 	const handleExportReferencePdf = useCallback(() => {
 		if (!canExportReferencePdf || !result || referencePdfActive) return;
 		flushSync(() => {
+			setReferenceScores({});
 			setReferencePdfActive(true);
 		});
 		setReferencePdfError(null);
 		void (async () => {
 			try {
+				if (!(activeHistoryId && historyKind === "intraday")) {
+					const groups = collectReferenceGroups(result, displayMarkdown);
+					const lookup = buildReferenceTweetLookup(result.context);
+					const tweets = [
+						...new Map(
+							groups
+								.flatMap((group) => group.tweetIds)
+								.map((tweetId) => referenceTweetFor(lookup, tweetId))
+								.filter((tweet): tweet is ReferenceTweet => Boolean(tweet))
+								.map((tweet) => [normalizeReferenceTweetId(tweet.id), tweet]),
+						).values(),
+					];
+					const scores = await fetchTweetScores(
+						tweets.map((tweet) => ({
+							tweetId: tweet.id,
+							text: tweet.text,
+							createdAt: tweet.createdAt,
+							author: {
+								handle: tweet.author,
+								displayName: tweet.name,
+								bio: tweet.authorProfile.bio,
+							},
+						})),
+					);
+					flushSync(() =>
+						setReferenceScores(
+							Object.fromEntries(
+								scores.map((score) => [
+									normalizeReferenceTweetId(score.tweetId),
+									score.score,
+								]),
+							),
+						),
+					);
+				}
 				// Let the busy state paint before image preparation and Paged.js start.
 				await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 				if (
@@ -1806,7 +1524,15 @@ export function TodayRouteView({
 				setReferencePdfActive(false);
 			}
 		})();
-	}, [canExportReferencePdf, referenceExportTitle, referencePdfActive, result]);
+	}, [
+		activeHistoryId,
+		canExportReferencePdf,
+		displayMarkdown,
+		historyKind,
+		referenceExportTitle,
+		referencePdfActive,
+		result,
+	]);
 	const handleRefreshDigest = useCallback(() => {
 		if (activeHistoryId) {
 			refreshAfterHistoryRef.current = true;
@@ -2029,6 +1755,7 @@ export function TodayRouteView({
 						generatedAt={referenceGeneratedAt}
 						markdown={displayMarkdown}
 						result={result}
+						scores={referenceScores}
 					/>
 				) : null}
 
@@ -2038,7 +1765,6 @@ export function TodayRouteView({
 						context={result?.context ?? context}
 						markdownLinkClassName={todayMarkdownLinkClass}
 						markdown={displayMarkdown}
-						renderHeadingSupplement={renderDigestHeadingSupplement}
 						sourceOnlyCitations
 					/>
 				) : (
