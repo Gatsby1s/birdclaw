@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.10.6 - 2026-08-25
+
+### Changed
+
+- Revert the v0.10.4 Today source integration and restore the pre-v0.10.4 tweet-led digest behavior.
+- Restore the complete PDF's separate Feed editorial-source appendix instead of folding Feed items into topic source groups.
+
 ## 0.10.5 - 2026-08-21
 
 ### Fixed
