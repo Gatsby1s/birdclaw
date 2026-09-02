@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.10.7 - 2026-09-02
+
+### Fixed
+
+- Support the audited Twillot 11.0.8 extension while preserving its extension identity, permissions, and reversible official rollback copy.
+- Refuse to build the BirdClaw companion when the installed Twillot source differs from the audited 11.0.8 manifest, worker, locale, or extension-key fingerprints.
+
 ## 0.10.6 - 2026-08-25
 
 ### Changed
