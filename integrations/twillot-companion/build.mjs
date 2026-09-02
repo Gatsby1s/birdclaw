@@ -30,14 +30,19 @@ const DEFAULT_ROLLBACK_DESTINATION = path.join(
 	"twillot-official-rollback",
 );
 const OFFICIAL = {
-	name: "Twillot - Your Twitter, Organized",
-	version: "11.0.7",
+	manifestName: "__MSG_extensionName__",
+	displayName: "Twillot - X Bookmarks, Search & Export",
+	version: "11.0.8",
+	defaultLocale: "en",
+	localeFile: "_locales/en/messages.json",
+	localeSha256:
+		"ac2d635bdb3fae524df2d123a7bdc6a9d5c2a928b24587c9640c35fcc2da7c05",
 	keySha256: "0959a05eb4fc6579f664ab0ffb8d831da7c8db7111a4ff1376e2baa0eeffebe3",
 	workerSha256:
-		"a4b7e480bf094e999e19e19cfe4d618a36f463da68ed43401f86477b3c54b874",
-	workerChunk: "assets/chunk-7e5e6447.js",
+		"9c82f3e3db1c4c71fab1aefb7eba3703c0eba1a6b9620b01db43e6307dd35e6e",
+	workerChunk: "assets/chunk-0542871d.js",
 	workerChunkSha256:
-		"2f71925fe6e9493293b051112212bf4333370fb4d3790bdf1e7d73834855c01f",
+		"b510093b8d5f7bd2383a659025af22edddfb7d56a02b6d2cdce96839165a1b7b",
 };
 const ASSETS = [
 	{
@@ -137,15 +142,16 @@ function uniqueStrings(values) {
 async function validateOfficialSource(sourcePath, manifest) {
 	if (
 		manifest.manifest_version !== 3 ||
-		manifest.name !== OFFICIAL.name ||
+		manifest.name !== OFFICIAL.manifestName ||
 		manifest.version !== OFFICIAL.version ||
+		manifest.default_locale !== OFFICIAL.defaultLocale ||
 		manifest.background?.service_worker !== "service-worker-loader.js" ||
 		manifest.background?.type !== "module" ||
 		typeof manifest.key !== "string" ||
 		sha256(manifest.key) !== OFFICIAL.keySha256
 	) {
 		throw new Error(
-			"Only the audited official Twillot 11.0.7 Manifest V3 source is supported.",
+			"Only the audited official Twillot 11.0.8 Manifest V3 source is supported.",
 		);
 	}
 	if (
@@ -160,15 +166,17 @@ async function validateOfficialSource(sourcePath, manifest) {
 	const loader = await readFile(
 		path.join(sourcePath, "service-worker-loader.js"),
 	);
+	const locale = await readFile(path.join(sourcePath, OFFICIAL.localeFile));
 	const workerChunk = await readFile(
 		path.join(sourcePath, OFFICIAL.workerChunk),
 	);
 	if (
 		sha256(loader) !== OFFICIAL.workerSha256 ||
+		sha256(locale) !== OFFICIAL.localeSha256 ||
 		sha256(workerChunk) !== OFFICIAL.workerChunkSha256
 	) {
 		throw new Error(
-			"The Twillot 11.0.7 worker files do not match the audited source hashes.",
+			"The Twillot 11.0.8 worker and locale files do not match the audited source hashes.",
 		);
 	}
 }
@@ -177,7 +185,7 @@ function patchManifest(manifest) {
 	const originalKey = manifest.key;
 	const patched = structuredClone(manifest);
 	delete patched.update_url;
-	patched.name = `${manifest.name} (BirdClaw Bridge)`;
+	patched.name = `${OFFICIAL.displayName} (BirdClaw Bridge)`;
 	patched.permissions = uniqueStrings([
 		...(patched.permissions || []),
 		"alarms",
@@ -484,7 +492,7 @@ export async function buildBridge({
 function usage() {
 	return [
 		"Usage:",
-		"  node integrations/twillot-companion/build.mjs --source <official-11.0.7-dir> [--destination <dir>] [--rollback-destination <dir>]",
+		"  node integrations/twillot-companion/build.mjs --source <official-11.0.8-dir> [--destination <dir>] [--rollback-destination <dir>]",
 		"",
 		`Default bridge destination: ${DEFAULT_DESTINATION}`,
 		`Default rollback destination: ${DEFAULT_ROLLBACK_DESTINATION}`,
