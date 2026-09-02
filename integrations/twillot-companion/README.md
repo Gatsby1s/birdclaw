@@ -11,7 +11,7 @@ The builder never edits or overwrites Chrome's managed extension directory. Both
 
 The companion:
 
-- supports only the audited official Twillot `11.0.7` package and checks the official key, service-worker loader hash, and worker-chunk hash before building;
+- supports only the audited official Twillot `11.0.8` package and checks the official key, localized-name file, service-worker loader hash, and worker-chunk hash before building;
 - expects IndexedDB `twillot` version `41`, stores `posts` and `settings`, key path `id`, and the audited `public_index` schema; an unexpected version/store/index stops the job without writing to the database;
 - opens all IndexedDB transactions as `readonly` and never calls `put`, `add`, `delete`, or `clear`;
 - never reads `chrome.storage.session`, X authorization headers, cookies, or Twillot/X private APIs;
@@ -37,14 +37,14 @@ The upload projection permits only `id`, `tweet_id`, `conversation_id`, `owner_i
 ## Before building
 
 1. Keep the official Twillot extension installed. Do **not** uninstall or click **Remove**; uninstalling an extension can delete its extension-origin IndexedDB.
-2. Open `chrome://extensions`, enable **Developer mode**, and confirm Twillot is version `11.0.7` with ID `flkokionhgagpmnhlngldhbfnblmenen`.
+2. Open `chrome://extensions`, enable **Developer mode**, and confirm Twillot is version `11.0.8` with ID `flkokionhgagpmnhlngldhbfnblmenen`.
 3. Open `chrome://version` and note the active **Profile Path**. Extension storage is profile-specific.
 4. Open BirdClaw Cloud Settings and create a Twillot companion pairing token.
 
 The official version directory normally looks like:
 
 ```text
-<Profile Path>/Extensions/flkokionhgagpmnhlngldhbfnblmenen/11.0.7_0
+<Profile Path>/Extensions/flkokionhgagpmnhlngldhbfnblmenen/11.0.8_0
 ```
 
 Never choose that managed directory in Chrome's **Load unpacked** dialog. The builder treats it as read-only and creates safe copies elsewhere.
@@ -55,7 +55,7 @@ From the BirdClaw repository:
 
 ```bash
 node integrations/twillot-companion/build.mjs \
-  --source "/absolute/path/to/Extensions/flkokionhgagpmnhlngldhbfnblmenen/11.0.7_0"
+  --source "/absolute/path/to/Extensions/flkokionhgagpmnhlngldhbfnblmenen/11.0.8_0"
 ```
 
 Defaults:
@@ -69,7 +69,7 @@ Custom output paths are supported:
 
 ```bash
 node integrations/twillot-companion/build.mjs \
-  --source "/absolute/path/to/the/official/11.0.7_0" \
+  --source "/absolute/path/to/the/official/11.0.8_0" \
   --destination "/absolute/path/to/twillot-bridge" \
   --rollback-destination "/absolute/path/to/twillot-official-rollback"
 ```

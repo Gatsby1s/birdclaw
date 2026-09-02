@@ -16,14 +16,15 @@ const INSTALLED_SOURCE = path.join(
 	"Default",
 	"Extensions",
 	"flkokionhgagpmnhlngldhbfnblmenen",
-	"11.0.7_0",
+	"11.0.8_0",
 );
 
 test("manifest patch keeps the key and adds only the companion surfaces", () => {
 	const manifest = {
 		manifest_version: 3,
-		name: "Twillot - Your Twitter, Organized",
-		version: "11.0.7",
+		name: "__MSG_extensionName__",
+		version: "11.0.8",
+		default_locale: "en",
 		key: "stable-key",
 		permissions: ["downloads", "storage", "tabs"],
 		host_permissions: ["https://*.x.com/*", "https://*.twillot.com/*"],
@@ -32,6 +33,10 @@ test("manifest patch keeps the key and adds only the companion surfaces", () => 
 	};
 	const patched = patchManifest(manifest);
 	assert.equal(patched.key, manifest.key);
+	assert.equal(
+		patched.name,
+		"Twillot - X Bookmarks, Search & Export (BirdClaw Bridge)",
+	);
 	assert.equal(patched.update_url, undefined);
 	assert.equal(patched.permissions.includes("cookies"), false);
 	assert.equal(patched.permissions.includes("alarms"), true);
@@ -53,7 +58,7 @@ test("manifest patch keeps the key and adds only the companion surfaces", () => 
 });
 
 test("worker injection is explicit and refuses an already patched loader", () => {
-	const official = "import './assets/chunk-7e5e6447.js';\n";
+	const official = "import './assets/chunk-0542871d.js';\n";
 	const patched = injectWorker(official);
 	assert.match(patched, /BIRDCLAW_TWILLOT_BRIDGE_START/);
 	assert.match(patched, /import '\.\/birdclaw-twillot-worker\.js';/);
@@ -61,14 +66,14 @@ test("worker injection is explicit and refuses an already patched loader", () =>
 });
 
 test(
-	"audited local 11.0.7 source builds separate bridge and vanilla rollback copies",
+	"audited local 11.0.8 source builds separate bridge and vanilla rollback copies",
 	{ skip: !process.env.HOME },
 	async (context) => {
 		try {
 			await readFile(path.join(INSTALLED_SOURCE, "manifest.json"));
 		} catch {
 			context.skip(
-				"Audited Twillot 11.0.7 source is not installed in this profile.",
+				"Audited Twillot 11.0.8 source is not installed in this profile.",
 			);
 			return;
 		}
