@@ -526,6 +526,9 @@ async function handlePrivateWebGate(
 		);
 		return true;
 	}
+	if (url.pathname === "/api/integrations/twillot-history") {
+		return false;
+	}
 	if (!requestNeedsLogin(request)) return false;
 	const webRequest = toWebRequest(request, new AbortController().signal);
 	const signedIn = hasValidBirdclawWebSession(webRequest);
