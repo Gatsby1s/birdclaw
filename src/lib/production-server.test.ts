@@ -223,6 +223,71 @@ describe("production server", () => {
 		);
 	});
 
+	it("lets the Twillot companion reach its dedicated origin and token gate", async () => {
+		process.env.BIRDCLAW_WEB_TOKEN = "correct horse battery staple";
+		process.env.BIRDCLAW_ALLOW_REMOTE_WEB = "1";
+		const packageRoot = mkdtempSync(
+			path.join(os.tmpdir(), "birdclaw-production-twillot-"),
+		);
+		tempDirs.push(packageRoot);
+		const clientDir = path.join(packageRoot, "client");
+		mkdirSync(clientDir, { recursive: true });
+		const serverEntry = path.join(packageRoot, "server.mjs");
+		writeFileSync(
+			serverEntry,
+			`export default { fetch(request) { return Response.json({ path: new URL(request.url).pathname, method: request.method, origin: request.headers.get("origin"), authorized: request.headers.has("authorization") }); } };`,
+		);
+		const server = await startProductionServer({
+			packageRoot,
+			clientDir,
+			serverEntry,
+			port: 0,
+		});
+		try {
+			const address = server.address();
+			if (!address || typeof address === "string")
+				throw new Error("no address");
+			const baseUrl = `http://127.0.0.1:${String(address.port)}`;
+			const proxyHeaders = {
+				"x-forwarded-for": "203.0.113.8",
+				"x-forwarded-host": "birdclaw.example",
+				"x-forwarded-proto": "https",
+				origin: "chrome-extension://flkokionhgagpmnhlngldhbfnblmenen",
+				authorization: "Bearer companion-token",
+			};
+
+			const preflight = await fetch(
+				`${baseUrl}/api/integrations/twillot-history`,
+				{ method: "OPTIONS", headers: proxyHeaders },
+			);
+			expect(preflight.status).toBe(200);
+			await expect(preflight.json()).resolves.toMatchObject({
+				path: "/api/integrations/twillot-history",
+				method: "OPTIONS",
+			});
+
+			const companion = await fetch(
+				`${baseUrl}/api/integrations/twillot-history?sourceId=source_12345678`,
+				{ headers: proxyHeaders },
+			);
+			expect(companion.status).toBe(200);
+			await expect(companion.json()).resolves.toEqual({
+				path: "/api/integrations/twillot-history",
+				method: "GET",
+				origin: "chrome-extension://flkokionhgagpmnhlngldhbfnblmenen",
+				authorized: true,
+			});
+
+			const lookalike = await fetch(
+				`${baseUrl}/api/integrations/twillot-history-extra`,
+				{ headers: proxyHeaders },
+			);
+			expect(lookalike.status).toBe(401);
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	});
+
 	it("refuses public binding when the web token is missing", async () => {
 		delete process.env.BIRDCLAW_WEB_TOKEN;
 		process.env.BIRDCLAW_ALLOW_REMOTE_WEB = "1";
