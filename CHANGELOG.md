@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.10.8 - 2026-09-03
+
+### Fixed
+
+- Let the exact Twillot companion endpoint reach its dedicated extension-origin and pairing-token checks before the private web login gate, including browser preflight requests.
+- Keep lookalike and all other private API paths behind the existing BirdClaw web session gate.
+
 ## 0.10.7 - 2026-09-02
 
 ### Fixed
