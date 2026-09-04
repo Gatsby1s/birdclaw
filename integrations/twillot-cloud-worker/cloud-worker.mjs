@@ -312,6 +312,7 @@ export async function runCloudWorker() {
 		if (bootstrap.applied) {
 			log("session_bootstrap_applied", {
 				cookieCount: bootstrap.cookieCount,
+				originCount: bootstrap.originCount,
 			});
 		}
 		const extensionPage = await pairCompanion(

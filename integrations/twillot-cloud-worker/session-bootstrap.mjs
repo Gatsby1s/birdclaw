@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, writeFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const ALLOWED_COOKIE_HOSTS = ["x.com", "twillot.com"];
@@ -113,8 +113,15 @@ export async function applySessionBootstrap(
 	const bootstrap = parseSessionBootstrap(encoded);
 	if (!bootstrap) return { applied: false, reason: "not-configured" };
 	const marker = path.join(profileDir, ".birdclaw-session-bootstrap-v1");
-	if (await exists(marker))
-		return { applied: false, reason: "already-applied" };
+	const digest = createHash("sha256").update(encoded).digest("hex");
+	if (await exists(marker)) {
+		const appliedDigest = await readFile(marker, "utf8")
+			.then((value) => value.trim())
+			.catch(() => "");
+		if (appliedDigest === digest) {
+			return { applied: false, reason: "already-applied" };
+		}
+	}
 	await context.addCookies(bootstrap.cookies);
 	for (const origin of bootstrap.origins) {
 		const page = await context.newPage();
@@ -136,7 +143,10 @@ export async function applySessionBootstrap(
 	} finally {
 		await xPage.close();
 	}
-	const digest = createHash("sha256").update(encoded).digest("hex");
 	await writeFile(marker, `${digest}\n`, { mode: 0o600 });
-	return { applied: true, cookieCount: bootstrap.cookies.length };
+	return {
+		applied: true,
+		cookieCount: bootstrap.cookies.length,
+		originCount: bootstrap.origins.length,
+	};
 }

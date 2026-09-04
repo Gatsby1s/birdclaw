@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.16 - 2026-09-04
+
+### Fixed
+
+- Reapply an updated allowlisted session bootstrap when its digest changes, including Twillot and X local storage needed by the persistent cloud profile.
+
 ## 0.10.15 - 2026-09-04
 
 ### Fixed
