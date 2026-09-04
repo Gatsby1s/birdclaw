@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased
+
+### Added
+
+- Run the audited Twillot extension in a dedicated Railway Chromium worker with a persistent profile, automatic following-scope sync, and automatic public-post capture.
+- Collect every current following account through a per-account FxTwitter → Twillot → 6551 fallback chain instead of depending on a local Mac collector.
+
+### Changed
+
+- Keep 6551 as the budgeted last resort only after the matching Twillot attempt fails or times out.
+
 ## 0.10.8 - 2026-09-03
 
 ### Fixed

@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { useTestHome } from "../test/test-home";
 import { ingestTweetPayload } from "./tweet-repository";
+import { importTwillotFollowingSnapshot } from "./follow-graph";
 import {
 	readTwitter6551DailyBudget,
 	readTwitter6551FallbackState,
@@ -1151,6 +1152,129 @@ describe("6551 Twitter adapter", () => {
 		} finally {
 			await worker.stop();
 			vi.unstubAllGlobals();
+			vi.useRealTimers();
+		}
+	});
+
+	it("collects every cloud following account through FxTwitter, then Twillot, then 6551 per account", async () => {
+		const envKeys = [
+			"BIRDCLAW_CLOUD_ALL_FOLLOWING_ENABLED",
+			"BIRDCLAW_TWILLOT_CLOUD_FALLBACK_ENABLED",
+			"BIRDCLAW_TWILLOT_FALLBACK_TIMEOUT_MINUTES",
+		];
+		const before = Object.fromEntries(
+			envKeys.map((key) => [key, process.env[key]]),
+		);
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-09-04T00:00:00.000Z"));
+		process.env.BIRDCLAW_CLOUD_ALL_FOLLOWING_ENABLED = "1";
+		process.env.BIRDCLAW_TWILLOT_CLOUD_FALLBACK_ENABLED = "1";
+		process.env.BIRDCLAW_TWILLOT_FALLBACK_TIMEOUT_MINUTES = "30";
+		const home = getHome();
+		home.db
+			.prepare(
+				`insert into accounts (
+			   id, name, handle, external_user_id, transport, is_default, created_at
+			 ) values ('acct_primary', 'Owner', 'owner', '1', 'xurl', 1, ?)`,
+			)
+			.run("2026-09-04T00:00:00.000Z");
+		importTwillotFollowingSnapshot(home.db, {
+			users: [
+				{ id: "42", username: "alice", name: "Alice" },
+				{ id: "43", username: "bob", name: "Bob" },
+			],
+			pageCount: 1,
+			complete: true,
+		});
+		const fxtwitter = {
+			getProfileStatuses: vi.fn(async (handle: string) => {
+				if (handle === "bob") throw new Error("Fx gap");
+				return {
+					code: 200,
+					results: [
+						fxTestStatus("fx-alice", {
+							author: {
+								type: "profile",
+								id: "42",
+								name: "Alice",
+								screen_name: "alice",
+							},
+						}),
+					],
+					cursor: null,
+				};
+			}),
+		};
+		const paidTweet = normalizeTwitter6551Tweet({
+			id: "paid-bob",
+			text: "paid bob",
+			createdAt: "2026-09-04T00:01:00.000Z",
+			userIdStr: "43",
+			userScreenName: "bob",
+		})!;
+		const paidClient = {
+			getUserTweets: vi.fn().mockResolvedValue([paidTweet]),
+		};
+		const worker = new Twitter6551Worker(
+			{
+				baseUrl: "https://ai.6551.io",
+				tokenEnv: "TWITTER_TOKEN",
+				tokenDetected: true,
+				token: "secret-token",
+				enabled: true,
+				accountId: "acct_cloud_pipeline",
+				watchUsers: [],
+				targetTweetIds: [],
+				backfillMinutes: 1,
+				restOnly: true,
+				paidEnabled: true,
+				fxtwitterEnabled: true,
+				provider: "fxtwitter" as const,
+				failoverMode: false,
+				localStaleSeconds: 180,
+				paidFallbackFailureThreshold: 1,
+				paidFallbackCooldownMinutes: 360,
+				paidDailyRequestBudget: 24,
+			},
+			paidClient as never,
+			fxtwitter as never,
+		);
+		try {
+			await expect(worker.runBackfill()).resolves.toBe("partial");
+			expect(
+				fxtwitter.getProfileStatuses.mock.calls.map(([handle]) => handle),
+			).toEqual(["alice", "bob"]);
+			expect(paidClient.getUserTweets).not.toHaveBeenCalled();
+			expect(
+				home.db.prepare("select handle, state from twillot_history_jobs").all(),
+			).toEqual([{ handle: "bob", state: "queued" }]);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				activeSource: "twillot",
+				watchUsers: ["alice", "bob"],
+				twillotPendingCount: 1,
+			});
+
+			home.db
+				.prepare(
+					`update twillot_history_jobs
+				 set state = 'failed', capture_status = 'needs_attention',
+				     last_error = 'vendor failed', updated_at = ?`,
+				)
+				.run("2026-09-04T00:00:30.000Z");
+			vi.setSystemTime(new Date("2026-09-04T00:01:00.000Z"));
+			await expect(worker.runBackfill()).resolves.toBe("partial");
+			expect(paidClient.getUserTweets).toHaveBeenCalledWith("bob", 100);
+			expect(getTwitter6551RuntimeStatus()).toMatchObject({
+				activeSource: "6551",
+				twillotFailedCount: 1,
+			});
+		} finally {
+			await worker.stop();
+			for (const key of envKeys) {
+				const value = before[key];
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
 			vi.useRealTimers();
 		}
 	});
