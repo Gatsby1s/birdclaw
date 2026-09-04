@@ -33,6 +33,7 @@ function readConfig() {
 		),
 		profileDir: process.env.BIRDCLAW_TWILLOT_PROFILE_DIR || DEFAULT_PROFILE_DIR,
 		chromiumPath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
+		headless: process.env.BIRDCLAW_TWILLOT_HEADLESS !== "0",
 		bootstrap: process.env.BIRDCLAW_TWILLOT_BOOTSTRAP_B64,
 		syncIntervalMs:
 			Math.max(
@@ -286,7 +287,7 @@ export async function runCloudWorker() {
 			path.resolve(config.profileDir),
 			{
 				executablePath: config.chromiumPath,
-				headless: false,
+				headless: config.headless,
 				args: [
 					`--disable-extensions-except=${prepared.bridgePath}`,
 					`--load-extension=${prepared.bridgePath}`,

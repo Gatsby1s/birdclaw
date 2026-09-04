@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.13 - 2026-09-04
+
+### Fixed
+
+- Launch Railway Chromium directly in modern headless mode so worker startup does not depend on an Xvfb display server.
+
 ## 0.10.12 - 2026-09-04
 
 ### Fixed
