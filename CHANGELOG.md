@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.22 - 2026-09-04
+
+### Fixed
+
+- Include the bounded server rejection reason in Twillot cloud claim diagnostics without logging credentials.
+
 ## 0.10.21 - 2026-09-04
 
 ### Fixed

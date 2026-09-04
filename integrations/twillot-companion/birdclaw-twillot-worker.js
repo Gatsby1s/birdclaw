@@ -1169,8 +1169,12 @@
 			const data = await parseResponse(response);
 			if (!response.ok || data.ok === false) {
 				const code = typeof data.code === "string" ? ` ${data.code}` : "";
+				const reason =
+					typeof data.message === "string"
+						? ` ${data.message.slice(0, 256)}`
+						: "";
 				throw new CompanionError(
-					`BirdClaw claim failed (HTTP ${response.status}${code}).`,
+					`BirdClaw claim failed (HTTP ${response.status}${code}).${reason}`,
 				);
 			}
 			if (!data.job) {
