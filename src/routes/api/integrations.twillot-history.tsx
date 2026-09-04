@@ -16,6 +16,7 @@ export const TWILLOT_EXTENSION_ORIGIN = `chrome-extension://${TWILLOT_EXTENSION_
 export const TWILLOT_CLOUD_ORIGIN =
 	"https://birdclaw-production.up.railway.app";
 const MAX_BATCH_BYTES = 16 * 1024 * 1024;
+const CLOUD_WORKER_HEADER = "twillot-history-v1";
 
 function corsHeaders() {
 	return {
@@ -70,7 +71,11 @@ function bridgeRequestDenied(request: Request) {
 			{ status: 403 },
 		);
 	}
-	if (request.headers.get("origin") !== TWILLOT_EXTENSION_ORIGIN) {
+	const extensionOrigin =
+		request.headers.get("origin") === TWILLOT_EXTENSION_ORIGIN;
+	const cloudWorker =
+		request.headers.get("x-birdclaw-integration") === CLOUD_WORKER_HEADER;
+	if (!extensionOrigin && !cloudWorker) {
 		return jsonResponse(
 			{ ok: false, message: "Untrusted Twillot extension origin." },
 			{ status: 403 },

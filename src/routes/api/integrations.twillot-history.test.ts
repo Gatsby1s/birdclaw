@@ -200,6 +200,22 @@ describe("Twillot extension bridge API", () => {
 		expect(response.status).toBe(403);
 	});
 
+	it("accepts the token-authenticated cloud worker when Chromium omits the extension origin", async () => {
+		const { token } = setup();
+		const response = await GET({
+			request: new Request(
+				"http://127.0.0.1:3001/api/integrations/twillot-history?sourceId=source_cloud_worker&requestedCap=1",
+				{
+					headers: {
+						authorization: `Bearer ${token}`,
+						"x-birdclaw-integration": "twillot-history-v1",
+					},
+				},
+			),
+		});
+		expect(response.status).toBe(200);
+	});
+
 	it("claims a job and imports a bounded public-post batch", async () => {
 		const { db, job, token } = setup();
 		const claimResponse = await GET({

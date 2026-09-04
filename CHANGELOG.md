@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.23 - 2026-09-04
+
+### Fixed
+
+- Authenticate displayless Chromium worker requests with the pairing token plus the dedicated integration header when no extension Origin is sent.
+
 ## 0.10.22 - 2026-09-04
 
 ### Fixed
