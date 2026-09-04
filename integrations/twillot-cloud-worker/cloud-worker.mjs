@@ -91,6 +91,8 @@ async function pairCompanion(context, extensionId, config) {
 	);
 	if (!paired) throw new Error("The Twillot companion pairing was not saved.");
 	log("companion_paired", { endpoint: config.endpoint });
+	await companionSyncNow(serviceWorker);
+	log("companion_online");
 	return { page, serviceWorker };
 }
 

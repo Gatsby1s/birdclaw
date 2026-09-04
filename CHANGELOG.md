@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.20 - 2026-09-04
+
+### Fixed
+
+- Have the Twillot cloud worker report in and claim available work immediately after pairing instead of waiting for its first five-minute alarm.
+
 ## 0.10.19 - 2026-09-04
 
 ### Fixed
