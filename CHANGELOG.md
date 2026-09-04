@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.17 - 2026-09-04
+
+### Fixed
+
+- Support Chromium's displayless Ozone backend for the full extension runtime and report whether the Twillot service worker is active.
+
 ## 0.10.16 - 2026-09-04
 
 ### Fixed

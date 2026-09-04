@@ -58,6 +58,13 @@ async function pairCompanion(context, extensionId, config) {
 		`chrome-extension://${extensionId}/birdclaw-twillot-options.html`,
 		{ waitUntil: "domcontentloaded" },
 	);
+	log("extension_runtime_detected", {
+		serviceWorkerCount: context
+			.serviceWorkers()
+			.filter((worker) =>
+				worker.url().startsWith(`chrome-extension://${extensionId}/`),
+			).length,
+	});
 	const paired = await page.evaluate(
 		async ({ endpoint, token }) => {
 			await chrome.storage.local.set({
@@ -296,6 +303,9 @@ export async function runCloudWorker() {
 				args: [
 					`--disable-extensions-except=${prepared.bridgePath}`,
 					`--load-extension=${prepared.bridgePath}`,
+					...(config.headless
+						? []
+						: ["--ozone-platform=headless", "--disable-gpu"]),
 					"--disable-dev-shm-usage",
 					"--no-sandbox",
 					"--no-first-run",
