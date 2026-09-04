@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.10 - 2026-09-04
+
+### Fixed
+
+- Let Railway service-level build settings select the dedicated Twillot worker Dockerfile instead of inheriting the retired repository-wide Config-as-Code file.
+
 ## 0.10.9 - 2026-09-04
 
 ### Added
