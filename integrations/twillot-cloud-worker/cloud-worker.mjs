@@ -5,6 +5,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright-core";
 import { prepareTwillotExtension } from "./prepare-extension.mjs";
+import { applySessionBootstrap } from "./session-bootstrap.mjs";
 import {
 	DEFAULT_ENDPOINT,
 	followingEndpoint,
@@ -33,6 +34,7 @@ function readConfig() {
 		),
 		profileDir: process.env.BIRDCLAW_TWILLOT_PROFILE_DIR || DEFAULT_PROFILE_DIR,
 		chromiumPath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
+		bootstrap: process.env.BIRDCLAW_TWILLOT_BOOTSTRAP_B64,
 		syncIntervalMs:
 			Math.max(
 				60,
@@ -291,6 +293,16 @@ export async function runCloudWorker() {
 				],
 			},
 		);
+		const bootstrap = await applySessionBootstrap(
+			context,
+			path.resolve(config.profileDir),
+			config.bootstrap,
+		);
+		if (bootstrap.applied) {
+			log("session_bootstrap_applied", {
+				cookieCount: bootstrap.cookieCount,
+			});
+		}
 		const extensionPage = await pairCompanion(
 			context,
 			prepared.extensionId,
