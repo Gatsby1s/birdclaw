@@ -58,15 +58,20 @@ async function pairCompanion(context, extensionId, config) {
 		`chrome-extension://${extensionId}/birdclaw-twillot-options.html`,
 		{ waitUntil: "domcontentloaded" },
 	);
-	await page.locator("#endpoint").fill(config.endpoint);
-	await page.locator("#token").fill(config.token);
-	await page.locator("#settings-form button[type='submit']").click();
-	await page
-		.locator("#pairing-status")
-		.filter({ hasText: "Configured" })
-		.waitFor({
-			timeout: 20_000,
-		});
+	const paired = await page.evaluate(
+		async ({ endpoint, token }) => {
+			await chrome.storage.local.set({
+				birdclawTwillotSettings: { endpoint, token },
+			});
+			const stored = await chrome.storage.local.get("birdclawTwillotSettings");
+			return (
+				stored.birdclawTwillotSettings?.endpoint === endpoint &&
+				stored.birdclawTwillotSettings?.token === token
+			);
+		},
+		{ endpoint: config.endpoint, token: config.token },
+	);
+	if (!paired) throw new Error("The Twillot companion pairing was not saved.");
 	log("companion_paired", { endpoint: config.endpoint });
 	return page;
 }

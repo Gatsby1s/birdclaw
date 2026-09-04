@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.15 - 2026-09-04
+
+### Fixed
+
+- Pair the cloud companion through its own extension storage API so headless Railway startup does not depend on an options-page button state.
+
 ## 0.10.14 - 2026-09-04
 
 ### Fixed
