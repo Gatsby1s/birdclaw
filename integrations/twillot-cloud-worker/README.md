@@ -14,7 +14,9 @@ Required Railway setup:
 - persistent volume mounted at `/data`
 - `BIRDCLAW_TWILLOT_TOKEN`: a dedicated BirdClaw pairing token
 - `BIRDCLAW_TWILLOT_ENDPOINT`: normally the production history endpoint
-- a one-time dedicated X/Twillot login bootstrap in the persistent profile
+- `BIRDCLAW_TWILLOT_BOOTSTRAP_B64`: one-time, allowlisted X/Twillot cookies and
+  local storage; remove this Railway secret after `session_bootstrap_applied`
+- a one-time dedicated X/Twillot session bootstrap in the persistent profile
 
 The worker never logs the pairing token, cookies, browser storage, or X request
 headers. The main BirdClaw service must enable

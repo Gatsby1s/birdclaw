@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { extractCrxZip } from "../prepare-extension.mjs";
+import { parseSessionBootstrap } from "../session-bootstrap.mjs";
 import { followingEndpoint, normalizeEndpoint } from "../worker-core.mjs";
 
 test("normalizes only the dedicated secure BirdClaw history endpoint", () => {
@@ -37,4 +38,58 @@ test("extracts a bounded CRX3 ZIP payload", () => {
 	zip.copy(crx, 13);
 	assert.deepEqual(extractCrxZip(crx), zip);
 	assert.throws(() => extractCrxZip(Buffer.from("bad")), /not a CRX/);
+});
+
+test("accepts only an allowlisted X and Twillot session bootstrap", () => {
+	const encoded = Buffer.from(
+		JSON.stringify({
+			version: 1,
+			cookies: [
+				{
+					name: "auth_token",
+					value: "opaque",
+					domain: ".x.com",
+					path: "/",
+					httpOnly: true,
+					secure: true,
+					sameSite: "None",
+				},
+			],
+			origins: [
+				{
+					origin: "https://www.twillot.com",
+					localStorage: [{ name: "session", value: "opaque" }],
+				},
+			],
+		}),
+	).toString("base64");
+	assert.deepEqual(parseSessionBootstrap(encoded), {
+		version: 1,
+		cookies: [
+			{
+				name: "auth_token",
+				value: "opaque",
+				domain: ".x.com",
+				path: "/",
+				httpOnly: true,
+				secure: true,
+				sameSite: "None",
+			},
+		],
+		origins: [
+			{
+				origin: "https://www.twillot.com",
+				localStorage: [{ name: "session", value: "opaque" }],
+			},
+		],
+	});
+	const bad = Buffer.from(
+		JSON.stringify({
+			version: 1,
+			cookies: [
+				{ name: "sid", value: "nope", domain: ".example.com", path: "/" },
+			],
+		}),
+	).toString("base64");
+	assert.throws(() => parseSessionBootstrap(bad), /invalid cookie/);
 });
