@@ -1,4 +1,10 @@
 import type { Database } from "./sqlite";
+import {
+	evaluatePreviousTwillotFallback,
+	findCloudFollowingTarget,
+	mergeCloudCollectionHandles,
+	queueTwillotFallback,
+} from "./cloud-twitter-collection";
 import { getTwitter6551Config } from "./config";
 import { enqueueDatabaseWrite } from "./database-writer";
 import { getNativeDb } from "./db";
@@ -45,6 +51,7 @@ const FAILOVER_CHECK_MS = 15_000;
 const DEFAULT_PAID_FALLBACK_FAILURE_THRESHOLD = 3;
 const DEFAULT_PAID_FALLBACK_COOLDOWN_MINUTES = 360;
 const DEFAULT_PAID_DAILY_REQUEST_BUDGET = 24;
+const DEFAULT_TWILLOT_FALLBACK_TIMEOUT_MINUTES = 30;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -107,8 +114,20 @@ export interface Twitter6551RuntimeStatus {
 		| "stopped";
 	connected: boolean;
 	failoverMode: boolean;
-	activeSource: "disabled" | "waiting" | "local" | "fxtwitter" | "6551";
+	activeSource:
+		| "disabled"
+		| "waiting"
+		| "local"
+		| "fxtwitter"
+		| "twillot"
+		| "6551";
 	watchUsers: string[];
+	cloudAllFollowing: boolean;
+	twillotCloudFallbackEnabled: boolean;
+	twillotFallbackTimeoutMinutes: number;
+	twillotPendingCount: number;
+	twillotCompletedCount: number;
+	twillotFailedCount: number;
 	targetTweetIds: string[];
 	lastConnectedAt: string | null;
 	lastEventAt: string | null;
@@ -796,6 +815,21 @@ function dailyBudgetEnvInteger(name: string, fallback: number) {
 	return Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
+function cloudAllFollowingEnabled() {
+	return process.env.BIRDCLAW_CLOUD_ALL_FOLLOWING_ENABLED === "1";
+}
+
+function twillotCloudFallbackEnabled() {
+	return process.env.BIRDCLAW_TWILLOT_CLOUD_FALLBACK_ENABLED === "1";
+}
+
+function twillotFallbackTimeoutMinutes() {
+	return positiveEnvNumber(
+		"BIRDCLAW_TWILLOT_FALLBACK_TIMEOUT_MINUTES",
+		DEFAULT_TWILLOT_FALLBACK_TIMEOUT_MINUTES,
+	);
+}
+
 export function getTwitter6551RuntimeConfig() {
 	const base = getTwitter6551Config();
 	const token =
@@ -824,7 +858,9 @@ export function getTwitter6551RuntimeConfig() {
 		provider,
 		enabled:
 			(paidEnabled || fxtwitterEnabled) &&
-			(watchUsers.length > 0 || targetTweetIds.length > 0),
+			(watchUsers.length > 0 ||
+				targetTweetIds.length > 0 ||
+				cloudAllFollowingEnabled()),
 		accountId:
 			process.env.BIRDCLAW_6551_ACCOUNT_ID?.trim() ||
 			base.accountId ||
@@ -882,6 +918,12 @@ function emptyStatus(): Twitter6551RuntimeStatus {
 				: config.provider
 			: "disabled",
 		watchUsers: config.watchUsers,
+		cloudAllFollowing: cloudAllFollowingEnabled(),
+		twillotCloudFallbackEnabled: twillotCloudFallbackEnabled(),
+		twillotFallbackTimeoutMinutes: twillotFallbackTimeoutMinutes(),
+		twillotPendingCount: 0,
+		twillotCompletedCount: 0,
+		twillotFailedCount: 0,
 		targetTweetIds: config.targetTweetIds,
 		lastConnectedAt: null,
 		lastEventAt: null,
@@ -913,6 +955,12 @@ const INITIAL_RUNTIME_STATUS: Twitter6551RuntimeStatus = {
 	failoverMode: false,
 	activeSource: "disabled",
 	watchUsers: [],
+	cloudAllFollowing: false,
+	twillotCloudFallbackEnabled: false,
+	twillotFallbackTimeoutMinutes: DEFAULT_TWILLOT_FALLBACK_TIMEOUT_MINUTES,
+	twillotPendingCount: 0,
+	twillotCompletedCount: 0,
+	twillotFailedCount: 0,
 	targetTweetIds: [],
 	lastConnectedAt: null,
 	lastEventAt: null,
@@ -1184,15 +1232,121 @@ export class Twitter6551Worker {
 		);
 	}
 
+	private currentWatchUsers() {
+		try {
+			return mergeCloudCollectionHandles(
+				getNativeDb({ seedDemoData: false }),
+				this.config.watchUsers,
+				cloudAllFollowingEnabled(),
+			);
+		} catch {
+			return this.config.watchUsers;
+		}
+	}
+
+	private handleFallbackAccountId(handle: string) {
+		return `${this.config.accountId}:watch:${handle.toLowerCase()}`;
+	}
+
+	private handleRecoveryScope(handle: string) {
+		return JSON.stringify({
+			provider: "fxtwitter",
+			accountId: this.config.accountId,
+			watchUsers: [handle.toLowerCase()],
+			targetTweetIds: [],
+		});
+	}
+
+	private async resetSuccessfulFxHandles(handles: string[], now: Date) {
+		for (const handle of handles) {
+			await enqueueDatabaseWrite((db) =>
+				recordTwitter6551FxRecovery(
+					db,
+					this.handleFallbackAccountId(handle),
+					this.handleRecoveryScope(handle),
+					"success",
+					now,
+				),
+			);
+		}
+	}
+
+	private async prepareTwillotFallbacks(handles: string[], now: Date) {
+		const pending: string[] = [];
+		const completed: string[] = [];
+		const failed: string[] = [];
+		const paidEligible: string[] = [];
+		const twillotEnabled = twillotCloudFallbackEnabled();
+		const timeoutMs = twillotFallbackTimeoutMinutes() * 60_000;
+		for (const handle of handles) {
+			const accountId = this.handleFallbackAccountId(handle);
+			const scope = this.handleRecoveryScope(handle);
+			const snapshot = await enqueueDatabaseWrite((db) => {
+				const previous = readTwitter6551FallbackState(
+					db,
+					accountId,
+					scope,
+					now,
+				);
+				const target = findCloudFollowingTarget(db, handle);
+				const twillotOutcome =
+					twillotEnabled && target
+						? evaluatePreviousTwillotFallback(db, {
+								target,
+								lastFxFailureAt: previous.lastCountedFxFailureAt,
+								timeoutMs,
+								now,
+							})
+						: ("failed" as const);
+				const state = recordTwitter6551FxRecovery(
+					db,
+					accountId,
+					scope,
+					"total_failure",
+					now,
+					this.recoveryIntervalMs(),
+				);
+				const isNewFailure =
+					state.lastCountedFxFailureAt !== previous.lastCountedFxFailureAt;
+				if (twillotOutcome === "completed" && !isNewFailure) {
+					return { outcome: "completed" as const, state };
+				}
+				if (
+					twillotEnabled &&
+					target &&
+					(twillotOutcome === "none" || twillotOutcome === "completed")
+				) {
+					const job = queueTwillotFallback(db, { target, now });
+					return {
+						outcome: job ? ("pending" as const) : ("failed" as const),
+						state,
+					};
+				}
+				return { outcome: twillotOutcome, state };
+			});
+			if (snapshot.outcome === "pending") pending.push(handle);
+			else if (snapshot.outcome === "completed") completed.push(handle);
+			else {
+				failed.push(handle);
+				paidEligible.push(handle);
+			}
+		}
+		return { pending, completed, failed, paidEligible };
+	}
+
 	async start(options: { forceBackfill?: boolean; allowPaid?: boolean } = {}) {
 		if (!this.config.enabled || this.stopped) return;
-		const previousRecovery = recoveryAttempts.get(this.recoveryScope());
+		const watchUsers = this.currentWatchUsers();
+		const previousRecovery = recoveryAttempts.get(
+			this.recoveryScope(watchUsers),
+		);
 		assignRuntimeStatus({
 			...emptyStatus(),
 			enabled: true,
 			provider: this.recoveryProvider(),
 			state: "starting",
 			activeSource: this.recoveryProvider(),
+			watchUsers,
 			lastBackfillAt: previousRecovery?.lastBackfillAt ?? null,
 		});
 		await enqueueDatabaseWrite((db) => {
@@ -1279,7 +1433,10 @@ export class Twitter6551Worker {
 		if (timeout) clearTimeout(timeout);
 	}
 
-	private async fetchTwitter6551Tweets() {
+	private async fetchTwitter6551Tweets(
+		watchUsers = this.currentWatchUsers(),
+		targetTweetIds = this.config.targetTweetIds,
+	) {
 		const client = this.paidClient();
 		const batches: Twitter6551Tweet[][] = [];
 		const failures: string[] = [];
@@ -1322,11 +1479,11 @@ export class Twitter6551Worker {
 					error instanceof Error ? error : new Twitter6551Error(String(error));
 			}
 		};
-		for (const username of this.config.watchUsers) {
+		for (const username of watchUsers) {
 			await capture(`@${username}`, () => client.getUserTweets(username, 100));
 			if (haltError) break;
 		}
-		for (const tweetId of this.config.targetTweetIds) {
+		for (const tweetId of targetTweetIds) {
 			if (haltError) break;
 			await capture(`status ${tweetId}`, async () => [
 				await client.getTweet(tweetId),
@@ -1376,9 +1533,11 @@ export class Twitter6551Worker {
 		return normalizeFxTwitterTweets(envelope.results);
 	}
 
-	private async fetchFxTwitterTweets() {
+	private async fetchFxTwitterTweets(watchUsers = this.currentWatchUsers()) {
 		const batches: FxTwitterTweet[][] = [];
 		const failures: string[] = [];
+		const succeededWatchUsers: string[] = [];
+		const failedWatchUsers: string[] = [];
 		let completedRequests = 0;
 		const capture = async <T>(
 			label: string,
@@ -1392,16 +1551,22 @@ export class Twitter6551Worker {
 				failures.push(`${label}: ${errorMessage(error)}`);
 			}
 		};
-		for (const username of this.config.watchUsers) {
-			await capture(
-				`@${username}`,
-				() =>
-					this.fxtwitter.getProfileStatuses(username, {
-						count: 100,
-						withReplies: true,
-					}),
-				(value) => this.tweetsFromSearchEnvelope(value),
-			);
+		for (const username of watchUsers) {
+			try {
+				batches.push(
+					this.tweetsFromSearchEnvelope(
+						await this.fxtwitter.getProfileStatuses(username, {
+							count: 100,
+							withReplies: true,
+						}),
+					),
+				);
+				completedRequests += 1;
+				succeededWatchUsers.push(username);
+			} catch (error) {
+				failedWatchUsers.push(username);
+				failures.push(`@${username}: ${errorMessage(error)}`);
+			}
 		}
 		for (const tweetId of this.config.targetTweetIds) {
 			await capture(
@@ -1423,7 +1588,11 @@ export class Twitter6551Worker {
 				(value) => this.tweetsFromSearchEnvelope(value),
 			);
 		}
-		if (completedRequests === 0 && failures.length > 0) {
+		if (
+			completedRequests === 0 &&
+			failures.length > 0 &&
+			(failedWatchUsers.length === 0 || !twillotCloudFallbackEnabled())
+		) {
 			throw new Twitter6551Error(
 				`FxTwitter recovery failed: ${failures.join("; ")}`,
 			);
@@ -1433,6 +1602,8 @@ export class Twitter6551Worker {
 				...new Map(batches.flat().map((tweet) => [tweet.id, tweet])).values(),
 			],
 			failures,
+			succeededWatchUsers,
+			failedWatchUsers,
 		};
 	}
 
@@ -1496,6 +1667,62 @@ export class Twitter6551Worker {
 				`6551 paid request budget could not be verified; requests are blocked (${errorMessage(error)})`,
 			);
 		}
+	}
+
+	private async runPaidFallbackForHandles(handles: string[], now: Date) {
+		const ingested = new Set<string>();
+		const recovered: string[] = [];
+		const skipped: string[] = [];
+		const failures: string[] = [];
+		if (!this.config.paidEnabled || !this.client) {
+			return {
+				ingested: [] as string[],
+				recovered,
+				skipped: handles,
+				failures: ["6551 paid reserve is disabled"],
+			};
+		}
+		for (const handle of handles) {
+			let claim: ReturnType<typeof claimTwitter6551PaidFallback>;
+			try {
+				claim = await enqueueDatabaseWrite((db) =>
+					claimTwitter6551PaidFallback(
+						db,
+						this.handleFallbackAccountId(handle),
+						this.handleRecoveryScope(handle),
+						this.config.paidFallbackFailureThreshold,
+						this.config.paidFallbackCooldownMinutes * 60_000,
+						now,
+					),
+				);
+			} catch (error) {
+				failures.push(`@${handle}: ${errorMessage(error)}`);
+				continue;
+			}
+			applyFallbackStatus(claim.state);
+			if (!claim.claimed) {
+				skipped.push(handle);
+				continue;
+			}
+			try {
+				this.ensurePaidBudgetAvailable();
+				const tweets = await this.client.getUserTweets(handle, 100);
+				const ids = await enqueueDatabaseWrite((db) =>
+					ingestTwitter6551Tweets(
+						db,
+						this.config.accountId,
+						tweets,
+						"home",
+						true,
+					),
+				);
+				for (const id of ids) ingested.add(id);
+				recovered.push(handle);
+			} catch (error) {
+				failures.push(`@${handle}: ${errorMessage(error)}`);
+			}
+		}
+		return { ingested: [...ingested], recovered, skipped, failures };
 	}
 
 	private async runPaidFallback(
@@ -1590,8 +1817,16 @@ export class Twitter6551Worker {
 		if (this.backfillRunning || this.stopped) return "skipped" as const;
 		const allowPaid = options.allowPaid ?? true;
 		this.backfillRunning = true;
-		const scope = this.recoveryScope();
+		const watchUsers = this.currentWatchUsers();
+		const scope = this.recoveryScope(watchUsers);
 		const attemptedAt = Date.now();
+		assignRuntimeStatus({
+			...runtimeStatus,
+			watchUsers,
+			cloudAllFollowing: cloudAllFollowingEnabled(),
+			twillotCloudFallbackEnabled: twillotCloudFallbackEnabled(),
+			twillotFallbackTimeoutMinutes: twillotFallbackTimeoutMinutes(),
+		});
 		recoveryAttempts.set(scope, {
 			attemptedAt,
 			outcome: "running",
@@ -1602,10 +1837,14 @@ export class Twitter6551Worker {
 			const provider = this.recoveryProvider();
 			let ingested: string[];
 			let partialFailures: string[] = [];
+			let activeSource: Twitter6551RuntimeStatus["activeSource"] = provider;
+			let twillotPendingCount = 0;
+			let twillotCompletedCount = 0;
+			let twillotFailedCount = 0;
 			if (provider === "fxtwitter") {
 				let result: Awaited<ReturnType<typeof this.fetchFxTwitterTweets>>;
 				try {
-					result = await this.fetchFxTwitterTweets();
+					result = await this.fetchFxTwitterTweets(watchUsers);
 				} catch (error) {
 					const fallbackState = await this.recordFxRecoveryOutcome(
 						"total_failure",
@@ -1627,8 +1866,55 @@ export class Twitter6551Worker {
 					];
 				}
 				ingested = await this.ingestFxTwitterTweets(result.tweets);
+				const now = new Date();
+				if (twillotCloudFallbackEnabled()) {
+					await this.resetSuccessfulFxHandles(result.succeededWatchUsers, now);
+				}
+				if (
+					twillotCloudFallbackEnabled() &&
+					result.failedWatchUsers.length > 0
+				) {
+					const fallbacks = await this.prepareTwillotFallbacks(
+						result.failedWatchUsers,
+						now,
+					);
+					twillotPendingCount = fallbacks.pending.length;
+					twillotCompletedCount = fallbacks.completed.length;
+					twillotFailedCount = fallbacks.failed.length;
+					if (fallbacks.pending.length > 0) {
+						activeSource = "twillot";
+						partialFailures = [
+							...partialFailures,
+							`Twillot cloud fallback queued for ${String(fallbacks.pending.length)} account(s)`,
+						];
+					}
+					if (fallbacks.paidEligible.length > 0) {
+						if (allowPaid) {
+							const paid = await this.runPaidFallbackForHandles(
+								fallbacks.paidEligible,
+								now,
+							);
+							ingested = [...new Set([...ingested, ...paid.ingested])];
+							if (paid.recovered.length > 0) activeSource = "6551";
+							partialFailures = [
+								...partialFailures,
+								...paid.failures.map((failure) => `6551 ${failure}`),
+								...(paid.skipped.length > 0
+									? [
+											`6551 reserve remains gated for ${String(paid.skipped.length)} account(s)`,
+										]
+									: []),
+							];
+						} else {
+							partialFailures = [
+								...partialFailures,
+								`6551 reserve is eligible for ${String(fallbacks.paidEligible.length)} account(s), but this manual run forbids paid requests`,
+							];
+						}
+					}
+				}
 			} else {
-				const paid = await this.fetchTwitter6551Tweets();
+				const paid = await this.fetchTwitter6551Tweets(watchUsers);
 				if (paid.completedRequests === 0) {
 					if (paid.haltError) throw paid.haltError;
 					if (paid.firstError) throw paid.firstError;
@@ -1655,7 +1941,11 @@ export class Twitter6551Worker {
 			assignRuntimeStatus({
 				...runtimeStatus,
 				provider,
-				activeSource: provider,
+				activeSource,
+				watchUsers,
+				twillotPendingCount,
+				twillotCompletedCount,
+				twillotFailedCount,
 				state:
 					partialFailures.length > 0
 						? "degraded"
@@ -1700,8 +1990,8 @@ export class Twitter6551Worker {
 		}
 	}
 
-	private recoveryScope() {
-		return recoveryScopeForConfig(this.config);
+	private recoveryScope(watchUsers = this.currentWatchUsers()) {
+		return recoveryScopeForConfig({ ...this.config, watchUsers });
 	}
 
 	private recoveryIntervalMs() {

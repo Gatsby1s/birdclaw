@@ -68,6 +68,7 @@ import { Route as ApiActionRouteImport } from './routes/api/action'
 import { Route as ApiIntegrationsXremarkRouteImport } from './routes/api/integrations.xremark'
 import { Route as ApiIntegrationsTwitter6551RouteImport } from './routes/api/integrations.twitter6551'
 import { Route as ApiIntegrationsTwillotHistoryRouteImport } from './routes/api/integrations.twillot-history'
+import { Route as ApiIntegrationsTwillotFollowingRouteImport } from './routes/api/integrations.twillot-following'
 import { Route as ApiIntegrationsXremarkSnapshotRouteImport } from './routes/api/integrations.xremark.snapshot'
 import { Route as ApiIntegrationsXremarkChangesRouteImport } from './routes/api/integrations.xremark.changes'
 
@@ -369,6 +370,12 @@ const ApiIntegrationsTwillotHistoryRoute =
     path: '/api/integrations/twillot-history',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiIntegrationsTwillotFollowingRoute =
+  ApiIntegrationsTwillotFollowingRouteImport.update({
+    id: '/api/integrations/twillot-following',
+    path: '/api/integrations/twillot-following',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiIntegrationsXremarkSnapshotRoute =
   ApiIntegrationsXremarkSnapshotRouteImport.update({
     id: '/snapshot',
@@ -439,6 +446,7 @@ export interface FileRoutesByFullPath {
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/twillot-following': typeof ApiIntegrationsTwillotFollowingRoute
   '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
   '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
@@ -502,6 +510,7 @@ export interface FileRoutesByTo {
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/twillot-following': typeof ApiIntegrationsTwillotFollowingRoute
   '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
   '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
@@ -566,6 +575,7 @@ export interface FileRoutesById {
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
+  '/api/integrations/twillot-following': typeof ApiIntegrationsTwillotFollowingRoute
   '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
   '/api/integrations/twitter6551': typeof ApiIntegrationsTwitter6551Route
   '/api/integrations/xremark': typeof ApiIntegrationsXremarkRouteWithChildren
@@ -631,6 +641,7 @@ export interface FileRouteTypes {
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
     | '/profiles/$handle'
+    | '/api/integrations/twillot-following'
     | '/api/integrations/twillot-history'
     | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
@@ -694,6 +705,7 @@ export interface FileRouteTypes {
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
     | '/profiles/$handle'
+    | '/api/integrations/twillot-following'
     | '/api/integrations/twillot-history'
     | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
@@ -757,6 +769,7 @@ export interface FileRouteTypes {
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
     | '/profiles/$handle'
+    | '/api/integrations/twillot-following'
     | '/api/integrations/twillot-history'
     | '/api/integrations/twitter6551'
     | '/api/integrations/xremark'
@@ -821,6 +834,7 @@ export interface RootRouteChildren {
   ApiXurlRateLimitsRoute: typeof ApiXurlRateLimitsRoute
   AuthorsHandleRoute: typeof AuthorsHandleRoute
   ProfilesHandleRoute: typeof ProfilesHandleRoute
+  ApiIntegrationsTwillotFollowingRoute: typeof ApiIntegrationsTwillotFollowingRoute
   ApiIntegrationsTwillotHistoryRoute: typeof ApiIntegrationsTwillotHistoryRoute
   ApiIntegrationsTwitter6551Route: typeof ApiIntegrationsTwitter6551Route
   ApiIntegrationsXremarkRoute: typeof ApiIntegrationsXremarkRouteWithChildren
@@ -1241,6 +1255,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiIntegrationsTwillotHistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/integrations/twillot-following': {
+      id: '/api/integrations/twillot-following'
+      path: '/api/integrations/twillot-following'
+      fullPath: '/api/integrations/twillot-following'
+      preLoaderRoute: typeof ApiIntegrationsTwillotFollowingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/integrations/xremark/snapshot': {
       id: '/api/integrations/xremark/snapshot'
       path: '/snapshot'
@@ -1331,6 +1352,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiXurlRateLimitsRoute: ApiXurlRateLimitsRoute,
   AuthorsHandleRoute: AuthorsHandleRoute,
   ProfilesHandleRoute: ProfilesHandleRoute,
+  ApiIntegrationsTwillotFollowingRoute: ApiIntegrationsTwillotFollowingRoute,
   ApiIntegrationsTwillotHistoryRoute: ApiIntegrationsTwillotHistoryRoute,
   ApiIntegrationsTwitter6551Route: ApiIntegrationsTwitter6551Route,
   ApiIntegrationsXremarkRoute: ApiIntegrationsXremarkRouteWithChildren,

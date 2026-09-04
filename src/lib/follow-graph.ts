@@ -442,7 +442,7 @@ function mergeFollowPayloadIntoLocalStore({
 	accountId: string;
 	direction: FollowDirection;
 	payload: MergedFollowPayload;
-	source: FollowGraphLiveSource | "cache";
+	source: FollowGraphLiveSource | "cache" | "twillot";
 }) {
 	const now = new Date().toISOString();
 	const snapshotId = `follow_snapshot_${randomUUID()}`;
@@ -603,6 +603,36 @@ function mergeFollowPayloadIntoLocalStore({
 			pageCount: payload.pageCount,
 		};
 	})();
+}
+
+export function importTwillotFollowingSnapshot(
+	db: Database,
+	input: {
+		accountId?: string;
+		users: XurlMentionUser[];
+		pageCount: number;
+		complete: boolean;
+	},
+) {
+	const account = resolveAccount(db, input.accountId);
+	return mergeFollowPayloadIntoLocalStore({
+		db,
+		accountId: account.accountId,
+		direction: "following",
+		source: "twillot",
+		payload: {
+			data: input.users,
+			meta: {
+				result_count: input.users.length,
+				page_count: input.pageCount,
+				next_token: null,
+				cloud_collector: true,
+			},
+			complete: input.complete,
+			pageCount: input.pageCount,
+			truncatedByMaxResources: false,
+		},
+	});
 }
 
 function makeDryRunResponse({
