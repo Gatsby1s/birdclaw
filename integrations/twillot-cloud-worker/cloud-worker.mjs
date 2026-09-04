@@ -58,13 +58,24 @@ async function pairCompanion(context, extensionId, config) {
 		`chrome-extension://${extensionId}/birdclaw-twillot-options.html`,
 		{ waitUntil: "domcontentloaded" },
 	);
+	const serviceWorkers = context
+		.serviceWorkers()
+		.filter((worker) =>
+			worker.url().startsWith(`chrome-extension://${extensionId}/`),
+		);
+	const serviceWorker = serviceWorkers[0];
+	const bridgeAvailable = serviceWorker
+		? await serviceWorker.evaluate(
+				() => typeof globalThis.__BIRDCLAW_TWILLOT_CLOUD__ === "object",
+			)
+		: false;
 	log("extension_runtime_detected", {
-		serviceWorkerCount: context
-			.serviceWorkers()
-			.filter((worker) =>
-				worker.url().startsWith(`chrome-extension://${extensionId}/`),
-			).length,
+		serviceWorkerCount: serviceWorkers.length,
+		bridgeAvailable,
 	});
+	if (!serviceWorker || !bridgeAvailable) {
+		throw new Error("The Twillot companion worker did not start.");
+	}
 	const paired = await page.evaluate(
 		async ({ endpoint, token }) => {
 			await chrome.storage.local.set({
@@ -80,25 +91,21 @@ async function pairCompanion(context, extensionId, config) {
 	);
 	if (!paired) throw new Error("The Twillot companion pairing was not saved.");
 	log("companion_paired", { endpoint: config.endpoint });
-	return page;
+	return { page, serviceWorker };
 }
 
-async function companionState(extensionPage) {
-	return extensionPage.evaluate(async () => {
-		const response = await chrome.runtime.sendMessage({
-			type: "birdclaw:twillot:get-state",
-		});
+async function companionState(serviceWorker) {
+	return serviceWorker.evaluate(async () => {
+		const response = await globalThis.__BIRDCLAW_TWILLOT_CLOUD__.getState();
 		if (!response?.ok)
 			throw new Error(response?.error || "Companion unavailable");
 		return response.state;
 	});
 }
 
-async function companionSyncNow(extensionPage) {
-	return extensionPage.evaluate(async () => {
-		const response = await chrome.runtime.sendMessage({
-			type: "birdclaw:twillot:sync-now",
-		});
+async function companionSyncNow(serviceWorker) {
+	return serviceWorker.evaluate(async () => {
+		const response = await globalThis.__BIRDCLAW_TWILLOT_CLOUD__.syncNow();
 		if (!response?.ok)
 			throw new Error(response?.error || "Companion sync failed");
 		return response;
@@ -251,13 +258,13 @@ async function syncFollowing(context, extensionPage, config) {
 	);
 }
 
-async function clickActiveJob(context, extensionPage, clickedJobs) {
-	const state = await companionState(extensionPage);
+async function clickActiveJob(context, serviceWorker, clickedJobs) {
+	const state = await companionState(serviceWorker);
 	const job = state.activeJob;
 	if (!job?.id) return;
 	const lastClick = clickedJobs.get(job.id) || 0;
 	if (Date.now() - lastClick < JOB_RETRY_CLICK_MS) {
-		await companionSyncNow(extensionPage);
+		await companionSyncNow(serviceWorker);
 		return;
 	}
 	const page = context.pages().find((candidate) => {
@@ -282,7 +289,7 @@ async function clickActiveJob(context, extensionPage, clickedJobs) {
 		clickedJobs.set(job.id, Date.now());
 		log("twillot_job_started", { jobId: job.id, handle: job.handle });
 	}
-	await companionSyncNow(extensionPage);
+	await companionSyncNow(serviceWorker);
 }
 
 export async function runCloudWorker() {
@@ -325,7 +332,7 @@ export async function runCloudWorker() {
 				originCount: bootstrap.originCount,
 			});
 		}
-		const extensionPage = await pairCompanion(
+		const { page: extensionPage, serviceWorker } = await pairCompanion(
 			context,
 			prepared.extensionId,
 			config,
@@ -345,7 +352,7 @@ export async function runCloudWorker() {
 					await syncFollowing(context, extensionPage, config);
 					nextFollowingSyncAt = Date.now() + config.syncIntervalMs;
 				}
-				await clickActiveJob(context, extensionPage, clickedJobs);
+				await clickActiveJob(context, serviceWorker, clickedJobs);
 			} catch (error) {
 				log("worker_cycle_error", {
 					message: error instanceof Error ? error.message : String(error),

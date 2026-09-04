@@ -1601,6 +1601,15 @@
 	);
 	void installAlarms();
 
+	Object.defineProperty(globalThis, "__BIRDCLAW_TWILLOT_CLOUD__", {
+		configurable: false,
+		writable: false,
+		value: Object.freeze({
+			getState: () => handleMessage({ type: CONTROL.getState }, {}),
+			syncNow: () => handleMessage({ type: CONTROL.syncNow }, {}),
+		}),
+	});
+
 	if (globalThis.__BIRDCLAW_TWILLOT_TEST__) {
 		globalThis.__birdclawTwillotWorkerTest = {
 			CONTROL,

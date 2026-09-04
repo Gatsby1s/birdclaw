@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.18 - 2026-09-04
+
+### Fixed
+
+- Drive the cloud collector through a private service-worker bridge so Twillot's own message listeners cannot swallow controller requests.
+
 ## 0.10.17 - 2026-09-04
 
 ### Fixed
