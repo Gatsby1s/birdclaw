@@ -62,6 +62,10 @@ test("worker injection is explicit and refuses an already patched loader", () =>
 	const patched = injectWorker(official);
 	assert.match(patched, /BIRDCLAW_TWILLOT_BRIDGE_START/);
 	assert.match(patched, /import '\.\/birdclaw-twillot-worker\.js';/);
+	assert.ok(
+		patched.indexOf("birdclaw-twillot-worker.js") <
+			patched.indexOf("assets/chunk-0542871d.js"),
+	);
 	assert.throws(() => injectWorker(patched), /already contains/);
 });
 

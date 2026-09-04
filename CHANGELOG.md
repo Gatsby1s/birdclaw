@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.19 - 2026-09-04
+
+### Fixed
+
+- Load the BirdClaw companion before Twillot's official worker module so cloud startup cannot suppress the bridge.
+
 ## 0.10.18 - 2026-09-04
 
 ### Fixed

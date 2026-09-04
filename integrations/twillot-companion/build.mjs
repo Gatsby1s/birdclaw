@@ -235,8 +235,7 @@ function injectWorker(loaderSource) {
 			"The source worker already contains a BirdClaw Twillot injection.",
 		);
 	}
-	const suffix = loaderSource.endsWith("\n") ? "" : "\n";
-	return `${loaderSource}${suffix}${INJECTION_START}\nimport './birdclaw-twillot-worker.js';\n${INJECTION_END}\n`;
+	return `${INJECTION_START}\nimport './birdclaw-twillot-worker.js';\n${INJECTION_END}\n${loaderSource}`;
 }
 
 export { injectWorker, patchManifest };
