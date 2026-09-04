@@ -2,10 +2,13 @@
 
 ## Unreleased
 
+## 0.10.9 - 2026-09-04
+
 ### Added
 
 - Run the audited Twillot extension in a dedicated Railway Chromium worker with a persistent profile, automatic following-scope sync, and automatic public-post capture.
 - Collect every current following account through a per-account FxTwitter → Twillot → 6551 fallback chain instead of depending on a local Mac collector.
+- Bootstrap only allowlisted X and Twillot browser session data into the persistent cloud worker profile, then remove the one-time secret after first use.
 
 ### Changed
 
