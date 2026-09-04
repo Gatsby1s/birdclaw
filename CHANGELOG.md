@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.10.11 - 2026-09-04
+
+### Fixed
+
+- Prepare the audited official Twillot bridge while building the Railway image so worker startup does not depend on a live Chrome Web Store download.
+- Emit bounded startup-phase events for cloud-worker deployment verification without exposing credentials or browser data.
+
 ## 0.10.10 - 2026-09-04
 
 ### Fixed

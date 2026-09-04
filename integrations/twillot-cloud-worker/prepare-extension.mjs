@@ -13,6 +13,23 @@ const UPDATE_URL =
 	"https://clients2.google.com/service/update2/crx?response=redirect&prodversion=140.0.0.0&acceptformat=crx3&x=id%3Dflkokionhgagpmnhlngldhbfnblmenen%26uc";
 const MAX_CRX_BYTES = 10 * 1024 * 1024;
 
+async function preparedBridgeFromImage() {
+	const configured = process.env.BIRDCLAW_TWILLOT_PREPARED_BRIDGE_DIR;
+	if (!configured) return null;
+	const bridgePath = path.resolve(configured);
+	const manifest = JSON.parse(
+		await readFile(path.join(bridgePath, "manifest.json"), "utf8"),
+	);
+	if (manifest.version !== "11.0.8" || typeof manifest.key !== "string") {
+		throw new Error("The image-bundled Twillot bridge is not recognized.");
+	}
+	return {
+		extensionId: EXTENSION_ID,
+		bridgePath,
+		cleanup: async () => {},
+	};
+}
+
 export function extractCrxZip(crx) {
 	const bytes = Buffer.from(crx);
 	if (bytes.length < 12 || bytes.subarray(0, 4).toString("ascii") !== "Cr24") {
@@ -54,6 +71,8 @@ async function downloadOfficialCrx(fetchImpl = fetch) {
 }
 
 export async function prepareTwillotExtension(options = {}) {
+	const prepared = await preparedBridgeFromImage();
+	if (prepared) return prepared;
 	const root = await mkdtemp(path.join(os.tmpdir(), "birdclaw-twillot-cloud-"));
 	const source = path.join(root, "official");
 	const bridge = path.join(root, "bridge");

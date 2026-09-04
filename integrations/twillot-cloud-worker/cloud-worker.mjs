@@ -275,9 +275,14 @@ async function clickActiveJob(context, extensionPage, clickedJobs) {
 
 export async function runCloudWorker() {
 	const config = readConfig();
+	log("extension_prepare_started", {
+		bundled: Boolean(process.env.BIRDCLAW_TWILLOT_PREPARED_BRIDGE_DIR),
+	});
 	const prepared = await prepareTwillotExtension();
+	log("extension_prepared", { extensionId: prepared.extensionId });
 	let context;
 	try {
+		log("chromium_launch_started");
 		context = await chromium.launchPersistentContext(
 			path.resolve(config.profileDir),
 			{
@@ -293,6 +298,7 @@ export async function runCloudWorker() {
 				],
 			},
 		);
+		log("chromium_launched");
 		const bootstrap = await applySessionBootstrap(
 			context,
 			path.resolve(config.profileDir),
