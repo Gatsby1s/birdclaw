@@ -2,7 +2,6 @@
 
 import path from "node:path";
 import process from "node:process";
-import { pathToFileURL } from "node:url";
 import { chromium } from "playwright-core";
 import { prepareTwillotExtension } from "./prepare-extension.mjs";
 import { applySessionBootstrap } from "./session-bootstrap.mjs";
@@ -346,14 +345,9 @@ export async function runCloudWorker() {
 	}
 }
 
-const isDirectRun =
-	process.argv[1] &&
-	pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
-if (isDirectRun) {
-	runCloudWorker().catch((error) => {
-		log("worker_fatal", {
-			message: error instanceof Error ? error.message : String(error),
-		});
-		process.exitCode = 1;
+runCloudWorker().catch((error) => {
+	log("worker_fatal", {
+		message: error instanceof Error ? error.message : String(error),
 	});
-}
+	process.exitCode = 1;
+});

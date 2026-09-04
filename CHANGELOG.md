@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.12 - 2026-09-04
+
+### Fixed
+
+- Start the dedicated Twillot worker unconditionally from its container entrypoint instead of relying on a path-sensitive direct-run check.
+
 ## 0.10.11 - 2026-09-04
 
 ### Fixed
