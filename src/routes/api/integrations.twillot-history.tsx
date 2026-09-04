@@ -21,7 +21,8 @@ function corsHeaders() {
 	return {
 		"access-control-allow-origin": TWILLOT_EXTENSION_ORIGIN,
 		"access-control-allow-methods": "GET, POST, OPTIONS",
-		"access-control-allow-headers": "authorization, content-type",
+		"access-control-allow-headers":
+			"authorization, content-type, x-birdclaw-integration",
 		"access-control-max-age": "600",
 		vary: "Origin",
 	};

@@ -1168,10 +1168,9 @@
 			});
 			const data = await parseResponse(response);
 			if (!response.ok || data.ok === false) {
+				const code = typeof data.code === "string" ? ` ${data.code}` : "";
 				throw new CompanionError(
-					response.status === 401 || response.status === 403
-						? "BirdClaw rejected the pairing token."
-						: "BirdClaw could not provide the next Twillot job.",
+					`BirdClaw claim failed (HTTP ${response.status}${code}).`,
 				);
 			}
 			if (!data.job) {

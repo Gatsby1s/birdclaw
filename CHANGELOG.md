@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.21 - 2026-09-04
+
+### Fixed
+
+- Allow the Twillot worker's integration header through cloud CORS and report sanitized claim failure codes.
+
 ## 0.10.20 - 2026-09-04
 
 ### Fixed
