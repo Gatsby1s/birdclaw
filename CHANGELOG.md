@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.14 - 2026-09-04
+
+### Fixed
+
+- Use a dedicated worker bootstrap module that reports entry and import phases before loading Chromium automation.
+
 ## 0.10.13 - 2026-09-04
 
 ### Fixed

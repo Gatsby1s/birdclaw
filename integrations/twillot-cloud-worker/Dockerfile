@@ -21,4 +21,4 @@ ENV CHROMIUM_PATH=/usr/bin/chromium
 ENV BIRDCLAW_TWILLOT_PROFILE_DIR=/data/twillot-browser
 ENV BIRDCLAW_TWILLOT_PREPARED_BRIDGE_DIR=/opt/twillot-bridge
 
-CMD ["node", "/app/integrations/twillot-cloud-worker/cloud-worker.mjs"]
+CMD ["node", "/app/integrations/twillot-cloud-worker/start.mjs"]
