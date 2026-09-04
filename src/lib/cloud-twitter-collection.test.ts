@@ -8,6 +8,7 @@ import { getNativeDb, resetDatabaseForTests } from "./db";
 import { importTwillotFollowingSnapshot } from "./follow-graph";
 import {
 	evaluatePreviousTwillotFallback,
+	findCloudCollectionTarget,
 	findCloudFollowingTarget,
 	listCloudFollowingTargets,
 	mergeCloudCollectionHandles,
@@ -58,6 +59,21 @@ describe("cloud Twitter collection targets", () => {
 			"carol",
 			"bob",
 		]);
+	});
+
+	it("resolves a configured non-following profile for Twillot fallback", () => {
+		const db = setup();
+		db.prepare(
+			`insert into profiles (
+			   id, handle, display_name, bio, followers_count, avatar_hue, created_at
+			 ) values ('profile_user_44', 'carol', 'Carol', '', 0, 44, ?)`,
+		).run("2026-09-04T00:00:00.000Z");
+		expect(findCloudCollectionTarget(db, "@CAROL", "acct")).toEqual({
+			accountId: "acct",
+			profileId: "profile_user_44",
+			externalUserId: "44",
+			handle: "carol",
+		});
 	});
 
 	it("queues Twillot after Fx failure and recognizes completion or timeout", () => {

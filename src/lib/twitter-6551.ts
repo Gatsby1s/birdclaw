@@ -1,7 +1,7 @@
 import type { Database } from "./sqlite";
 import {
 	evaluatePreviousTwillotFallback,
-	findCloudFollowingTarget,
+	findCloudCollectionTarget,
 	mergeCloudCollectionHandles,
 	queueTwillotFallback,
 } from "./cloud-twitter-collection";
@@ -1288,7 +1288,11 @@ export class Twitter6551Worker {
 					scope,
 					now,
 				);
-				const target = findCloudFollowingTarget(db, handle);
+				const target = findCloudCollectionTarget(
+					db,
+					handle,
+					this.config.accountId,
+				);
 				const twillotOutcome =
 					twillotEnabled && target
 						? evaluatePreviousTwillotFallback(db, {

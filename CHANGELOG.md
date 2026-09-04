@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.24 - 2026-09-04
+
+### Fixed
+
+- Route configured cloud collection accounts through Twillot after FxTwitter failures even when the following graph has not been imported yet.
+
 ## 0.10.23 - 2026-09-04
 
 ### Fixed

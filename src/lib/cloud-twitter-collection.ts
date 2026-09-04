@@ -77,6 +77,44 @@ export function findCloudFollowingTarget(db: Database, handle: string) {
 	);
 }
 
+export function findCloudCollectionTarget(
+	db: Database,
+	handle: string,
+	fallbackAccountId?: string,
+) {
+	const following = findCloudFollowingTarget(db, handle);
+	if (following) return following;
+	const normalized = normalizeHandle(handle);
+	if (!normalized) return null;
+	const profile = (
+		db
+			.prepare(
+				`select id, handle from profiles
+			 where lower(handle) = ?
+			 order by created_at asc, id`,
+			)
+			.all(normalized) as Array<{ id: string; handle: string }>
+	).find((candidate) => /^profile_user_\d{1,32}$/.test(candidate.id));
+	const externalUserId = profile?.id.match(/^profile_user_(\d{1,32})$/)?.[1];
+	if (!profile || !externalUserId) return null;
+	const account = fallbackAccountId
+		? (db
+				.prepare("select id from accounts where id = ?")
+				.get(fallbackAccountId) as { id: string } | undefined)
+		: (db
+				.prepare(
+					"select id from accounts order by is_default desc, created_at asc, id limit 1",
+				)
+				.get() as { id: string } | undefined);
+	if (!account) return null;
+	return {
+		accountId: account.id,
+		profileId: profile.id,
+		externalUserId,
+		handle: profile.handle.replace(/^@/, ""),
+	} satisfies CloudTwitterCollectionTarget;
+}
+
 function getTwillotJobForTarget(
 	db: Database,
 	target: CloudTwitterCollectionTarget,
