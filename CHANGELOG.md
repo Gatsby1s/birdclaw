@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.25 - 2026-09-05
+
+### Fixed
+
+- Keep complete PDF exports available when optional tweet scoring is busy, times out, or fails.
+
 ## 0.10.24 - 2026-09-04
 
 ### Fixed
