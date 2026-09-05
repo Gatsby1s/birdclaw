@@ -880,6 +880,8 @@ describe("today route", () => {
 	});
 
 	it("describes a Feed-off reference PDF as Home-only", async () => {
+		fetchTweetScoresMock.mockRejectedValueOnce(new Error("评分服务不可用"));
+		const scoreWarning = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const printMock = vi.spyOn(window, "print").mockImplementation(() => {
 			try {
 				const referencePdf = screen.getByTestId("today-reference-pdf");
@@ -917,6 +919,10 @@ describe("today route", () => {
 		await screen.findByRole("heading", { name: "Today", level: 1 });
 		fireEvent.click(screen.getByRole("button", { name: "导出完整 PDF" }));
 		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
+		expect(scoreWarning).toHaveBeenCalledWith(
+			"Reference PDF score lookup failed; exporting without scores",
+			expect.any(Error),
+		);
 	});
 
 	it("renders generated citations as source links without coloring the prose", async () => {

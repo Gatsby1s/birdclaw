@@ -849,9 +849,15 @@ describe("discuss route", () => {
 
 		await screen.findByRole("heading", { name: "ChatGPT", level: 1 });
 		expect(discussionRequests).toHaveLength(1);
+		fetchTweetScoresMock.mockRejectedValueOnce(new Error("评分服务不可用"));
+		const scoreWarning = vi.spyOn(console, "warn").mockImplementation(() => {});
 		fireEvent.click(screen.getByRole("button", { name: "导出完整 PDF" }));
 
 		await waitFor(() => expect(printMock).toHaveBeenCalledTimes(1));
+		expect(scoreWarning).toHaveBeenCalledWith(
+			"Reference PDF score lookup failed; exporting without scores",
+			expect.any(Error),
+		);
 		expect(discussionRequests).toHaveLength(1);
 		expect(document.title).toBe("birdclaw");
 		expect(document.body.dataset.todayPrintMode).toBeUndefined();
