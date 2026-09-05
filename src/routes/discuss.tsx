@@ -105,6 +105,7 @@ const ranges: Array<{ value: DiscussDateRange; label: string }> = [
 ];
 const DISCUSS_SEARCH_LIMIT = 20_000;
 const DISCUSS_MAX_PAGES = 200;
+const REFERENCE_PDF_SCORE_TIMEOUT_MS = 5_000;
 const discussRangeSegmentActiveClass =
 	"!bg-[var(--accent)] !text-[var(--accent-text)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent)_35%,transparent)]";
 const discussMarkdownLinkClass =
@@ -632,7 +633,10 @@ export function DiscussRouteView({
 	}, [canExportPdf, exportTitle, referencePdfActive]);
 	const handleExportReferencePdf = useCallback(() => {
 		if (!canExportReferencePdf || !result || referencePdfActive) return;
-		flushSync(() => setReferencePdfActive(true));
+		flushSync(() => {
+			setReferenceScores({});
+			setReferencePdfActive(true);
+		});
 		setReferencePdfError(null);
 		void (async () => {
 			try {
@@ -644,28 +648,43 @@ export function DiscussRouteView({
 				const tweets = result.context.tweets.filter((tweet) =>
 					referencedIds.has(normalizeDiscussionReferenceId(tweet.id)),
 				);
-				const scores = await fetchTweetScores(
-					tweets.map((tweet) => ({
-						tweetId: tweet.id,
-						text: tweet.text,
-						createdAt: tweet.createdAt,
-						author: {
-							handle: tweet.author,
-							displayName: tweet.name,
-							bio: tweet.authorProfile.bio,
-						},
-					})),
+				const scoreController = new AbortController();
+				const scoreTimeout = window.setTimeout(
+					() => scoreController.abort(),
+					REFERENCE_PDF_SCORE_TIMEOUT_MS,
 				);
-				flushSync(() =>
-					setReferenceScores(
-						Object.fromEntries(
-							scores.map((score) => [
-								normalizeDiscussionReferenceId(score.tweetId),
-								score.score,
-							]),
+				try {
+					const scores = await fetchTweetScores(
+						tweets.map((tweet) => ({
+							tweetId: tweet.id,
+							text: tweet.text,
+							createdAt: tweet.createdAt,
+							author: {
+								handle: tweet.author,
+								displayName: tweet.name,
+								bio: tweet.authorProfile.bio,
+							},
+						})),
+						scoreController.signal,
+					);
+					flushSync(() =>
+						setReferenceScores(
+							Object.fromEntries(
+								scores.map((score) => [
+									normalizeDiscussionReferenceId(score.tweetId),
+									score.score,
+								]),
+							),
 						),
-					),
-				);
+					);
+				} catch (error) {
+					console.warn(
+						"Reference PDF score lookup failed; exporting without scores",
+						error,
+					);
+				} finally {
+					window.clearTimeout(scoreTimeout);
+				}
 				if (
 					typeof CSS === "undefined" ||
 					typeof CSS.supports !== "function" ||

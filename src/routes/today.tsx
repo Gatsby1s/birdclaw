@@ -75,6 +75,7 @@ type ReferenceGroup = {
 };
 const PROFILE_HYDRATION_LIMIT = 12;
 const PROFILE_HYDRATION_DELAY_MS = 300;
+const REFERENCE_PDF_SCORE_TIMEOUT_MS = 5_000;
 const DIGEST_STATUS_MESSAGES = {
 	524: "Digest startup timed out at Cloudflare (524). Retry to open a new stream.",
 } as const;
@@ -1479,28 +1480,43 @@ export function TodayRouteView({
 								.map((tweet) => [normalizeReferenceTweetId(tweet.id), tweet]),
 						).values(),
 					];
-					const scores = await fetchTweetScores(
-						tweets.map((tweet) => ({
-							tweetId: tweet.id,
-							text: tweet.text,
-							createdAt: tweet.createdAt,
-							author: {
-								handle: tweet.author,
-								displayName: tweet.name,
-								bio: tweet.authorProfile.bio,
-							},
-						})),
+					const scoreController = new AbortController();
+					const scoreTimeout = window.setTimeout(
+						() => scoreController.abort(),
+						REFERENCE_PDF_SCORE_TIMEOUT_MS,
 					);
-					flushSync(() =>
-						setReferenceScores(
-							Object.fromEntries(
-								scores.map((score) => [
-									normalizeReferenceTweetId(score.tweetId),
-									score.score,
-								]),
+					try {
+						const scores = await fetchTweetScores(
+							tweets.map((tweet) => ({
+								tweetId: tweet.id,
+								text: tweet.text,
+								createdAt: tweet.createdAt,
+								author: {
+									handle: tweet.author,
+									displayName: tweet.name,
+									bio: tweet.authorProfile.bio,
+								},
+							})),
+							scoreController.signal,
+						);
+						flushSync(() =>
+							setReferenceScores(
+								Object.fromEntries(
+									scores.map((score) => [
+										normalizeReferenceTweetId(score.tweetId),
+										score.score,
+									]),
+								),
 							),
-						),
-					);
+						);
+					} catch (error) {
+						console.warn(
+							"Reference PDF score lookup failed; exporting without scores",
+							error,
+						);
+					} finally {
+						window.clearTimeout(scoreTimeout);
+					}
 				}
 				// Let the busy state paint before image preparation and Paged.js start.
 				await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
