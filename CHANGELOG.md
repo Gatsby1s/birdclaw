@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.11.0 - 2026-09-06
+
+### Added
+
+- Organize X accounts, public Telegram channels and uploaded PDF/text originals into person archives with merge, source controls and unread updates.
+- Connect X sources to Twillot history backfill and collect public Telegram history and new posts with restart-safe cursors and separately tracked media downloads.
+- Extend the authenticated read-only RAG MCP with person filters, document chunks, page/source attribution and exact document links.
+- Deliver in-app live archive updates and protect schema 22 with a verified pre-migration backup.
+
+### Coverage
+
+- Collection is limited to accessible provider/public history; private or unavailable Telegram content requires a separate authorized Telegram API integration. Large or inaccessible media and PDFs needing OCR display their actual processing status.
+
 ## 0.10.25 - 2026-09-05
 
 ### Fixed
