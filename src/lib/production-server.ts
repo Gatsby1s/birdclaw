@@ -1,3 +1,7 @@
+import {
+	startPersonArchiveWorker,
+	stopPersonArchiveWorker,
+} from "./person-archive-worker";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import {
@@ -739,6 +743,7 @@ export async function startProductionServer({
 		stopIntradayDigestScheduler();
 		stopWeeklyDigestScheduler();
 		stopTwillotFollowScheduler();
+		stopPersonArchiveWorker();
 		stopLocalCloudBridgeClient();
 		stopLocalAnalysisBridgeWorker();
 		stopLocalTwitterCollector();
@@ -754,6 +759,7 @@ export async function startProductionServer({
 		startIntradayDigestScheduler();
 		startWeeklyDigestScheduler();
 		startTwillotFollowScheduler();
+		startPersonArchiveWorker();
 		startLocalTwitterCollector();
 		startLocalCloudBridgeClient();
 		startLocalAnalysisBridgeWorker();
@@ -791,6 +797,7 @@ export async function runProductionServer(options: ProductionServerOptions) {
 			stopIntradayDigestScheduler();
 			stopWeeklyDigestScheduler();
 			stopTwillotFollowScheduler();
+			stopPersonArchiveWorker();
 			stopLocalCloudBridgeClient();
 			stopLocalAnalysisBridgeWorker();
 			stopLocalTwitterCollector();

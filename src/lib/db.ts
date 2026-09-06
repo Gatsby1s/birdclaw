@@ -13,6 +13,7 @@ import {
 	recordDatabaseStatement,
 } from "./database-metrics";
 import { normalizeTimestampToIso } from "./timestamps";
+import { ensurePersonArchiveTables } from "./person-archive-schema";
 
 let nativeDb: Database | undefined;
 let readDbs: Database[] = [];
@@ -1815,6 +1816,11 @@ const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
 		up: (db) => {
 			ensureProfileListsTables(db);
 		},
+	},
+	{
+		version: 22,
+		name: "add person archives, source jobs, documents and media",
+		up: ensurePersonArchiveTables,
 	},
 ];
 

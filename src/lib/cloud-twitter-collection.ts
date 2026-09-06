@@ -65,6 +65,16 @@ export function mergeCloudCollectionHandles(
 			handles.set(normalizeHandle(target.handle), target.handle);
 		}
 	}
+	const personSources = db
+		.prepare(
+			"select coalesce(p.handle,s.identifier) identifier,s.enabled from person_sources s left join profiles p on p.id=s.profile_id where s.kind='x'",
+		)
+		.all() as Array<{ identifier: string; enabled: number }>;
+	for (const source of personSources) {
+		if (source.enabled)
+			handles.set(normalizeHandle(source.identifier), source.identifier);
+		else handles.delete(normalizeHandle(source.identifier));
+	}
 	return [...handles.values()];
 }
 

@@ -143,7 +143,7 @@ function compactContextValue(value: string, limit = 140) {
 		: compact;
 }
 
-function authorContextForRow(
+export function authorContextForRow(
 	resolveAnnotation: (lookup: {
 		identifier?: string;
 		handle?: string;
@@ -214,7 +214,7 @@ function unique<T>(items: T[]) {
 	return [...new Set(items)];
 }
 
-function extractSearchTerms(query: string) {
+export function extractSearchTerms(query: string) {
 	const normalized = compactText(query).toLocaleLowerCase();
 	const runs = normalized.match(/[\p{Script=Han}]+|[\p{L}\p{N}_@.-]+/gu) ?? [];
 	const terms: string[] = [];
@@ -272,7 +272,7 @@ function collectionStateSelect() {
 	`;
 }
 
-function searchFts(db: Database, query: string) {
+function searchFts(db: Database, query: string, personId?: string) {
 	const terms = extractFtsTerms(query);
 	if (terms.length === 0) return [];
 	const match = terms
@@ -299,11 +299,17 @@ function searchFts(db: Database, query: string) {
 			join tweets t on t.id = tweets_fts.tweet_id
 			join profiles p on p.id = t.author_profile_id
 			where tweets_fts match ?
+              and (?='' or exists(select 1 from person_sources s where s.kind='x' and s.profile_id=t.author_profile_id and s.person_id=?))
 			order by fts_rank asc
 			limit ?
 			`,
 		)
-		.all(match, MAX_SEARCH_CANDIDATES) as SearchCandidateRow[];
+		.all(
+			match,
+			personId ?? "",
+			personId ?? "",
+			MAX_SEARCH_CANDIDATES,
+		) as SearchCandidateRow[];
 }
 
 function termWeight(term: string) {
@@ -325,7 +331,7 @@ function haystackHasTerm(haystack: string, term: string) {
 	return haystack.includes(term.toLocaleLowerCase());
 }
 
-function searchSubstrings(db: Database, query: string) {
+function searchSubstrings(db: Database, query: string, personId?: string) {
 	const terms = extractSearchTerms(query);
 	if (terms.length === 0) return [];
 	const score = terms
@@ -372,6 +378,7 @@ function searchSubstrings(db: Database, query: string) {
 					      ' ' || p.annotation_search_text) as search_text
 				from tweets t
 				join annotated_profiles p on p.id = t.author_profile_id
+                  where (?='' or exists(select 1 from person_sources s where s.kind='x' and s.profile_id=t.author_profile_id and s.person_id=?))
 			), ranked as (
 				select *, ${score} as term_score from candidates
 			)
@@ -384,7 +391,12 @@ function searchSubstrings(db: Database, query: string) {
 			limit ?
 			`,
 		)
-		.all(...terms, MAX_SEARCH_CANDIDATES) as SearchCandidateRow[];
+		.all(
+			personId ?? "",
+			personId ?? "",
+			...terms,
+			MAX_SEARCH_CANDIDATES,
+		) as SearchCandidateRow[];
 }
 
 function relevanceScore(
@@ -411,16 +423,36 @@ function relevanceScore(
 	return score;
 }
 
-export function searchRagTweets(query: string): RagSearchResult[] {
+export function searchRagTweets(
+	query: string,
+	personId?: string,
+): RagSearchResult[] {
 	const normalized = compactText(query);
-	if (!normalized) return [];
+	if (!normalized && !personId) return [];
 	const db = getReadDb({ seedDemoData: false });
 	const resolveAnnotation = createXRemarkAnnotationResolver(db);
 	const terms = extractSearchTerms(normalized);
 	const candidates = new Map<string, SearchCandidateRow>();
+	if (!normalized && personId) {
+		const recent = db
+			.prepare(
+				`select t.id,t.text,t.created_at,t.like_count,t.author_profile_id,p.handle,p.display_name,'' annotation_search_text,${collectionStateSelect()} from tweets t join profiles p on p.id=t.author_profile_id join person_sources s on s.profile_id=t.author_profile_id and s.kind='x' where s.person_id=? order by t.created_at desc,t.id desc limit 10`,
+			)
+			.all(personId) as SearchCandidateRow[];
+		return recent.map((row) => {
+			const context = authorContextForRow(resolveAnnotation, row);
+			return {
+				id: `tweet:${row.id}`,
+				title: titleForTweet(row, [], context),
+				url: tweetUrl(row),
+				author_context: context,
+			};
+		});
+	}
+
 	for (const row of [
-		...searchFts(db, normalized),
-		...searchSubstrings(db, normalized),
+		...searchFts(db, normalized, personId),
+		...searchSubstrings(db, normalized, personId),
 	]) {
 		candidates.set(row.id, row);
 	}

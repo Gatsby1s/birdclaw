@@ -64,7 +64,8 @@ function RootDocument({ children }: { children: ReactNode }) {
 	const wideMain =
 		compactNavigation ||
 		pathname.startsWith("/discuss") ||
-		pathname.startsWith("/today");
+		pathname.startsWith("/today") ||
+		pathname.startsWith("/people");
 
 	return (
 		<html lang="en" suppressHydrationWarning>

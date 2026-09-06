@@ -13,6 +13,7 @@ import { Route as TodayRouteImport } from './routes/today'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RateLimitsRouteImport } from './routes/rate-limits'
 import { Route as ProfileAnalyzeRouteImport } from './routes/profile-analyze'
+import { Route as PeopleRouteImport } from './routes/people'
 import { Route as NetworkMapRouteImport } from './routes/network-map'
 import { Route as MentionsRouteImport } from './routes/mentions'
 import { Route as ListsRouteImport } from './routes/lists'
@@ -27,6 +28,7 @@ import { Route as BookmarksRouteImport } from './routes/bookmarks'
 import { Route as BlocksRouteImport } from './routes/blocks'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ProfilesHandleRouteImport } from './routes/profiles.$handle'
+import { Route as PeoplePersonIdRouteImport } from './routes/people_.$personId'
 import { Route as AuthorsHandleRouteImport } from './routes/authors.$handle'
 import { Route as ApiXurlRateLimitsRouteImport } from './routes/api/xurl-rate-limits'
 import { Route as ApiXremarkRouteImport } from './routes/api/xremark'
@@ -46,8 +48,12 @@ import { Route as ApiQueryRouteImport } from './routes/api/query'
 import { Route as ApiProfilePriorityRouteImport } from './routes/api/profile-priority'
 import { Route as ApiProfileHydrateRouteImport } from './routes/api/profile-hydrate'
 import { Route as ApiProfileAnalysisRouteImport } from './routes/api/profile-analysis'
+import { Route as ApiPersonItemsRouteImport } from './routes/api/person-items'
+import { Route as ApiPersonFilesRouteImport } from './routes/api/person-files'
+import { Route as ApiPersonEventsRouteImport } from './routes/api/person-events'
 import { Route as ApiPeriodDigestHistoryRouteImport } from './routes/api/period-digest-history'
 import { Route as ApiPeriodDigestRouteImport } from './routes/api/period-digest'
+import { Route as ApiPeopleRouteImport } from './routes/api/people'
 import { Route as ApiNetworkMapRouteImport } from './routes/api/network-map'
 import { Route as ApiListsRouteImport } from './routes/api/lists'
 import { Route as ApiListMembersRouteImport } from './routes/api/list-members'
@@ -90,6 +96,11 @@ const RateLimitsRoute = RateLimitsRouteImport.update({
 const ProfileAnalyzeRoute = ProfileAnalyzeRouteImport.update({
   id: '/profile-analyze',
   path: '/profile-analyze',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PeopleRoute = PeopleRouteImport.update({
+  id: '/people',
+  path: '/people',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NetworkMapRoute = NetworkMapRouteImport.update({
@@ -160,6 +171,11 @@ const IndexRoute = IndexRouteImport.update({
 const ProfilesHandleRoute = ProfilesHandleRouteImport.update({
   id: '/profiles/$handle',
   path: '/profiles/$handle',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PeoplePersonIdRoute = PeoplePersonIdRouteImport.update({
+  id: '/people_/$personId',
+  path: '/people/$personId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthorsHandleRoute = AuthorsHandleRouteImport.update({
@@ -258,6 +274,21 @@ const ApiProfileAnalysisRoute = ApiProfileAnalysisRouteImport.update({
   path: '/api/profile-analysis',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPersonItemsRoute = ApiPersonItemsRouteImport.update({
+  id: '/api/person-items',
+  path: '/api/person-items',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPersonFilesRoute = ApiPersonFilesRouteImport.update({
+  id: '/api/person-files',
+  path: '/api/person-files',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPersonEventsRoute = ApiPersonEventsRouteImport.update({
+  id: '/api/person-events',
+  path: '/api/person-events',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPeriodDigestHistoryRoute = ApiPeriodDigestHistoryRouteImport.update({
   id: '/api/period-digest-history',
   path: '/api/period-digest-history',
@@ -266,6 +297,11 @@ const ApiPeriodDigestHistoryRoute = ApiPeriodDigestHistoryRouteImport.update({
 const ApiPeriodDigestRoute = ApiPeriodDigestRouteImport.update({
   id: '/api/period-digest',
   path: '/api/period-digest',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPeopleRoute = ApiPeopleRouteImport.update({
+  id: '/api/people',
+  path: '/api/people',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiNetworkMapRoute = ApiNetworkMapRouteImport.update({
@@ -403,6 +439,7 @@ export interface FileRoutesByFullPath {
   '/lists': typeof ListsRoute
   '/mentions': typeof MentionsRoute
   '/network-map': typeof NetworkMapRoute
+  '/people': typeof PeopleRoute
   '/profile-analyze': typeof ProfileAnalyzeRoute
   '/rate-limits': typeof RateLimitsRoute
   '/settings': typeof SettingsRoute
@@ -424,8 +461,12 @@ export interface FileRoutesByFullPath {
   '/api/list-members': typeof ApiListMembersRoute
   '/api/lists': typeof ApiListsRoute
   '/api/network-map': typeof ApiNetworkMapRoute
+  '/api/people': typeof ApiPeopleRoute
   '/api/period-digest': typeof ApiPeriodDigestRoute
   '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
+  '/api/person-events': typeof ApiPersonEventsRoute
+  '/api/person-files': typeof ApiPersonFilesRoute
+  '/api/person-items': typeof ApiPersonItemsRoute
   '/api/profile-analysis': typeof ApiProfileAnalysisRoute
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
   '/api/profile-priority': typeof ApiProfilePriorityRoute
@@ -445,6 +486,7 @@ export interface FileRoutesByFullPath {
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
+  '/people/$personId': typeof PeoplePersonIdRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
   '/api/integrations/twillot-following': typeof ApiIntegrationsTwillotFollowingRoute
   '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
@@ -467,6 +509,7 @@ export interface FileRoutesByTo {
   '/lists': typeof ListsRoute
   '/mentions': typeof MentionsRoute
   '/network-map': typeof NetworkMapRoute
+  '/people': typeof PeopleRoute
   '/profile-analyze': typeof ProfileAnalyzeRoute
   '/rate-limits': typeof RateLimitsRoute
   '/settings': typeof SettingsRoute
@@ -488,8 +531,12 @@ export interface FileRoutesByTo {
   '/api/list-members': typeof ApiListMembersRoute
   '/api/lists': typeof ApiListsRoute
   '/api/network-map': typeof ApiNetworkMapRoute
+  '/api/people': typeof ApiPeopleRoute
   '/api/period-digest': typeof ApiPeriodDigestRoute
   '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
+  '/api/person-events': typeof ApiPersonEventsRoute
+  '/api/person-files': typeof ApiPersonFilesRoute
+  '/api/person-items': typeof ApiPersonItemsRoute
   '/api/profile-analysis': typeof ApiProfileAnalysisRoute
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
   '/api/profile-priority': typeof ApiProfilePriorityRoute
@@ -509,6 +556,7 @@ export interface FileRoutesByTo {
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
+  '/people/$personId': typeof PeoplePersonIdRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
   '/api/integrations/twillot-following': typeof ApiIntegrationsTwillotFollowingRoute
   '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
@@ -532,6 +580,7 @@ export interface FileRoutesById {
   '/lists': typeof ListsRoute
   '/mentions': typeof MentionsRoute
   '/network-map': typeof NetworkMapRoute
+  '/people': typeof PeopleRoute
   '/profile-analyze': typeof ProfileAnalyzeRoute
   '/rate-limits': typeof RateLimitsRoute
   '/settings': typeof SettingsRoute
@@ -553,8 +602,12 @@ export interface FileRoutesById {
   '/api/list-members': typeof ApiListMembersRoute
   '/api/lists': typeof ApiListsRoute
   '/api/network-map': typeof ApiNetworkMapRoute
+  '/api/people': typeof ApiPeopleRoute
   '/api/period-digest': typeof ApiPeriodDigestRoute
   '/api/period-digest-history': typeof ApiPeriodDigestHistoryRoute
+  '/api/person-events': typeof ApiPersonEventsRoute
+  '/api/person-files': typeof ApiPersonFilesRoute
+  '/api/person-items': typeof ApiPersonItemsRoute
   '/api/profile-analysis': typeof ApiProfileAnalysisRoute
   '/api/profile-hydrate': typeof ApiProfileHydrateRoute
   '/api/profile-priority': typeof ApiProfilePriorityRoute
@@ -574,6 +627,7 @@ export interface FileRoutesById {
   '/api/xremark': typeof ApiXremarkRoute
   '/api/xurl-rate-limits': typeof ApiXurlRateLimitsRoute
   '/authors/$handle': typeof AuthorsHandleRoute
+  '/people_/$personId': typeof PeoplePersonIdRoute
   '/profiles/$handle': typeof ProfilesHandleRoute
   '/api/integrations/twillot-following': typeof ApiIntegrationsTwillotFollowingRoute
   '/api/integrations/twillot-history': typeof ApiIntegrationsTwillotHistoryRoute
@@ -598,6 +652,7 @@ export interface FileRouteTypes {
     | '/lists'
     | '/mentions'
     | '/network-map'
+    | '/people'
     | '/profile-analyze'
     | '/rate-limits'
     | '/settings'
@@ -619,8 +674,12 @@ export interface FileRouteTypes {
     | '/api/list-members'
     | '/api/lists'
     | '/api/network-map'
+    | '/api/people'
     | '/api/period-digest'
     | '/api/period-digest-history'
+    | '/api/person-events'
+    | '/api/person-files'
+    | '/api/person-items'
     | '/api/profile-analysis'
     | '/api/profile-hydrate'
     | '/api/profile-priority'
@@ -640,6 +699,7 @@ export interface FileRouteTypes {
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
+    | '/people/$personId'
     | '/profiles/$handle'
     | '/api/integrations/twillot-following'
     | '/api/integrations/twillot-history'
@@ -662,6 +722,7 @@ export interface FileRouteTypes {
     | '/lists'
     | '/mentions'
     | '/network-map'
+    | '/people'
     | '/profile-analyze'
     | '/rate-limits'
     | '/settings'
@@ -683,8 +744,12 @@ export interface FileRouteTypes {
     | '/api/list-members'
     | '/api/lists'
     | '/api/network-map'
+    | '/api/people'
     | '/api/period-digest'
     | '/api/period-digest-history'
+    | '/api/person-events'
+    | '/api/person-files'
+    | '/api/person-items'
     | '/api/profile-analysis'
     | '/api/profile-hydrate'
     | '/api/profile-priority'
@@ -704,6 +769,7 @@ export interface FileRouteTypes {
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
+    | '/people/$personId'
     | '/profiles/$handle'
     | '/api/integrations/twillot-following'
     | '/api/integrations/twillot-history'
@@ -726,6 +792,7 @@ export interface FileRouteTypes {
     | '/lists'
     | '/mentions'
     | '/network-map'
+    | '/people'
     | '/profile-analyze'
     | '/rate-limits'
     | '/settings'
@@ -747,8 +814,12 @@ export interface FileRouteTypes {
     | '/api/list-members'
     | '/api/lists'
     | '/api/network-map'
+    | '/api/people'
     | '/api/period-digest'
     | '/api/period-digest-history'
+    | '/api/person-events'
+    | '/api/person-files'
+    | '/api/person-items'
     | '/api/profile-analysis'
     | '/api/profile-hydrate'
     | '/api/profile-priority'
@@ -768,6 +839,7 @@ export interface FileRouteTypes {
     | '/api/xremark'
     | '/api/xurl-rate-limits'
     | '/authors/$handle'
+    | '/people_/$personId'
     | '/profiles/$handle'
     | '/api/integrations/twillot-following'
     | '/api/integrations/twillot-history'
@@ -791,6 +863,7 @@ export interface RootRouteChildren {
   ListsRoute: typeof ListsRoute
   MentionsRoute: typeof MentionsRoute
   NetworkMapRoute: typeof NetworkMapRoute
+  PeopleRoute: typeof PeopleRoute
   ProfileAnalyzeRoute: typeof ProfileAnalyzeRoute
   RateLimitsRoute: typeof RateLimitsRoute
   SettingsRoute: typeof SettingsRoute
@@ -812,8 +885,12 @@ export interface RootRouteChildren {
   ApiListMembersRoute: typeof ApiListMembersRoute
   ApiListsRoute: typeof ApiListsRoute
   ApiNetworkMapRoute: typeof ApiNetworkMapRoute
+  ApiPeopleRoute: typeof ApiPeopleRoute
   ApiPeriodDigestRoute: typeof ApiPeriodDigestRoute
   ApiPeriodDigestHistoryRoute: typeof ApiPeriodDigestHistoryRoute
+  ApiPersonEventsRoute: typeof ApiPersonEventsRoute
+  ApiPersonFilesRoute: typeof ApiPersonFilesRoute
+  ApiPersonItemsRoute: typeof ApiPersonItemsRoute
   ApiProfileAnalysisRoute: typeof ApiProfileAnalysisRoute
   ApiProfileHydrateRoute: typeof ApiProfileHydrateRoute
   ApiProfilePriorityRoute: typeof ApiProfilePriorityRoute
@@ -833,6 +910,7 @@ export interface RootRouteChildren {
   ApiXremarkRoute: typeof ApiXremarkRoute
   ApiXurlRateLimitsRoute: typeof ApiXurlRateLimitsRoute
   AuthorsHandleRoute: typeof AuthorsHandleRoute
+  PeoplePersonIdRoute: typeof PeoplePersonIdRoute
   ProfilesHandleRoute: typeof ProfilesHandleRoute
   ApiIntegrationsTwillotFollowingRoute: typeof ApiIntegrationsTwillotFollowingRoute
   ApiIntegrationsTwillotHistoryRoute: typeof ApiIntegrationsTwillotHistoryRoute
@@ -868,6 +946,13 @@ declare module '@tanstack/react-router' {
       path: '/profile-analyze'
       fullPath: '/profile-analyze'
       preLoaderRoute: typeof ProfileAnalyzeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/people': {
+      id: '/people'
+      path: '/people'
+      fullPath: '/people'
+      preLoaderRoute: typeof PeopleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/network-map': {
@@ -966,6 +1051,13 @@ declare module '@tanstack/react-router' {
       path: '/profiles/$handle'
       fullPath: '/profiles/$handle'
       preLoaderRoute: typeof ProfilesHandleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/people_/$personId': {
+      id: '/people_/$personId'
+      path: '/people/$personId'
+      fullPath: '/people/$personId'
+      preLoaderRoute: typeof PeoplePersonIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/authors/$handle': {
@@ -1101,6 +1193,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiProfileAnalysisRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/person-items': {
+      id: '/api/person-items'
+      path: '/api/person-items'
+      fullPath: '/api/person-items'
+      preLoaderRoute: typeof ApiPersonItemsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/person-files': {
+      id: '/api/person-files'
+      path: '/api/person-files'
+      fullPath: '/api/person-files'
+      preLoaderRoute: typeof ApiPersonFilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/person-events': {
+      id: '/api/person-events'
+      path: '/api/person-events'
+      fullPath: '/api/person-events'
+      preLoaderRoute: typeof ApiPersonEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/period-digest-history': {
       id: '/api/period-digest-history'
       path: '/api/period-digest-history'
@@ -1113,6 +1226,13 @@ declare module '@tanstack/react-router' {
       path: '/api/period-digest'
       fullPath: '/api/period-digest'
       preLoaderRoute: typeof ApiPeriodDigestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/people': {
+      id: '/api/people'
+      path: '/api/people'
+      fullPath: '/api/people'
+      preLoaderRoute: typeof ApiPeopleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/network-map': {
@@ -1309,6 +1429,7 @@ const rootRouteChildren: RootRouteChildren = {
   ListsRoute: ListsRoute,
   MentionsRoute: MentionsRoute,
   NetworkMapRoute: NetworkMapRoute,
+  PeopleRoute: PeopleRoute,
   ProfileAnalyzeRoute: ProfileAnalyzeRoute,
   RateLimitsRoute: RateLimitsRoute,
   SettingsRoute: SettingsRoute,
@@ -1330,8 +1451,12 @@ const rootRouteChildren: RootRouteChildren = {
   ApiListMembersRoute: ApiListMembersRoute,
   ApiListsRoute: ApiListsRoute,
   ApiNetworkMapRoute: ApiNetworkMapRoute,
+  ApiPeopleRoute: ApiPeopleRoute,
   ApiPeriodDigestRoute: ApiPeriodDigestRoute,
   ApiPeriodDigestHistoryRoute: ApiPeriodDigestHistoryRoute,
+  ApiPersonEventsRoute: ApiPersonEventsRoute,
+  ApiPersonFilesRoute: ApiPersonFilesRoute,
+  ApiPersonItemsRoute: ApiPersonItemsRoute,
   ApiProfileAnalysisRoute: ApiProfileAnalysisRoute,
   ApiProfileHydrateRoute: ApiProfileHydrateRoute,
   ApiProfilePriorityRoute: ApiProfilePriorityRoute,
@@ -1351,6 +1476,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiXremarkRoute: ApiXremarkRoute,
   ApiXurlRateLimitsRoute: ApiXurlRateLimitsRoute,
   AuthorsHandleRoute: AuthorsHandleRoute,
+  PeoplePersonIdRoute: PeoplePersonIdRoute,
   ProfilesHandleRoute: ProfilesHandleRoute,
   ApiIntegrationsTwillotFollowingRoute: ApiIntegrationsTwillotFollowingRoute,
   ApiIntegrationsTwillotHistoryRoute: ApiIntegrationsTwillotHistoryRoute,

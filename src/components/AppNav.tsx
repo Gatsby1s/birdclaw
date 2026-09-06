@@ -19,6 +19,7 @@ import {
 	Settings,
 	ShieldOff,
 	UserSearch,
+	Users,
 } from "lucide-react";
 import {
 	cx,
@@ -45,6 +46,7 @@ import { ThemeSlider } from "./ThemeSlider";
 
 const links = [
 	{ to: "/", label: "Home", icon: Home },
+	{ to: "/people", label: "People", icon: Users },
 	{ to: "/lists", label: "Lists", icon: ListIcon },
 	{ to: "/feed", label: "Feed", icon: Rss },
 	{ to: "/inbox", label: "Inbox", icon: Inbox },
@@ -67,7 +69,7 @@ const mobilePrimaryLinks = [
 	{ to: "/", label: "Home", icon: Home },
 	{ to: "/feed", label: "Feed", icon: Rss },
 	{ to: "/today", label: "Today", icon: CalendarDays },
-	{ to: "/discuss", label: "Discuss", icon: MessagesSquare },
+	{ to: "/people", label: "People", icon: Users },
 ] as const;
 
 export function AppNav({ compact = false }: { compact?: boolean }) {
@@ -95,7 +97,9 @@ export function AppNav({ compact = false }: { compact?: boolean }) {
 				</Link>
 				<nav className={sidebarNavClass} aria-label="Primary">
 					{links.map((link) => {
-						const active = pathname === link.to;
+						const active =
+							pathname === link.to ||
+							(link.to === "/people" && pathname.startsWith("/people/"));
 						const Icon = link.icon;
 						return (
 							<Link
@@ -151,7 +155,9 @@ export function MobileAppNav() {
 		>
 			{mobilePrimaryLinks.map((link) => {
 				const Icon = link.icon;
-				const active = pathname === link.to;
+				const active =
+					pathname === link.to ||
+					(link.to === "/people" && pathname.startsWith("/people/"));
 				return (
 					<Link
 						key={link.to}
@@ -174,7 +180,9 @@ export function MobileAppNav() {
 				<div className="absolute right-2 bottom-[calc(4rem+env(safe-area-inset-bottom))] grid max-h-[min(70dvh,560px)] w-[min(78vw,300px)] grid-cols-2 gap-1 overflow-y-auto rounded-2xl border border-[var(--line-strong)] bg-[var(--bg-elevated)] p-2 shadow-[0_16px_50px_var(--shadow-strong)]">
 					{moreLinks.map((link) => {
 						const Icon = link.icon;
-						const active = pathname === link.to;
+						const active =
+							pathname === link.to ||
+							(link.to === "/people" && pathname.startsWith("/people/"));
 						return (
 							<Link
 								key={link.to}
