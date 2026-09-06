@@ -16,17 +16,14 @@ import {
 	mcpResourceMetadata,
 	type McpAuthConfig,
 } from "./mcp-auth";
-import {
-	fetchRagTweet,
-	searchRagTweets,
-	type RagFetchResult,
-	type RagSearchResult,
-} from "./rag-mcp-store";
+import { type RagFetchResult, type RagSearchResult } from "./rag-mcp-store";
+
+import { searchPersonArchive, fetchPersonArchive } from "./person-archive-rag";
 
 const SEARCH_DESCRIPTION =
-	"Search the private BirdClaw tweet archive. Use this before fetch to find stable tweet document IDs relevant to a question. Every result includes mandatory author_context from the owner's X Remark records (labels, personal note, and why the author is followed). Always surface this context when judging a claim, especially warning labels such as 反指. Returns at most 10 results with canonical source URLs.";
+	"Search the private BirdClaw person archive: X tweets, Telegram channel posts and uploaded PDF/text documents. Use person:NAME_OR_ID keywords (quote names containing spaces) to restrict retrieval to exactly one person (also accepts an X/TG handle). Returns stable tweet: IDs and doc:ID:chunk:N IDs for fetch. PDF originals may require OCR; only extracted text is searchable. Public Telegram coverage is limited; channel attribution is not proof of authorship. Every result includes mandatory author_context from the owner's X Remark records (labels, personal note, and why the author is followed). Always surface this context when judging a claim, especially warning labels such as 反指. Returns at most 10 results with canonical source URLs.";
 const FETCH_DESCRIPTION =
-	"Fetch one BirdClaw tweet document by the stable ID returned from search. Returns the full archived tweet plus available parent, quote, and reply context, mandatory author judgment context for every included author, and a canonical source URL for citations. Never omit recorded labels, notes, or follow reasons when presenting the source.";
+	"Fetch one BirdClaw tweet or person document chunk by the stable ID returned from search. For uploaded documents, follow metadata.next_chunk to read further; preserve person identity, filename, page and channel/forwarded attribution. Returns the full archived tweet plus available parent, quote, and reply context, mandatory author judgment context for every included author, and a canonical source URL for citations. Never omit recorded labels, notes, or follow reasons when presenting the source.";
 const packageVersion = (
 	JSON.parse(
 		readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
@@ -164,8 +161,8 @@ function textResult<T extends object>(payload: T) {
 export function createRagMcpProtocolServer(
 	dependencies: Pick<RagMcpDependencies, "search" | "fetch"> = {},
 ) {
-	const search = dependencies.search ?? searchRagTweets;
-	const fetch = dependencies.fetch ?? fetchRagTweet;
+	const search = dependencies.search ?? searchPersonArchive;
+	const fetch = dependencies.fetch ?? fetchPersonArchive;
 	const server = new Server(
 		{ name: "birdclaw-rag", version: packageVersion ?? "0.0.0" },
 		{ capabilities: { tools: {} } },

@@ -612,6 +612,8 @@ export function claimTwillotHistoryJob(
         where provider = ?
           and state in ('queued', 'deferred')
           and next_run_at <= ?
+          and not exists (select 1 from person_sources ps where ps.kind='x'
+            and (ps.profile_id=twillot_history_jobs.profile_id or ps.identifier=lower(twillot_history_jobs.handle)) and ps.enabled=0)
         order by next_run_at, created_at, id
         limit 1
         `,

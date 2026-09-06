@@ -102,6 +102,18 @@ describe("AppNav", () => {
 		);
 	});
 
+	it("keeps People active on an individual person archive", () => {
+		routerState.path = "/people/person-1";
+		render(
+			<ThemeProvider>
+				<AppNav />
+			</ThemeProvider>,
+		);
+		expect(screen.getByRole("link", { name: "People" })).toHaveClass(
+			"nav-link-active",
+		);
+	});
+
 	it("places the theme toggle inside the bottom account picker", () => {
 		render(
 			<ThemeProvider>

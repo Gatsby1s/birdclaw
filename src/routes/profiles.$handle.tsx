@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { ProfilePersonArchiveButton } from "#/components/PersonArchiveShared";
 import { AvatarChip } from "#/components/AvatarChip";
 import { ProfileSpecialFollowButton } from "#/components/ProfileSpecialFollowButton";
 import { ProfileListsButton } from "#/components/ProfileListsButton";
@@ -217,6 +218,8 @@ export function ProfileRouteView({ handle }: { handle: string }) {
 								profilesByHandle={profilesByHandle}
 							/>
 						) : null}
+
+						<ProfilePersonArchiveButton handle={xRemarkHandle} />
 
 						<ProfileSpecialFollowButton
 							handle={xRemarkHandle}
