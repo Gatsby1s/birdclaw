@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.12
+
+- Read every rendered window of the virtualized Following table before advancing pages, and retain strict full-roster count validation before upload.
+
 ## 0.11.11
 
 - Support the current Following sync sheet for both first sync and repeated full refreshes; verify an updated completion timestamp and close the sheet before collecting every results page.
