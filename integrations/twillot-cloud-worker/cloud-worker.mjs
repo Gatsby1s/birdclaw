@@ -8,6 +8,7 @@ import { prepareTwillotExtension } from "./prepare-extension.mjs";
 import { recoverOrphanedProfileLock } from "./profile-lock.mjs";
 import { ensureExtensionRuntime } from "./extension-runtime.mjs";
 import { applySessionBootstrap } from "./session-bootstrap.mjs";
+import { scrapeFollowingPage } from "./following-page-scraper.mjs";
 import {
 	createFollowingSynchronizer,
 	FollowingSyncError,
@@ -109,44 +110,6 @@ async function companionSyncNow(serviceWorker) {
 			throw new Error(response?.error || "Companion sync failed");
 		return response;
 	});
-}
-
-async function scrapeFollowingPage(page) {
-	const records = await page
-		.locator('a[href*="export-twitter-posts"]')
-		.evaluateAll((anchors) =>
-			anchors.flatMap((anchor) => {
-				const href = anchor.getAttribute("href") || "";
-				const id = new URL(href, location.href).searchParams.get("publicUid");
-				const container =
-					anchor.closest("button") || anchor.parentElement?.parentElement;
-				const profileLink = container?.querySelector(
-					'a[href^="https://x.com/"]',
-				);
-				const profileUrl = profileLink?.getAttribute("href") || "";
-				const username = new URL(
-					profileUrl || "https://x.com/",
-					location.href,
-				).pathname
-					.split("/")[1]
-					?.replace(/^@/, "");
-				if (!id || !username) return [];
-				const text = (profileLink?.textContent || username).trim();
-				const name = text
-					.replace(new RegExp(`\\s*@${username}\\s*$`, "i"), "")
-					.trim();
-				const image = anchor.querySelector("img");
-				return [
-					{
-						id,
-						username,
-						name: name || username,
-						...(image?.src ? { profileImageUrl: image.src } : {}),
-					},
-				];
-			}),
-		);
-	return records;
 }
 
 async function uploadFollowingSnapshot(
@@ -286,7 +249,7 @@ export async function runCloudWorker() {
 		);
 		const syncFollowing = createFollowingSynchronizer({
 			context,
-			scrapePage: scrapeFollowingPage,
+			scrapePage: (page) => scrapeFollowingPage(page, { log }),
 			onFailure: async (page) => {
 				if (!page || page.isClosed() || !isFollowingPageUrl(page.url())) return;
 				const snapshot = await page.screenshot({ timeout: 3_000 });
