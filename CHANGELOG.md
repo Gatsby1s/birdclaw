@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.4
+
+- Discover the current X account when Twillot’s profile cache is empty, complete its existing-session connection, and report safe connection stages.
+
 ## 0.11.3
 
 - Complete Twillot’s existing-account connection before cloud following sync, wait through extension initialization, and reclaim temporary verification pages after failures.
