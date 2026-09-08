@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.9
+
+- Recover verified orphaned Chromium locks on the exclusive cloud volume while preserving all session and database data. Let following-list collection proceed independently when the initial history queue check fails or defers.
+
 ## 0.11.8
 
 - Verify the running Twillot extension against its built content revision and reload stale Chromium workers once before pairing, preventing deployments from silently executing cached companion code.
