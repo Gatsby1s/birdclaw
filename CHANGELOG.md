@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.11
+
+- Support the current Following sync sheet for both first sync and repeated full refreshes; verify an updated completion timestamp and close the sheet before collecting every results page.
+
 ## 0.11.10
 
 - Wait for Twillot to finish verifying and persist its connected account before closing the verification tab or reloading the following list.
