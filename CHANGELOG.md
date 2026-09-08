@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.11.2 - 2026-09-08
+
+### Fixed
+
+- Route paired following uploads to their dedicated Origin and Bearer checks without requiring a separate web login.
+- Reconnect an existing cloud X session before retrying Twillot following sync, close the temporary page, and keep login challenges explicit.
+
 ## 0.11.1 - 2026-09-08
 
 ### Fixed
