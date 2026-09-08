@@ -1,6 +1,10 @@
+import {
+	FollowingSyncControlsError,
+	inspectFollowingSyncControls,
+	refreshFollowingSync,
+} from "./following-sync-controls.mjs";
+
 const FOLLOWING_URL = "https://www.twillot.com/en/twitter-following";
-const SYNC_NAME =
-	/Sync Twitter following to your local browser|Sync Following/i;
 
 export class FollowingSyncError extends Error {
 	constructor(code) {
@@ -34,6 +38,10 @@ export function safeWorkerError(error) {
 		"following_incomplete",
 		"following_pagination_stalled",
 		"following_page_limit",
+		"following_sync_failed",
+		"following_sync_timeout",
+		"following_sync_rate_limited",
+		"following_sync_upgrade_required",
 	]);
 	return error instanceof FollowingSyncError && allowed.has(error.code)
 		? error.code
@@ -74,12 +82,11 @@ export async function inspectFollowingPage(page) {
 			signature: ids.join(","),
 		};
 	});
-	const sync = page.getByRole("button", { name: SYNC_NAME }).first();
+	const sync = await inspectFollowingSyncControls(page);
 	const connect = page
 		.getByRole("button", { name: /Connect Twitter Now/i })
 		.first();
 	const next = page.getByRole("button", { name: "Next page", exact: true });
-	const syncVisible = await sync.isVisible();
 	const nextVisible = await next.isVisible();
 	return {
 		...summary,
@@ -88,8 +95,7 @@ export async function inspectFollowingPage(page) {
 			.first()
 			.isVisible(),
 		needsLogin: await connect.isVisible(),
-		syncVisible,
-		syncEnabled: syncVisible && (await sync.isEnabled()),
+		...sync,
 		nextVisible,
 		nextEnabled: nextVisible && (await next.isEnabled()),
 	};
@@ -192,6 +198,7 @@ export function createFollowingSynchronizer({
 	log = () => {},
 	inspectPage = inspectFollowingPage,
 	reconnectSession = reconnectExistingXSession,
+	refreshSync = refreshFollowingSync,
 	timeoutMs = 180_000,
 	readinessMs = 30_000,
 	pollMs = 500,
@@ -201,6 +208,7 @@ export function createFollowingSynchronizer({
 	let ownedPage = null;
 	let running = null;
 	async function synchronize() {
+		const startedAt = performance.now();
 		let expired = false;
 		let page = null;
 		let timer;
@@ -336,11 +344,20 @@ export function createFollowingSynchronizer({
 				timeout: 30_000,
 			});
 			check();
-			let state = await waitReady(null, true);
-			if (state.syncVisible && state.syncEnabled) {
-				await page.getByRole("button", { name: SYNC_NAME }).first().click();
-				state = await waitReady();
+			await waitReady(null, true);
+			try {
+				await refreshSync(page, {
+					timeoutMs: timeoutMs - (performance.now() - startedAt),
+					check,
+					log,
+				});
+			} catch (error) {
+				if (error instanceof FollowingSyncControlsError)
+					throw new FollowingSyncError(error.code);
+				throw error;
 			}
+			check();
+			let state = await waitReady();
 			const first = page.getByRole("button", {
 				name: "Go to first page",
 				exact: true,

@@ -25,6 +25,7 @@ function fixture({
 	reconnectSession = async () => false,
 	loginGraceMs = 0,
 	onFailure = async () => {},
+	refreshSync = async () => {},
 } = {}) {
 	let created = 0;
 	const uploads = [];
@@ -42,6 +43,7 @@ function fixture({
 		context,
 		onFailure,
 		inspectPage,
+		refreshSync,
 		reconnectSession,
 		timeoutMs,
 		readinessMs,
