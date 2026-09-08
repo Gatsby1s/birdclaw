@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { chromium } from "playwright-core";
 import { prepareTwillotExtension } from "./prepare-extension.mjs";
+import { ensureExtensionRuntime } from "./extension-runtime.mjs";
 import { applySessionBootstrap } from "./session-bootstrap.mjs";
 import {
 	createFollowingSynchronizer,
@@ -59,30 +60,12 @@ function log(event, detail = {}) {
 	);
 }
 
-async function pairCompanion(context, extensionId, config) {
-	const page = await context.newPage();
-	await page.goto(
-		`chrome-extension://${extensionId}/birdclaw-twillot-options.html`,
-		{ waitUntil: "domcontentloaded" },
-	);
-	const serviceWorkers = context
-		.serviceWorkers()
-		.filter((worker) =>
-			worker.url().startsWith(`chrome-extension://${extensionId}/`),
-		);
-	const serviceWorker = serviceWorkers[0];
-	const bridgeAvailable = serviceWorker
-		? await serviceWorker.evaluate(
-				() => typeof globalThis.__BIRDCLAW_TWILLOT_CLOUD__ === "object",
-			)
-		: false;
-	log("extension_runtime_detected", {
-		serviceWorkerCount: serviceWorkers.length,
-		bridgeAvailable,
+async function pairCompanion(context, extensionId, expectedRevision, config) {
+	const { page, serviceWorker } = await ensureExtensionRuntime(context, {
+		extensionId,
+		expectedRevision,
+		log,
 	});
-	if (!serviceWorker || !bridgeAvailable) {
-		throw new Error("The Twillot companion worker did not start.");
-	}
 	const paired = await page.evaluate(
 		async ({ endpoint, token }) => {
 			await chrome.storage.local.set({
@@ -280,6 +263,7 @@ export async function runCloudWorker() {
 		const { page: extensionPage, serviceWorker } = await pairCompanion(
 			context,
 			prepared.extensionId,
+			prepared.expectedRevision,
 			config,
 		);
 		const syncFollowing = createFollowingSynchronizer({

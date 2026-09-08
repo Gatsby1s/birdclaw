@@ -13,6 +13,25 @@ const UPDATE_URL =
 	"https://clients2.google.com/service/update2/crx?response=redirect&prodversion=140.0.0.0&acceptformat=crx3&x=id%3Dflkokionhgagpmnhlngldhbfnblmenen%26uc";
 const MAX_CRX_BYTES = 10 * 1024 * 1024;
 
+export async function readBridgeRevision(bridgePath) {
+	const marker = JSON.parse(
+		await readFile(
+			path.join(bridgePath, ".birdclaw-twillot-bridge.json"),
+			"utf8",
+		),
+	);
+	if (
+		marker.schemaVersion !== 1 ||
+		marker.kind !== "birdclaw-twillot-bridge" ||
+		!/^[a-f0-9]{64}$/.test(marker.revision ?? "")
+	) {
+		throw new Error(
+			"The prepared Twillot bridge revision is missing or invalid.",
+		);
+	}
+	return marker.revision;
+}
+
 async function preparedBridgeFromImage() {
 	const configured = process.env.BIRDCLAW_TWILLOT_PREPARED_BRIDGE_DIR;
 	if (!configured) return null;
@@ -26,6 +45,7 @@ async function preparedBridgeFromImage() {
 	return {
 		extensionId: EXTENSION_ID,
 		bridgePath,
+		expectedRevision: await readBridgeRevision(bridgePath),
 		cleanup: async () => {},
 	};
 }
@@ -128,6 +148,7 @@ export async function prepareTwillotExtension(options = {}) {
 		return {
 			extensionId: EXTENSION_ID,
 			bridgePath: bridge,
+			expectedRevision: await readBridgeRevision(bridge),
 			cleanup: () => rm(root, { recursive: true, force: true }),
 		};
 	} catch (error) {

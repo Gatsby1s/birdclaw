@@ -261,7 +261,17 @@ async function assertReplaceableDestination(
 	return true;
 }
 
-async function copyBridgeAssets(destination) {
+export async function bridgeRevision() {
+	const inputs = await Promise.all(
+		["build.mjs", ...ASSETS.map((asset) => asset.source)].map(async (name) => [
+			name,
+			sha256(await readFile(path.join(ROOT, name))),
+		]),
+	);
+	return sha256(JSON.stringify({ official: OFFICIAL, inputs }));
+}
+
+async function copyBridgeAssets(destination, revision) {
 	for (const asset of ASSETS) {
 		const source = path.join(ROOT, asset.source);
 		const target = path.join(destination, asset.target);
@@ -270,6 +280,13 @@ async function copyBridgeAssets(destination) {
 			throw new Error(`Bridge asset ${asset.source} is missing or unsafe.`);
 		}
 		await copyFile(source, target);
+		if (asset.target === "birdclaw-twillot-worker.js") {
+			const contents = await readFile(target, "utf8");
+			await writeFile(
+				target,
+				`${contents}\nObject.defineProperty(globalThis, "__BIRDCLAW_TWILLOT_REVISION__", { value: ${JSON.stringify(revision)} });\n`,
+			);
+		}
 		await chmod(target, stat.mode);
 	}
 }
@@ -375,7 +392,8 @@ export async function buildBridge({
 
 	try {
 		for (const plan of plans) await copyTree(realSource, plan.staging);
-		await copyBridgeAssets(plans[0].staging);
+		const revision = await bridgeRevision();
+		await copyBridgeAssets(plans[0].staging, revision);
 		await rm(path.join(plans[0].staging, "_metadata"), {
 			recursive: true,
 			force: true,
@@ -414,6 +432,7 @@ export async function buildBridge({
 						generatedAt: new Date().toISOString(),
 						sourceManifestName: manifest.name,
 						sourceManifestVersion: manifest.version,
+						...(plan.kind === "birdclaw-twillot-bridge" ? { revision } : {}),
 					},
 					null,
 					2,

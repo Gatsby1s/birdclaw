@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildBridge, injectWorker, patchManifest } from "../build.mjs";
+import {
+	bridgeRevision,
+	buildBridge,
+	injectWorker,
+	patchManifest,
+} from "../build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const INSTALLED_SOURCE = path.join(
@@ -90,6 +95,23 @@ test(
 				destination: bridge,
 				rollbackDestination: rollback,
 			});
+			const marker = JSON.parse(
+				await readFile(
+					path.join(bridge, ".birdclaw-twillot-bridge.json"),
+					"utf8",
+				),
+			);
+			assert.equal(marker.revision, await bridgeRevision());
+			assert.match(marker.revision, /^[a-f0-9]{64}$/);
+			const worker = await readFile(
+				path.join(bridge, "birdclaw-twillot-worker.js"),
+				"utf8",
+			);
+			assert.ok(
+				worker.endsWith(
+					`Object.defineProperty(globalThis, "__BIRDCLAW_TWILLOT_REVISION__", { value: "${marker.revision}" });\n`,
+				),
+			);
 			assert.equal(path.basename(built.bridgePath), path.basename(bridge));
 			assert.equal(path.basename(built.rollbackPath), path.basename(rollback));
 			const sourceManifest = JSON.parse(

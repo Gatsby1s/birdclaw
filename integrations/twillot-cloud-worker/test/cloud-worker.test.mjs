@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractCrxZip } from "../prepare-extension.mjs";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { extractCrxZip, readBridgeRevision } from "../prepare-extension.mjs";
 import { parseSessionBootstrap } from "../session-bootstrap.mjs";
 import {
 	createBrowserShutdown,
@@ -133,4 +136,29 @@ test("shutdown and final cleanup share a single rejection-safe close operation",
 	assert.equal(shutdown.close(), first);
 	await first;
 	assert.equal(closes, 1);
+});
+
+test("prepared bridge fails closed without a valid build revision", async () => {
+	const dir = await mkdtemp(path.join(os.tmpdir(), "birdclaw-revision-test-"));
+	try {
+		const file = path.join(dir, ".birdclaw-twillot-bridge.json");
+		await assert.rejects(readBridgeRevision(dir), /ENOENT/);
+		const marker = { schemaVersion: 1, kind: "birdclaw-twillot-bridge" };
+		await writeFile(file, JSON.stringify(marker));
+		await assert.rejects(
+			readBridgeRevision(dir),
+			/revision is missing or invalid/,
+		);
+		marker.revision = "a".repeat(64);
+		await writeFile(file, JSON.stringify(marker));
+		assert.equal(await readBridgeRevision(dir), marker.revision);
+		marker.kind = "birdclaw-twillot-official-rollback";
+		await writeFile(file, JSON.stringify(marker));
+		await assert.rejects(
+			readBridgeRevision(dir),
+			/revision is missing or invalid/,
+		);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
 });
