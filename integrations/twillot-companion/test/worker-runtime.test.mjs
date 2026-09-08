@@ -906,7 +906,7 @@ test("does not steal original Twillot responses or hold their message channels",
 	for (const message of [
 		null,
 		{},
-		{ type: "getTwitterProfile", messageId: "profile-request" },
+		{ type: "getPageContent", messageId: "profile-request" },
 		{ type: "query", messageId: "following-request" },
 		{ type: "birdclaw:twillot:unknown" },
 	]) {
@@ -926,7 +926,7 @@ test("does not steal original Twillot responses or hold their message channels",
 
 test("original Twillot profile response wins without interference from the companion", async () => {
 	const harness = await createHarness();
-	const request = { type: "getTwitterProfile", messageId: "profile-request" };
+	const request = { type: "getPageContent", messageId: "profile-request" };
 	const response = await new Promise((resolve) => {
 		for (const listener of harness.messageListeners)
 			listener(
@@ -962,4 +962,42 @@ test("still handles recognized companion controls asynchronously", async () => {
 	assert.equal(held, true);
 	assert.equal(response.ok, true);
 	assert.equal(response.state.tokenConfigured, true);
+});
+
+test("answers the current website capability probe before the legacy null response", async () => {
+	const harness = await createHarness();
+	const request = {
+		type: "getCapabilities",
+		messageId: "capability-request",
+		payload: {},
+	};
+	let synchronousResponse;
+	const keepChannel = harness.messageListeners[0](
+		request,
+		{
+			url: "https://www.twillot.com/en/twitter-following",
+		},
+		(value) => {
+			synchronousResponse = value;
+		},
+	);
+	assert.equal(keepChannel, false);
+	assert.equal(synchronousResponse?.success, true);
+	assert.equal(synchronousResponse?.messageId, request.messageId);
+	assert.deepEqual(JSON.parse(JSON.stringify(synchronousResponse.data)), {
+		target: "chrome",
+		version: "11.0.8",
+		downloads: true,
+		tabGroups: true,
+		openTabs: false,
+		proxiedFetch: true,
+		requiresXTab: false,
+		storage: true,
+	});
+	const firstResponse = await new Promise((resolve) => {
+		harness.messageListeners[0](request, {}, resolve);
+		Promise.resolve(null).then(resolve);
+	});
+	assert.equal(firstResponse.messageId, request.messageId);
+	assert.equal(harness.fetchCalls.length, 0);
 });

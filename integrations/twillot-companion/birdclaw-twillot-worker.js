@@ -1576,6 +1576,27 @@
 
 	const controlTypes = new Set(Object.values(CONTROL));
 	chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+		// Current Twillot pages probe capabilities before initializing. The
+		// audited 11.0.8 extension has no such handler and replies without an id.
+		// Return its conservative Chrome capabilities synchronously, before the
+		// legacy listener can resolve the channel with an uncorrelated null.
+		if (message?.type === "getCapabilities") {
+			sendResponse({
+				success: true,
+				messageId: message.messageId,
+				data: {
+					target: "chrome",
+					version: "11.0.8",
+					downloads: true,
+					tabGroups: true,
+					openTabs: false,
+					proxiedFetch: true,
+					requiresXTab: false,
+					storage: true,
+				},
+			});
+			return false;
+		}
 		// Chrome delivers only the first response. Never claim Twillot's own
 		// messages: its webpage needs the original response and messageId.
 		if (!controlTypes.has(message?.type)) return false;
