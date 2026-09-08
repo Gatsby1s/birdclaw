@@ -140,6 +140,7 @@ async function createHarness(fetchResponses = [], { databaseState } = {}) {
 			{ sourceId: "11111111-2222-4333-8444-555555555555" },
 		],
 	]);
+	const messageListeners = [];
 	const createdTabs = [];
 	const fetchCalls = [];
 	const alarms = [];
@@ -162,7 +163,11 @@ async function createHarness(fetchResponses = [], { databaseState } = {}) {
 			},
 		},
 		runtime: {
-			onMessage: { addListener() {} },
+			onMessage: {
+				addListener(listener) {
+					messageListeners.push(listener);
+				},
+			},
 			onInstalled: { addListener() {} },
 			onStartup: { addListener() {} },
 			async openOptionsPage() {},
@@ -239,6 +244,7 @@ async function createHarness(fetchResponses = [], { databaseState } = {}) {
 	await drain();
 	return {
 		api: context.__birdclawTwillotWorkerTest,
+		messageListeners,
 		storage,
 		createdTabs,
 		fetchCalls,
@@ -890,4 +896,70 @@ test("worker never reads session storage or calls a Twillot/X private API", () =
 	assert.equal(SOURCE.includes("x.com/i/api"), false);
 	assert.equal(SOURCE.includes("apix.twillot.com"), false);
 	assert.equal(SOURCE.includes("verified_complete"), false);
+});
+
+test("does not steal original Twillot responses or hold their message channels", async () => {
+	const harness = await createHarness();
+	assert.equal(harness.messageListeners.length, 1);
+	const listener = harness.messageListeners[0];
+	const replies = [];
+	for (const message of [
+		null,
+		{},
+		{ type: "getTwitterProfile", messageId: "profile-request" },
+		{ type: "query", messageId: "following-request" },
+		{ type: "birdclaw:twillot:unknown" },
+	]) {
+		assert.equal(
+			listener(
+				message,
+				{ url: "https://www.twillot.com/en/twitter-following" },
+				(response) => replies.push(response),
+			),
+			false,
+		);
+	}
+	await drain();
+	assert.deepEqual(replies, []);
+	assert.equal(harness.fetchCalls.length, 0);
+});
+
+test("original Twillot profile response wins without interference from the companion", async () => {
+	const harness = await createHarness();
+	const request = { type: "getTwitterProfile", messageId: "profile-request" };
+	const response = await new Promise((resolve) => {
+		for (const listener of harness.messageListeners)
+			listener(
+				request,
+				{ url: "https://www.twillot.com/en/twitter-following" },
+				resolve,
+			);
+		setImmediate(() =>
+			resolve({
+				success: true,
+				messageId: request.messageId,
+				data: { id: "42" },
+			}),
+		);
+	});
+	assert.deepEqual(response, {
+		success: true,
+		messageId: "profile-request",
+		data: { id: "42" },
+	});
+});
+
+test("still handles recognized companion controls asynchronously", async () => {
+	const harness = await createHarness();
+	let held;
+	const response = await new Promise((resolve) => {
+		held = harness.messageListeners[0](
+			{ type: "birdclaw:twillot:get-state" },
+			{},
+			resolve,
+		);
+	});
+	assert.equal(held, true);
+	assert.equal(response.ok, true);
+	assert.equal(response.state.tokenConfigured, true);
 });

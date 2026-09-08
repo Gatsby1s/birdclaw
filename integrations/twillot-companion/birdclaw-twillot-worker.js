@@ -1574,7 +1574,11 @@
 		return Promise.resolve({ ok: false, error: "Unknown request." });
 	}
 
+	const controlTypes = new Set(Object.values(CONTROL));
 	chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+		// Chrome delivers only the first response. Never claim Twillot's own
+		// messages: its webpage needs the original response and messageId.
+		if (!controlTypes.has(message?.type)) return false;
 		handleMessage(message, sender)
 			.then(sendResponse)
 			.catch((error) =>
