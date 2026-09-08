@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.11.1 - 2026-09-08
+
+### Fixed
+
+- Reuse localized Twillot following pages instead of leaking a new page on every retry and exhausting cloud worker resources.
+- Wait for complete rendered following pages, bound synchronization, and record safe failure diagnostics.
+- Preserve the original collector source when recovering a complete following snapshot through the authenticated bridge.
+
 ## 0.11.0 - 2026-09-06
 
 ### Added
