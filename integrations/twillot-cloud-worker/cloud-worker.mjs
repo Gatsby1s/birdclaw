@@ -5,10 +5,12 @@ import path from "node:path";
 import process from "node:process";
 import { chromium } from "playwright-core";
 import { prepareTwillotExtension } from "./prepare-extension.mjs";
+import { recoverOrphanedProfileLock } from "./profile-lock.mjs";
 import { ensureExtensionRuntime } from "./extension-runtime.mjs";
 import { applySessionBootstrap } from "./session-bootstrap.mjs";
 import {
 	createFollowingSynchronizer,
+	FollowingSyncError,
 	safeWorkerError,
 	isFollowingPageUrl,
 } from "./following-runtime.mjs";
@@ -81,7 +83,12 @@ async function pairCompanion(context, extensionId, expectedRevision, config) {
 	);
 	if (!paired) throw new Error("The Twillot companion pairing was not saved.");
 	log("companion_paired");
-	await companionSyncNow(serviceWorker);
+	// A deferred or failed history job must not prevent independent following sync.
+	try {
+		await companionSyncNow(serviceWorker);
+	} catch (error) {
+		log("initial_history_sync_failed", { code: safeWorkerError(error) });
+	}
 	log("companion_online");
 	return { page, serviceWorker };
 }
@@ -224,10 +231,16 @@ export async function runCloudWorker() {
 	let context;
 	let shutdown;
 	try {
-		log("chromium_launch_started");
-		context = await chromium.launchPersistentContext(
+		const lockRecovery = await recoverOrphanedProfileLock(
 			path.resolve(config.profileDir),
-			{
+		);
+		log("browser_profile_lock_checked", {
+			recovered: lockRecovery.recovered,
+			reason: lockRecovery.reason,
+		});
+		log("chromium_launch_started");
+		context = await chromium
+			.launchPersistentContext(path.resolve(config.profileDir), {
 				executablePath: config.chromiumPath,
 				headless: config.headless,
 				args: [
@@ -241,8 +254,13 @@ export async function runCloudWorker() {
 					"--no-first-run",
 					"--no-default-browser-check",
 				],
-			},
-		);
+			})
+			.catch((error) => {
+				if (/ProcessSingleton|SingletonLock/.test(error?.message ?? "")) {
+					throw new FollowingSyncError("browser_profile_locked");
+				}
+				throw error;
+			});
 		shutdown = createBrowserShutdown(context);
 		process.once("SIGINT", shutdown.stop);
 		process.once("SIGTERM", shutdown.stop);

@@ -26,6 +26,7 @@ export function isFollowingPageUrl(value) {
 // Only fixed diagnostic codes may reach logs; provider errors can contain secrets.
 export function safeWorkerError(error) {
 	const allowed = new Set([
+		"browser_profile_locked",
 		"following_timeout",
 		"following_not_ready",
 		"following_login_required",
