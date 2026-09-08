@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.10
+
+- Wait for Twillot to finish verifying and persist its connected account before closing the verification tab or reloading the following list.
+
 ## 0.11.9
 
 - Recover verified orphaned Chromium locks on the exclusive cloud volume while preserving all session and database data. Let following-list collection proceed independently when the initial history queue check fails or defers.
