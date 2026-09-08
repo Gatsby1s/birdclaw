@@ -22,6 +22,7 @@ const userSchema = z.strictObject({
 
 const snapshotSchema = z.strictObject({
 	action: z.literal("following_snapshot"),
+	source: z.enum(["twillot", "bird"]).default("twillot"),
 	users: z.array(userSchema).min(1).max(5_000),
 	pageCount: z.number().int().positive().max(1_000),
 	complete: z.literal(true),
@@ -174,6 +175,7 @@ export const Route = createFileRoute("/api/integrations/twillot-following")({
 				try {
 					const result = importTwillotFollowingSnapshot(db, {
 						users,
+						source: parsed.data.source,
 						pageCount: parsed.data.pageCount,
 						complete: true,
 					});

@@ -84,6 +84,30 @@ describe("Twillot cloud following snapshot API", () => {
 		).toEqual([{ handle: "alice" }, { handle: "bob" }]);
 	});
 
+	it("preserves the source when replaying a complete bird recovery snapshot", async () => {
+		const { db, token } = setup();
+		const original = request(token, [
+			{ id: "42", username: "alice", name: "Alice" },
+		]);
+		const body = await original.json();
+		const response = await POST({
+			request: new Request(original.url, {
+				method: "POST",
+				headers: original.headers,
+				body: JSON.stringify({ ...body, source: "bird" }),
+			}),
+		});
+		expect(response.status).toBe(200);
+		expect(
+			db
+				.prepare("select source, status, result_count from follow_snapshots")
+				.all(),
+		).toEqual([{ source: "bird", status: "complete", result_count: 1 }]);
+		expect(
+			db.prepare("select source, current from follow_edges").all(),
+		).toEqual([{ source: "bird", current: 1 }]);
+	});
+
 	it("requires the exact extension origin, token, and a complete snapshot", async () => {
 		const { token } = setup();
 		const wrongOrigin = request(token, [
