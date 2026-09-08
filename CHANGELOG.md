@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.13
+
+- Scope Following scroll collection to the container holding all rendered user rows, preventing clipped user cells from being mistaken for the table viewport.
+
 ## 0.11.12
 
 - Read every rendered window of the virtualized Following table before advancing pages, and retain strict full-roster count validation before upload.
