@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.5
+
+- Restrict the BirdClaw companion message listener to its own controls so it cannot steal Twillot’s profile and following responses or stall account connection.
+
 ## 0.11.4
 
 - Discover the current X account when Twillot’s profile cache is empty, complete its existing-session connection, and report safe connection stages.
