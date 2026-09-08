@@ -530,7 +530,11 @@ async function handlePrivateWebGate(
 		);
 		return true;
 	}
-	if (url.pathname === "/api/integrations/twillot-history") {
+	if (
+		url.pathname === "/api/integrations/twillot-history" ||
+		url.pathname === "/api/integrations/twillot-following"
+	) {
+		// These routes enforce their own exact extension origin and pairing token.
 		return false;
 	}
 	if (!requestNeedsLogin(request)) return false;
