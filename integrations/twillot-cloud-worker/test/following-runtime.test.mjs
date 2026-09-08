@@ -23,6 +23,7 @@ function fixture({
 	timeoutMs = 100,
 	readinessMs = 15,
 	reconnectSession = async () => false,
+	loginGraceMs = 0,
 } = {}) {
 	let created = 0;
 	const uploads = [];
@@ -43,6 +44,7 @@ function fixture({
 		timeoutMs,
 		readinessMs,
 		stableMs: 0,
+		loginGraceMs,
 		pollMs: 1,
 		scrapePage: async () => [{ id: "42", username: "alice", name: "Alice" }],
 		uploadSnapshot: async (users, pageCount) => {
@@ -243,4 +245,106 @@ test("existing-session reconnect only opens X and waits for the account control"
 		false,
 	);
 	assert.equal(page.closed, true);
+});
+
+test("ignores a transient login overlay while the extension hydrates", async () => {
+	let reads = 0;
+	let attempts = 0;
+	const f = fixture({
+		loginGraceMs: 10,
+		readinessMs: 100,
+		inspectPage: async () => ({ ...ready, needsLogin: ++reads < 3 }),
+		reconnectSession: async () => {
+			attempts += 1;
+			return true;
+		},
+	});
+	await f.sync();
+	assert.equal(attempts, 0);
+	assert.equal(f.uploads.length, 1);
+});
+
+test("completes Twillot's existing-account dialog after checking the cloud X session", async () => {
+	const x = fakePage();
+	x.getByTestId = () => ({ waitFor: async () => {} });
+	const actions = [];
+	const following = {
+		getByRole: (_role, { name }) => ({
+			first: () => ({
+				click: async () => actions.push(`click:${name.source}`),
+				waitFor: async ({ state }) =>
+					actions.push(`wait:${name.source}:${state}`),
+			}),
+		}),
+	};
+	assert.equal(
+		await reconnectExistingXSession({ newPage: async () => x }, following),
+		true,
+	);
+	assert.deepEqual(actions, [
+		"click:Connect Twitter Now",
+		"wait:Continue as:visible",
+		"click:Continue as",
+		"wait:Connect Twitter Now:hidden",
+	]);
+	assert.equal(x.closed, true);
+});
+
+test("does not interact with Twillot auth when the existing X session is invalid", async () => {
+	const x = fakePage();
+	x.getByTestId = () => ({
+		waitFor: async () => {
+			throw new Error("expired");
+		},
+	});
+	let accessed = false;
+	assert.equal(
+		await reconnectExistingXSession(
+			{ newPage: async () => x },
+			{
+				getByRole: () => {
+					accessed = true;
+					throw new Error("must not interact");
+				},
+			},
+		),
+		false,
+	);
+	assert.equal(accessed, false);
+	assert.equal(x.closed, true);
+});
+
+test("reclaims only new verification tabs after a failed Twillot handshake", async () => {
+	const existing = fakePage("https://x.com/i/bookmarks?twillot=reauth");
+	const job = fakePage(
+		"https://www.twillot.com/en/export-twitter-posts?publicUid=42",
+	);
+	const auth = fakePage("https://x.com/i/bookmarks?twillot=reauth");
+	const x = fakePage();
+	x.getByTestId = () => ({ waitFor: async () => {} });
+	const pages = [existing, job];
+	const context = {
+		pages: () => pages,
+		newPage: async () => {
+			pages.push(x);
+			return x;
+		},
+	};
+	const following = {
+		getByRole: (_role, { name }) => ({
+			first: () => ({
+				click: async () => {
+					if (name.test("Continue as Alice")) pages.push(auth);
+				},
+				waitFor: async ({ state }) => {
+					if (state === "hidden") throw new Error("expired");
+				},
+			}),
+		}),
+	};
+	assert.equal(await reconnectExistingXSession(context, following), false);
+	assert.equal(auth.closed, true);
+	assert.equal(x.closed, true);
+	assert.equal(existing.closed, false);
+	assert.equal(job.closed, false);
 });

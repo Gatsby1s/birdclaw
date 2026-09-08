@@ -96,7 +96,8 @@ export async function inspectFollowingPage(page) {
 
 // Reconnect using only the session already held by this cloud browser.
 // Never import local credentials or interact with login/challenge forms here.
-export async function reconnectExistingXSession(context) {
+export async function reconnectExistingXSession(context, followingPage) {
+	const previousPages = new Set(context.pages?.() ?? []);
 	let page;
 	try {
 		page = await context.newPage();
@@ -108,11 +109,43 @@ export async function reconnectExistingXSession(context) {
 			state: "visible",
 			timeout: 30_000,
 		});
+		if (followingPage) {
+			const connect = followingPage
+				.getByRole("button", {
+					name: /Connect Twitter Now/i,
+				})
+				.first();
+			await connect.click();
+			// Twillot verifies its extension session through its own auth dialog.
+			// Opening X alone does not complete this explicit connection step.
+			const continueAs = followingPage
+				.getByRole("button", {
+					name: /Continue as/i,
+				})
+				.first();
+			await continueAs.waitFor({ state: "visible", timeout: 30_000 });
+			await continueAs.click();
+			await connect.waitFor({ state: "hidden", timeout: 45_000 });
+		}
 		return true;
 	} catch {
 		return false;
 	} finally {
 		await page?.close().catch(() => {});
+		// The site's auth flow opens a verification tab. Reclaim it on failure too.
+		for (const candidate of context.pages?.() ?? []) {
+			if (previousPages.has(candidate) || candidate.isClosed()) continue;
+			try {
+				const url = new URL(candidate.url());
+				if (
+					url.hostname === "x.com" &&
+					url.pathname === "/i/bookmarks" &&
+					url.searchParams.get("twillot") === "reauth"
+				) {
+					await candidate.close().catch(() => {});
+				}
+			} catch {}
+		}
 	}
 }
 
@@ -127,6 +160,7 @@ export function createFollowingSynchronizer({
 	readinessMs = 30_000,
 	pollMs = 500,
 	stableMs = 2_000,
+	loginGraceMs = 5_000,
 }) {
 	let ownedPage = null;
 	let running = null;
@@ -187,15 +221,21 @@ export function createFollowingSynchronizer({
 				let lastKey = null;
 				let stableSince = Date.now();
 				let state;
+				let loginSince = null;
 				while (Date.now() < until) {
 					check();
 					state = await inspectPage(page);
 					lastState = state;
 					check();
 					if (state.needsLogin) {
+						loginSince ??= Date.now();
+						if (Date.now() - loginSince < loginGraceMs) {
+							await new Promise((resolve) => setTimeout(resolve, pollMs));
+							continue;
+						}
 						if (allowSyncAction && !reconnectAttempted) {
 							reconnectAttempted = true;
-							const connected = await reconnectSession(context);
+							const connected = await reconnectSession(context, page);
 							check();
 							log("following_existing_session_checked", { connected });
 							if (connected) {
@@ -205,12 +245,14 @@ export function createFollowingSynchronizer({
 								});
 								until = Date.now() + readinessMs;
 								lastKey = null;
+								loginSince = null;
 								continue;
 							}
 						}
 						diagnostic();
 						throw new FollowingSyncError("following_login_required");
 					}
+					loginSince = null;
 					const key = JSON.stringify([
 						state.signature,
 						state.count,
@@ -246,9 +288,11 @@ export function createFollowingSynchronizer({
 				throw new FollowingSyncError(
 					state?.extensionMissing
 						? "following_extension_missing"
-						: previousSignature === null
-							? "following_not_ready"
-							: "following_pagination_stalled",
+						: state?.needsLogin
+							? "following_login_required"
+							: previousSignature === null
+								? "following_not_ready"
+								: "following_pagination_stalled",
 				);
 			};
 			await page.goto(FOLLOWING_URL, {
