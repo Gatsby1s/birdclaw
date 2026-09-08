@@ -22,3 +22,27 @@ export function followingEndpoint(historyEndpoint) {
 	url.pathname = "/api/integrations/twillot-following";
 	return url.toString();
 }
+
+export function createBrowserShutdown(context) {
+	let stopping = false;
+	let closing;
+	const close = () => {
+		closing ??= (async () => {
+			try {
+				await context.close();
+			} catch {}
+		})();
+		return closing;
+	};
+	return {
+		get stopping() {
+			return stopping;
+		},
+		stop() {
+			stopping = true;
+			// Closing the browser interrupts in-flight automation immediately.
+			void close();
+		},
+		close,
+	};
+}

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { chromium } from "playwright-core";
@@ -8,11 +9,13 @@ import { applySessionBootstrap } from "./session-bootstrap.mjs";
 import {
 	createFollowingSynchronizer,
 	safeWorkerError,
+	isFollowingPageUrl,
 } from "./following-runtime.mjs";
 import {
 	DEFAULT_ENDPOINT,
 	followingEndpoint,
 	normalizeEndpoint,
+	createBrowserShutdown,
 } from "./worker-core.mjs";
 
 const DEFAULT_PROFILE_DIR = "/data/twillot-browser";
@@ -236,6 +239,7 @@ export async function runCloudWorker() {
 	const prepared = await prepareTwillotExtension();
 	log("extension_prepared", { extensionId: prepared.extensionId });
 	let context;
+	let shutdown;
 	try {
 		log("chromium_launch_started");
 		context = await chromium.launchPersistentContext(
@@ -256,6 +260,9 @@ export async function runCloudWorker() {
 				],
 			},
 		);
+		shutdown = createBrowserShutdown(context);
+		process.once("SIGINT", shutdown.stop);
+		process.once("SIGTERM", shutdown.stop);
 		context.setDefaultTimeout(10_000);
 		context.setDefaultNavigationTimeout(30_000);
 		log("chromium_launched");
@@ -278,6 +285,17 @@ export async function runCloudWorker() {
 		const syncFollowing = createFollowingSynchronizer({
 			context,
 			scrapePage: scrapeFollowingPage,
+			onFailure: async (page) => {
+				if (!page || page.isClosed() || !isFollowingPageUrl(page.url())) return;
+				const snapshot = await page.screenshot({ timeout: 3_000 });
+				// One private, overwritten artifact; never capture X login pages.
+				await writeFile(
+					"/tmp/birdclaw-twillot-following-failure.png",
+					snapshot,
+					{ mode: 0o600 },
+				);
+				log("following_failure_snapshot_saved");
+			},
 			log,
 			uploadSnapshot: (users, pageCount) =>
 				uploadFollowingSnapshot(
@@ -289,14 +307,8 @@ export async function runCloudWorker() {
 		});
 		const clickedJobs = new Map();
 		let nextFollowingSyncAt = 0;
-		let stopping = false;
-		const stop = () => {
-			stopping = true;
-		};
-		process.once("SIGINT", stop);
-		process.once("SIGTERM", stop);
 		log("worker_ready", { profileDir: config.profileDir });
-		while (!stopping) {
+		while (!shutdown.stopping) {
 			if (Date.now() >= nextFollowingSyncAt) {
 				try {
 					await syncFollowing();
@@ -306,7 +318,7 @@ export async function runCloudWorker() {
 					nextFollowingSyncAt = Date.now() + 5 * 60_000;
 				}
 			}
-			if (stopping) break;
+			if (shutdown.stopping) break;
 			try {
 				await clickActiveJob(context, serviceWorker, clickedJobs);
 			} catch (error) {
@@ -315,7 +327,13 @@ export async function runCloudWorker() {
 			await new Promise((resolve) => setTimeout(resolve, JOB_POLL_MS));
 		}
 	} finally {
-		await context?.close().catch(() => {});
+		if (shutdown) {
+			process.removeListener("SIGINT", shutdown.stop);
+			process.removeListener("SIGTERM", shutdown.stop);
+			await shutdown.close();
+		} else {
+			await context?.close().catch(() => {});
+		}
 		await prepared.cleanup();
 	}
 }

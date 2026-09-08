@@ -183,6 +183,7 @@ export function createFollowingSynchronizer({
 	context,
 	scrapePage,
 	uploadSnapshot,
+	onFailure = async () => {},
 	log = () => {},
 	inspectPage = inspectFollowingPage,
 	reconnectSession = reconnectExistingXSession,
@@ -388,6 +389,7 @@ export function createFollowingSynchronizer({
 			]);
 		} catch (error) {
 			diagnostic();
+			await onFailure(page).catch(() => {});
 			throw error;
 		} finally {
 			clearTimeout(timer);

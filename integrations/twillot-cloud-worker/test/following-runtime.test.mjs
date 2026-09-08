@@ -24,6 +24,7 @@ function fixture({
 	readinessMs = 15,
 	reconnectSession = async () => false,
 	loginGraceMs = 0,
+	onFailure = async () => {},
 } = {}) {
 	let created = 0;
 	const uploads = [];
@@ -39,6 +40,7 @@ function fixture({
 	};
 	const sync = createFollowingSynchronizer({
 		context,
+		onFailure,
 		inspectPage,
 		reconnectSession,
 		timeoutMs,
@@ -391,4 +393,19 @@ test("discovers an uncached account through Twillot before verifying its session
 	assert.ok(logs.some((entry) => entry.stage === "account_discovery"));
 	assert.equal(logs.at(-1).stage, "complete");
 	assert.equal(x.closed, true);
+});
+
+test("a failed diagnostic does not replace the original collection error", async () => {
+	let observed = 0;
+	const f = fixture({
+		inspectPage: async () => ({ ...ready, count: 2 }),
+		onFailure: async (page) => {
+			assert.ok(page);
+			observed += 1;
+			throw new Error("artifact failure");
+		},
+	});
+	await assert.rejects(f.sync(), /following_incomplete/);
+	assert.equal(observed, 1);
+	assert.equal(f.uploads.length, 0);
 });

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { extractCrxZip } from "../prepare-extension.mjs";
 import { parseSessionBootstrap } from "../session-bootstrap.mjs";
-import { followingEndpoint, normalizeEndpoint } from "../worker-core.mjs";
+import {
+	createBrowserShutdown,
+	followingEndpoint,
+	normalizeEndpoint,
+} from "../worker-core.mjs";
 
 test("normalizes only the dedicated secure BirdClaw history endpoint", () => {
 	assert.equal(
@@ -92,4 +96,41 @@ test("accepts only an allowlisted X and Twillot session bootstrap", () => {
 		}),
 	).toString("base64");
 	assert.throws(() => parseSessionBootstrap(bad), /invalid cookie/);
+});
+
+test("shutdown closes the browser immediately to interrupt a blocked collection", async () => {
+	let releaseBlockedCall;
+	const blockedCall = new Promise((resolve) => {
+		releaseBlockedCall = resolve;
+	});
+	let closes = 0;
+	const shutdown = createBrowserShutdown({
+		close: async () => {
+			closes += 1;
+			releaseBlockedCall("browser closed");
+		},
+	});
+	assert.equal(shutdown.stopping, false);
+	shutdown.stop();
+	assert.equal(shutdown.stopping, true);
+	assert.equal(closes, 1);
+	assert.equal(await blockedCall, "browser closed");
+	shutdown.stop();
+	await shutdown.close();
+	assert.equal(closes, 1);
+});
+
+test("shutdown and final cleanup share a single rejection-safe close operation", async () => {
+	let closes = 0;
+	const shutdown = createBrowserShutdown({
+		close: async () => {
+			closes += 1;
+			throw new Error("already closed");
+		},
+	});
+	shutdown.stop();
+	const first = shutdown.close();
+	assert.equal(shutdown.close(), first);
+	await first;
+	assert.equal(closes, 1);
 });
