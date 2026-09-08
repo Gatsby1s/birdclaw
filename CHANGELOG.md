@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.14
+
+- Submit verified Following snapshots directly from the cloud worker with the existing pairing token and endpoint checks; reject redirects and emit only safe transfer diagnostics.
+
 ## 0.11.13
 
 - Scope Following scroll collection to the container holding all rendered user rows, preventing clipped user cells from being mistaken for the table viewport.
