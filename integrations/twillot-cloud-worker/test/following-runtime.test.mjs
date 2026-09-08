@@ -289,6 +289,7 @@ test("completes Twillot's existing-account dialog after checking the cloud X ses
 		"click:Connect Twitter Now",
 		"wait:Continue as:visible",
 		"click:Continue as",
+		"wait:Continue as:hidden",
 		"wait:Connect Twitter Now:hidden",
 	]);
 	assert.equal(x.closed, true);
@@ -318,7 +319,7 @@ test("does not interact with Twillot auth when the existing X session is invalid
 	assert.equal(x.closed, true);
 });
 
-test("reclaims only new verification tabs after a failed Twillot handshake", async () => {
+test("reclaims only new verification tabs when persisted-auth completion times out", async () => {
 	const existing = fakePage("https://x.com/i/bookmarks?twillot=reauth");
 	const job = fakePage(
 		"https://www.twillot.com/en/export-twitter-posts?publicUid=42",
@@ -342,8 +343,11 @@ test("reclaims only new verification tabs after a failed Twillot handshake", asy
 				click: async () => {
 					if (name.test("Continue as Alice")) pages.push(auth);
 				},
-				waitFor: async ({ state }) => {
-					if (state === "hidden") throw new Error("expired");
+				waitFor: async ({ state, timeout }) => {
+					if (state === "hidden" && name.test("Continue as Alice")) {
+						assert.equal(timeout, 60_000);
+						throw new Error("auth persistence timeout");
+					}
 				},
 			}),
 		}),
@@ -353,6 +357,76 @@ test("reclaims only new verification tabs after a failed Twillot handshake", asy
 	assert.equal(x.closed, true);
 	assert.equal(existing.closed, false);
 	assert.equal(job.closed, false);
+});
+
+test("does not complete or close verification while Connect is hidden but Continue still verifies", async () => {
+	const x = fakePage();
+	x.getByTestId = () => ({ waitFor: async () => {} });
+	const auth = fakePage("https://x.com/i/bookmarks?twillot=reauth");
+	const pages = [];
+	let finishPersistence;
+	const persisted = new Promise((resolve) => {
+		finishPersistence = resolve;
+	});
+	let settled = false;
+	let awaitingPersistence = false;
+	let connectHiddenChecks = 0;
+	const logs = [];
+	const following = {
+		getByRole: (_role, { name }) => ({
+			first: () => ({
+				or: () => ({ first: () => ({ waitFor: async () => {} }) }),
+				isVisible: async () => true,
+				click: async () => {
+					if (name.test("Continue as Alice")) pages.push(auth);
+				},
+				waitFor: async ({ state, timeout }) => {
+					if (state !== "hidden") return;
+					if (name.test("Continue as Alice")) {
+						assert.equal(timeout, 60_000);
+						awaitingPersistence = true;
+						await persisted;
+					} else {
+						// The modal hides this button immediately, even before token polling.
+						connectHiddenChecks += 1;
+					}
+				},
+			}),
+		}),
+	};
+	const result = reconnectExistingXSession(
+		{
+			pages: () => pages,
+			newPage: async () => {
+				pages.push(x);
+				return x;
+			},
+		},
+		following,
+		(_event, detail) => logs.push(detail),
+	).then((value) => {
+		settled = true;
+		return value;
+	});
+	try {
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(awaitingPersistence, true);
+		assert.equal(settled, false);
+		assert.equal(connectHiddenChecks, 0);
+		assert.equal(auth.closed, false);
+		assert.equal(x.closed, false);
+		assert.equal(
+			logs.some((entry) => entry.stage === "complete"),
+			false,
+		);
+	} finally {
+		finishPersistence();
+	}
+	assert.equal(await result, true);
+	assert.equal(connectHiddenChecks, 1);
+	assert.equal(auth.closed, true);
+	assert.equal(x.closed, true);
+	assert.equal(logs.at(-1).stage, "complete");
 });
 
 test("discovers an uncached account through Twillot before verifying its session", async () => {

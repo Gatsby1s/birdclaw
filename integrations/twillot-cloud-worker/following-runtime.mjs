@@ -152,6 +152,10 @@ export async function reconnectExistingXSession(
 			stage = "session_verification";
 			log("following_reconnect_stage", { stage, status: "started" });
 			await continueAs.click();
+			// Continue stays visible (disabled/spinning) during verification. The
+			// site closes this dialog only after persisting the authenticated profile;
+			// its modal can hide the underlying Connect button much earlier.
+			await continueAs.waitFor({ state: "hidden", timeout: 60_000 });
 			await connect.waitFor({ state: "hidden", timeout: 45_000 });
 		}
 		log("following_reconnect_stage", { stage: "complete", status: "ready" });
