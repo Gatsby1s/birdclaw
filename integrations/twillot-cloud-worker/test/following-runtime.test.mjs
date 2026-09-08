@@ -271,6 +271,8 @@ test("completes Twillot's existing-account dialog after checking the cloud X ses
 	const following = {
 		getByRole: (_role, { name }) => ({
 			first: () => ({
+				or: () => ({ first: () => ({ waitFor: async () => {} }) }),
+				isVisible: async () => true,
 				click: async () => actions.push(`click:${name.source}`),
 				waitFor: async ({ state }) =>
 					actions.push(`wait:${name.source}:${state}`),
@@ -333,6 +335,8 @@ test("reclaims only new verification tabs after a failed Twillot handshake", asy
 	const following = {
 		getByRole: (_role, { name }) => ({
 			first: () => ({
+				or: () => ({ first: () => ({ waitFor: async () => {} }) }),
+				isVisible: async () => true,
 				click: async () => {
 					if (name.test("Continue as Alice")) pages.push(auth);
 				},
@@ -347,4 +351,44 @@ test("reclaims only new verification tabs after a failed Twillot handshake", asy
 	assert.equal(x.closed, true);
 	assert.equal(existing.closed, false);
 	assert.equal(job.closed, false);
+});
+
+test("discovers an uncached account through Twillot before verifying its session", async () => {
+	const x = fakePage();
+	x.getByTestId = () => ({ waitFor: async () => {} });
+	let discovered = false;
+	const actions = [];
+	const logs = [];
+	const following = {
+		getByRole: (_role, { name }) => ({
+			first: () => ({
+				or: () => ({ first: () => ({ waitFor: async () => {} }) }),
+				isVisible: async () => discovered,
+				waitFor: async () => {
+					if (name instanceof RegExp && name.test("Continue as"))
+						assert.equal(discovered, true);
+				},
+				click: async () => {
+					actions.push(String(name));
+					if (name === "Connect Twitter") discovered = true;
+				},
+			}),
+		}),
+	};
+	assert.equal(
+		await reconnectExistingXSession(
+			{ newPage: async () => x },
+			following,
+			(event, fields) => logs.push({ event, ...fields }),
+		),
+		true,
+	);
+	assert.deepEqual(actions, [
+		"/Connect Twitter Now/i",
+		"Connect Twitter",
+		"/Continue as/i",
+	]);
+	assert.ok(logs.some((entry) => entry.stage === "account_discovery"));
+	assert.equal(logs.at(-1).stage, "complete");
+	assert.equal(x.closed, true);
 });

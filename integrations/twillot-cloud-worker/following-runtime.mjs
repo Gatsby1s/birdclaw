@@ -96,9 +96,14 @@ export async function inspectFollowingPage(page) {
 
 // Reconnect using only the session already held by this cloud browser.
 // Never import local credentials or interact with login/challenge forms here.
-export async function reconnectExistingXSession(context, followingPage) {
+export async function reconnectExistingXSession(
+	context,
+	followingPage,
+	log = () => {},
+) {
 	const previousPages = new Set(context.pages?.() ?? []);
 	let page;
+	let stage = "x_session";
 	try {
 		page = await context.newPage();
 		await page.goto("https://x.com/home", {
@@ -109,7 +114,9 @@ export async function reconnectExistingXSession(context, followingPage) {
 			state: "visible",
 			timeout: 30_000,
 		});
+		log("following_reconnect_stage", { stage, status: "ready" });
 		if (followingPage) {
+			stage = "account_dialog";
 			const connect = followingPage
 				.getByRole("button", {
 					name: /Connect Twitter Now/i,
@@ -123,12 +130,33 @@ export async function reconnectExistingXSession(context, followingPage) {
 					name: /Continue as/i,
 				})
 				.first();
-			await continueAs.waitFor({ state: "visible", timeout: 30_000 });
+			const discover = followingPage
+				.getByRole("button", {
+					name: "Connect Twitter",
+					exact: true,
+				})
+				.first();
+			await continueAs
+				.or(discover)
+				.first()
+				.waitFor({ state: "visible", timeout: 15_000 });
+			if (!(await continueAs.isVisible())) {
+				// With an empty Twillot profile cache, its normal connection action
+				// discovers the already signed-in X account before Continue appears.
+				stage = "account_discovery";
+				log("following_reconnect_stage", { stage, status: "started" });
+				await discover.click();
+			}
+			await continueAs.waitFor({ state: "visible", timeout: 35_000 });
+			stage = "session_verification";
+			log("following_reconnect_stage", { stage, status: "started" });
 			await continueAs.click();
 			await connect.waitFor({ state: "hidden", timeout: 45_000 });
 		}
+		log("following_reconnect_stage", { stage: "complete", status: "ready" });
 		return true;
 	} catch {
+		log("following_reconnect_stage", { stage, status: "failed" });
 		return false;
 	} finally {
 		await page?.close().catch(() => {});
@@ -139,8 +167,10 @@ export async function reconnectExistingXSession(context, followingPage) {
 				const url = new URL(candidate.url());
 				if (
 					url.hostname === "x.com" &&
-					url.pathname === "/i/bookmarks" &&
-					url.searchParams.get("twillot") === "reauth"
+					(url.pathname === "/i/flow/login" ||
+						url.pathname === "/home" ||
+						(url.pathname === "/i/bookmarks" &&
+							url.searchParams.get("twillot") === "reauth"))
 				) {
 					await candidate.close().catch(() => {});
 				}
@@ -156,7 +186,7 @@ export function createFollowingSynchronizer({
 	log = () => {},
 	inspectPage = inspectFollowingPage,
 	reconnectSession = reconnectExistingXSession,
-	timeoutMs = 120_000,
+	timeoutMs = 180_000,
 	readinessMs = 30_000,
 	pollMs = 500,
 	stableMs = 2_000,
@@ -235,7 +265,7 @@ export function createFollowingSynchronizer({
 						}
 						if (allowSyncAction && !reconnectAttempted) {
 							reconnectAttempted = true;
-							const connected = await reconnectSession(context, page);
+							const connected = await reconnectSession(context, page, log);
 							check();
 							log("following_existing_session_checked", { connected });
 							if (connected) {
