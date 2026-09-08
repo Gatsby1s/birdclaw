@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.6
+
+- Answer current Twillot website capability probes using the audited Chrome extension’s supported features, preventing initialization from waiting indefinitely on legacy null responses.
+
 ## 0.11.5
 
 - Restrict the BirdClaw companion message listener to its own controls so it cannot steal Twillot’s profile and following responses or stall account connection.
