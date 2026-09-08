@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.8
+
+- Verify the running Twillot extension against its built content revision and reload stale Chromium workers once before pairing, preventing deployments from silently executing cached companion code.
+
 ## 0.11.7
 
 - Close the Twillot browser immediately on termination so pending automation cannot delay profile-lock release. Keep one private, bounded failure screenshot for following-sync diagnostics.
