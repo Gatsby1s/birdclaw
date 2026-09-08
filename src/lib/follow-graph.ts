@@ -612,6 +612,7 @@ export function importTwillotFollowingSnapshot(
 		users: XurlMentionUser[];
 		pageCount: number;
 		complete: boolean;
+		source?: "twillot" | "bird";
 	},
 ) {
 	const account = resolveAccount(db, input.accountId);
@@ -619,7 +620,7 @@ export function importTwillotFollowingSnapshot(
 		db,
 		accountId: account.accountId,
 		direction: "following",
-		source: "twillot",
+		source: input.source ?? "twillot",
 		payload: {
 			data: input.users,
 			meta: {

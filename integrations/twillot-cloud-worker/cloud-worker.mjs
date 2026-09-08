@@ -6,6 +6,10 @@ import { chromium } from "playwright-core";
 import { prepareTwillotExtension } from "./prepare-extension.mjs";
 import { applySessionBootstrap } from "./session-bootstrap.mjs";
 import {
+	createFollowingSynchronizer,
+	safeWorkerError,
+} from "./following-runtime.mjs";
+import {
 	DEFAULT_ENDPOINT,
 	followingEndpoint,
 	normalizeEndpoint,
@@ -90,7 +94,7 @@ async function pairCompanion(context, extensionId, config) {
 		{ endpoint: config.endpoint, token: config.token },
 	);
 	if (!paired) throw new Error("The Twillot companion pairing was not saved.");
-	log("companion_paired", { endpoint: config.endpoint });
+	log("companion_paired");
 	await companionSyncNow(serviceWorker);
 	log("companion_online");
 	return { page, serviceWorker };
@@ -116,7 +120,7 @@ async function companionSyncNow(serviceWorker) {
 
 async function scrapeFollowingPage(page) {
 	const records = await page
-		.locator('a[href*="export-twitter-posts?publicUid="]')
+		.locator('a[href*="export-twitter-posts"]')
 		.evaluateAll((anchors) =>
 			anchors.flatMap((anchor) => {
 				const href = anchor.getAttribute("href") || "";
@@ -163,6 +167,7 @@ async function uploadFollowingSnapshot(
 		async ({ url, token, users, pageCount }) => {
 			const response = await fetch(url, {
 				method: "POST",
+				signal: AbortSignal.timeout(30_000),
 				credentials: "omit",
 				cache: "no-store",
 				headers: {
@@ -187,77 +192,6 @@ async function uploadFollowingSnapshot(
 	);
 	log("following_uploaded", { count: users.length, pageCount });
 	return result;
-}
-
-async function syncFollowing(context, extensionPage, config) {
-	let page = context
-		.pages()
-		.find((candidate) =>
-			candidate.url().includes("twillot.com/twitter-following"),
-		);
-	if (!page) page = await context.newPage();
-	await page.goto("https://www.twillot.com/en/twitter-following", {
-		waitUntil: "domcontentloaded",
-	});
-	const connect = page.getByRole("button", { name: /Connect Twitter Now/i });
-	if (await connect.isVisible().catch(() => false)) {
-		throw new Error("The cloud Chromium profile is not connected to X.");
-	}
-	const sync = page
-		.getByRole("button", {
-			name: /Sync Twitter following to your local browser|Sync Following/i,
-		})
-		.first();
-	if ((await sync.isVisible().catch(() => false)) && (await sync.isEnabled())) {
-		await sync.click();
-		await page.waitForTimeout(8_000);
-	}
-	const first = page.getByRole("button", { name: "Go to first page" });
-	if (
-		(await first.isVisible().catch(() => false)) &&
-		(await first.isEnabled())
-	) {
-		await first.click();
-		await page.waitForTimeout(500);
-	}
-	const users = new Map();
-	let pageCount = 0;
-	for (; pageCount < 1_000; pageCount += 1) {
-		for (const user of await scrapeFollowingPage(page)) {
-			users.set(user.username.toLowerCase(), user);
-		}
-		const next = page.getByRole("button", { name: "Next page" });
-		if (
-			!(await next.isVisible().catch(() => false)) ||
-			!(await next.isEnabled())
-		) {
-			pageCount += 1;
-			break;
-		}
-		await next.click();
-		await page.waitForTimeout(500);
-	}
-	const followingLabel = await page
-		.getByRole("link", { name: /^Following \d+$/ })
-		.first()
-		.innerText()
-		.catch(() => "");
-	const expectedCount = Number(followingLabel.match(/\d+/)?.[0]);
-	if (
-		!users.size ||
-		!Number.isFinite(expectedCount) ||
-		users.size !== expectedCount
-	) {
-		throw new Error(
-			`Twillot following snapshot is incomplete (${users.size}/${Number.isFinite(expectedCount) ? expectedCount : "unknown"}).`,
-		);
-	}
-	return uploadFollowingSnapshot(
-		extensionPage,
-		config,
-		[...users.values()],
-		pageCount,
-	);
 }
 
 async function clickActiveJob(context, serviceWorker, clickedJobs) {
@@ -322,6 +256,8 @@ export async function runCloudWorker() {
 				],
 			},
 		);
+		context.setDefaultTimeout(10_000);
+		context.setDefaultNavigationTimeout(30_000);
 		log("chromium_launched");
 		const bootstrap = await applySessionBootstrap(
 			context,
@@ -339,6 +275,18 @@ export async function runCloudWorker() {
 			prepared.extensionId,
 			config,
 		);
+		const syncFollowing = createFollowingSynchronizer({
+			context,
+			scrapePage: scrapeFollowingPage,
+			log,
+			uploadSnapshot: (users, pageCount) =>
+				uploadFollowingSnapshot(
+					extensionPage,
+					config,
+					[...users.values()],
+					pageCount,
+				),
+		});
 		const clickedJobs = new Map();
 		let nextFollowingSyncAt = 0;
 		let stopping = false;
@@ -349,19 +297,20 @@ export async function runCloudWorker() {
 		process.once("SIGTERM", stop);
 		log("worker_ready", { profileDir: config.profileDir });
 		while (!stopping) {
-			try {
-				if (Date.now() >= nextFollowingSyncAt) {
-					await syncFollowing(context, extensionPage, config);
+			if (Date.now() >= nextFollowingSyncAt) {
+				try {
+					await syncFollowing();
 					nextFollowingSyncAt = Date.now() + config.syncIntervalMs;
-				}
-				await clickActiveJob(context, serviceWorker, clickedJobs);
-			} catch (error) {
-				log("worker_cycle_error", {
-					message: error instanceof Error ? error.message : String(error),
-				});
-				if (nextFollowingSyncAt <= Date.now()) {
+				} catch (error) {
+					log("following_sync_failed", { code: safeWorkerError(error) });
 					nextFollowingSyncAt = Date.now() + 5 * 60_000;
 				}
+			}
+			if (stopping) break;
+			try {
+				await clickActiveJob(context, serviceWorker, clickedJobs);
+			} catch (error) {
+				log("worker_cycle_error", { code: safeWorkerError(error) });
 			}
 			await new Promise((resolve) => setTimeout(resolve, JOB_POLL_MS));
 		}
@@ -373,7 +322,7 @@ export async function runCloudWorker() {
 
 runCloudWorker().catch((error) => {
 	log("worker_fatal", {
-		message: error instanceof Error ? error.message : String(error),
+		code: safeWorkerError(error),
 	});
 	process.exitCode = 1;
 });
