@@ -50,7 +50,7 @@ test(
 				route.fulfill({
 					contentType: "text/html",
 					body: `<!doctype html>
-<style>body{margin:0}#outer{height:600px;overflow:auto}#grid{height:400px;width:500px;overflow-y:auto}#content{height:3000px;position:relative}.row{height:60px;position:absolute;left:0;right:0}.row img{width:20px;height:20px}.user{height:20px;margin-top:20px}</style>
+<style>body{margin:0}#outer{height:600px;overflow:auto}#grid{height:400px;width:500px;overflow-y:auto}#content{height:3000px;position:relative}.row{height:60px;position:absolute;left:0;right:0}.row img{width:20px;height:20px}.user{height:20px;margin-top:20px;overflow-x:hidden}</style>
 <div id="outer"><div style="height:40px">Toolbar</div><div id="grid" role="grid"><div id="content"></div></div><div style="height:1000px">Unrelated content</div></div>
 <script>
 window.offset=0;window.count=50;window.frozen=false;window.renderCalls=0;
@@ -63,6 +63,14 @@ let timer;grid.addEventListener('scroll',()=>{clearTimeout(timer);timer=setTimeo
 			const page = await context.newPage();
 			await page.goto(URL);
 			assert.equal(await page.locator('a[href*="publicUid"]').count(), 18);
+			// Clipped user cells report auto Y overflow too; they are not the grid.
+			assert.equal(
+				await page
+					.locator(".user")
+					.first()
+					.evaluate((node) => getComputedStyle(node).overflowY),
+				"auto",
+			);
 			const logs = [];
 			const records = await scrapeFollowingPage(page, {
 				timeoutMs: 5_000,

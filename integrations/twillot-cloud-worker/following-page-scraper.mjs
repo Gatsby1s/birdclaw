@@ -4,10 +4,14 @@ import {
 } from "./following-runtime.mjs";
 
 function findScroller() {
-	const anchor = document.querySelector('a[href*="export-twitter-posts"]');
+	const anchors = [
+		...document.querySelectorAll('a[href*="export-twitter-posts"]'),
+	];
+	const anchor = anchors[0];
 	if (!anchor) return null;
 	for (let node = anchor.parentElement; node; node = node.parentElement) {
 		if (
+			anchors.every((rowAnchor) => node.contains(rowAnchor)) &&
 			/auto|scroll|overlay/.test(getComputedStyle(node).overflowY) &&
 			node.clientHeight > 0
 		) {
