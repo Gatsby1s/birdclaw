@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.3
+
+- Complete Twillot’s existing-account connection before cloud following sync, wait through extension initialization, and reclaim temporary verification pages after failures.
+
 ## 0.11.2 - 2026-09-08
 
 ### Fixed
