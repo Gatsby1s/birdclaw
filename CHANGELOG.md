@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.7
+
+- Close the Twillot browser immediately on termination so pending automation cannot delay profile-lock release. Keep one private, bounded failure screenshot for following-sync diagnostics.
+
 ## 0.11.6
 
 - Answer current Twillot website capability probes using the audited Chrome extension’s supported features, preventing initialization from waiting indefinitely on legacy null responses.
