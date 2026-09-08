@@ -278,6 +278,29 @@ describe("production server", () => {
 				authorized: true,
 			});
 
+			for (const method of ["OPTIONS", "POST"]) {
+				const following = await fetch(
+					`${baseUrl}/api/integrations/twillot-following`,
+					{
+						method,
+						headers: proxyHeaders,
+					},
+				);
+				expect(following.status).toBe(200);
+				await expect(following.json()).resolves.toMatchObject({
+					path: "/api/integrations/twillot-following",
+					method,
+					authorized: true,
+				});
+			}
+			const followingLookalike = await fetch(
+				`${baseUrl}/api/integrations/twillot-following-extra`,
+				{
+					headers: proxyHeaders,
+				},
+			);
+			expect(followingLookalike.status).toBe(401);
+
 			const lookalike = await fetch(
 				`${baseUrl}/api/integrations/twillot-history-extra`,
 				{ headers: proxyHeaders },

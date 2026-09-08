@@ -94,12 +94,35 @@ export async function inspectFollowingPage(page) {
 	};
 }
 
+// Reconnect using only the session already held by this cloud browser.
+// Never import local credentials or interact with login/challenge forms here.
+export async function reconnectExistingXSession(context) {
+	let page;
+	try {
+		page = await context.newPage();
+		await page.goto("https://x.com/home", {
+			waitUntil: "domcontentloaded",
+			timeout: 30_000,
+		});
+		await page.getByTestId("SideNav_AccountSwitcher_Button").waitFor({
+			state: "visible",
+			timeout: 30_000,
+		});
+		return true;
+	} catch {
+		return false;
+	} finally {
+		await page?.close().catch(() => {});
+	}
+}
+
 export function createFollowingSynchronizer({
 	context,
 	scrapePage,
 	uploadSnapshot,
 	log = () => {},
 	inspectPage = inspectFollowingPage,
+	reconnectSession = reconnectExistingXSession,
 	timeoutMs = 120_000,
 	readinessMs = 30_000,
 	pollMs = 500,
@@ -139,6 +162,7 @@ export function createFollowingSynchronizer({
 				check();
 			}
 			let lastState = null;
+			let reconnectAttempted = false;
 			let diagnosticPageCount = 0;
 			diagnostic = () => {
 				let pathname = null;
@@ -159,7 +183,7 @@ export function createFollowingSynchronizer({
 				previousSignature = null,
 				allowSyncAction = false,
 			) => {
-				const until = Date.now() + readinessMs;
+				let until = Date.now() + readinessMs;
 				let lastKey = null;
 				let stableSince = Date.now();
 				let state;
@@ -169,6 +193,21 @@ export function createFollowingSynchronizer({
 					lastState = state;
 					check();
 					if (state.needsLogin) {
+						if (allowSyncAction && !reconnectAttempted) {
+							reconnectAttempted = true;
+							const connected = await reconnectSession(context);
+							check();
+							log("following_existing_session_checked", { connected });
+							if (connected) {
+								await page.goto(FOLLOWING_URL, {
+									waitUntil: "domcontentloaded",
+									timeout: 30_000,
+								});
+								until = Date.now() + readinessMs;
+								lastKey = null;
+								continue;
+							}
+						}
 						diagnostic();
 						throw new FollowingSyncError("following_login_required");
 					}

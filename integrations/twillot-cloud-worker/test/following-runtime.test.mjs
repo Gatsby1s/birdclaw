@@ -4,6 +4,7 @@ import {
 	createFollowingSynchronizer,
 	isFollowingPageUrl,
 	safeWorkerError,
+	reconnectExistingXSession,
 } from "../following-runtime.mjs";
 
 const ready = {
@@ -21,6 +22,7 @@ function fixture({
 	inspectPage = async () => ready,
 	timeoutMs = 100,
 	readinessMs = 15,
+	reconnectSession = async () => false,
 } = {}) {
 	let created = 0;
 	const uploads = [];
@@ -37,6 +39,7 @@ function fixture({
 	const sync = createFollowingSynchronizer({
 		context,
 		inspectPage,
+		reconnectSession,
 		timeoutMs,
 		readinessMs,
 		stableMs: 0,
@@ -195,4 +198,49 @@ test("rejects a nonempty but incomplete snapshot", async () => {
 	const f = fixture({ inspectPage: async () => ({ ...ready, count: 2 }) });
 	await assert.rejects(f.sync(), /following_incomplete/);
 	assert.equal(f.uploads.length, 0);
+});
+
+test("reconnects an existing X session once before retrying the following page", async () => {
+	let connected = false;
+	let attempts = 0;
+	const f = fixture({
+		inspectPage: async () => ({ ...ready, needsLogin: !connected }),
+		reconnectSession: async () => {
+			attempts += 1;
+			connected = true;
+			return true;
+		},
+	});
+	await f.sync();
+	assert.equal(attempts, 1);
+	assert.equal(f.uploads.length, 1);
+	assert.equal(f.created(), 1);
+});
+
+test("existing-session reconnect only opens X and waits for the account control", async () => {
+	const page = fakePage();
+	let marker;
+	page.getByTestId = (name) => ({
+		waitFor: async () => {
+			marker = name;
+		},
+	});
+	assert.equal(
+		await reconnectExistingXSession({ newPage: async () => page }),
+		true,
+	);
+	assert.equal(page.address, "https://x.com/home");
+	assert.equal(marker, "SideNav_AccountSwitcher_Button");
+	assert.equal(page.closed, true);
+	page.closed = false;
+	page.getByTestId = () => ({
+		waitFor: async () => {
+			throw new Error("login required");
+		},
+	});
+	assert.equal(
+		await reconnectExistingXSession({ newPage: async () => page }),
+		false,
+	);
+	assert.equal(page.closed, true);
 });
