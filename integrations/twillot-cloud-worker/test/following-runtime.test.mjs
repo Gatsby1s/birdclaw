@@ -6,6 +6,7 @@ import {
 	safeWorkerError,
 	reconnectExistingXSession,
 } from "../following-runtime.mjs";
+import { uploadFollowingSnapshot } from "../following-upload.mjs";
 
 const ready = {
 	rows: 1,
@@ -26,6 +27,7 @@ function fixture({
 	loginGraceMs = 0,
 	onFailure = async () => {},
 	refreshSync = async () => {},
+	uploadSnapshot,
 } = {}) {
 	let created = 0;
 	const uploads = [];
@@ -51,9 +53,11 @@ function fixture({
 		loginGraceMs,
 		pollMs: 1,
 		scrapePage: async () => [{ id: "42", username: "alice", name: "Alice" }],
-		uploadSnapshot: async (users, pageCount) => {
-			uploads.push({ count: users.size, pageCount });
-		},
+		uploadSnapshot:
+			uploadSnapshot ??
+			(async (users, pageCount) => {
+				uploads.push({ count: users.size, pageCount });
+			}),
 		log: (event, detail) => logs.push({ event, ...detail }),
 	});
 	return { sync, pages, uploads, logs, created: () => created };
@@ -484,4 +488,38 @@ test("a failed diagnostic does not replace the original collection error", async
 	await assert.rejects(f.sync(), /following_incomplete/);
 	assert.equal(observed, 1);
 	assert.equal(f.uploads.length, 0);
+});
+
+test("whole-operation deadline aborts an in-flight native upload", async () => {
+	let aborted = false;
+	const f = fixture({
+		timeoutMs: 50,
+		uploadSnapshot: (users, pageCount, { signal }) =>
+			uploadFollowingSnapshot(
+				{
+					endpoint:
+						"https://birdclaw-production.up.railway.app/api/integrations/twillot-history",
+					token: "synthetic-token",
+				},
+				[...users.values()],
+				pageCount,
+				{
+					signal,
+					fetchImpl: async (_url, options) =>
+						new Promise((_resolve, reject) => {
+							options.signal.addEventListener(
+								"abort",
+								() => {
+									aborted = true;
+									reject(options.signal.reason);
+								},
+								{ once: true },
+							);
+						}),
+				},
+			),
+	});
+	await assert.rejects(f.sync(), /following_timeout/);
+	assert.equal(aborted, true);
+	assert.equal(f.pages[0].closed, true);
 });

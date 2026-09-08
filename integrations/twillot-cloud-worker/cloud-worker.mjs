@@ -9,6 +9,7 @@ import { recoverOrphanedProfileLock } from "./profile-lock.mjs";
 import { ensureExtensionRuntime } from "./extension-runtime.mjs";
 import { applySessionBootstrap } from "./session-bootstrap.mjs";
 import { scrapeFollowingPage } from "./following-page-scraper.mjs";
+import { uploadFollowingSnapshot } from "./following-upload.mjs";
 import {
 	createFollowingSynchronizer,
 	FollowingSyncError,
@@ -17,7 +18,6 @@ import {
 } from "./following-runtime.mjs";
 import {
 	DEFAULT_ENDPOINT,
-	followingEndpoint,
 	normalizeEndpoint,
 	createBrowserShutdown,
 } from "./worker-core.mjs";
@@ -112,44 +112,6 @@ async function companionSyncNow(serviceWorker) {
 	});
 }
 
-async function uploadFollowingSnapshot(
-	extensionPage,
-	config,
-	users,
-	pageCount,
-) {
-	const url = followingEndpoint(config.endpoint);
-	const result = await extensionPage.evaluate(
-		async ({ url, token, users, pageCount }) => {
-			const response = await fetch(url, {
-				method: "POST",
-				signal: AbortSignal.timeout(30_000),
-				credentials: "omit",
-				cache: "no-store",
-				headers: {
-					Accept: "application/json",
-					Authorization: `Bearer ${token}`,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					action: "following_snapshot",
-					users,
-					pageCount,
-					complete: true,
-				}),
-			});
-			const data = await response.json().catch(() => ({}));
-			if (!response.ok || data.ok === false) {
-				throw new Error(data.message || `HTTP ${response.status}`);
-			}
-			return data;
-		},
-		{ url, token: config.token, users, pageCount },
-	);
-	log("following_uploaded", { count: users.length, pageCount });
-	return result;
-}
-
 async function clickActiveJob(context, serviceWorker, clickedJobs) {
 	const state = await companionState(serviceWorker);
 	const job = state.activeJob;
@@ -241,7 +203,7 @@ export async function runCloudWorker() {
 				originCount: bootstrap.originCount,
 			});
 		}
-		const { page: extensionPage, serviceWorker } = await pairCompanion(
+		const { serviceWorker } = await pairCompanion(
 			context,
 			prepared.extensionId,
 			prepared.expectedRevision,
@@ -262,13 +224,11 @@ export async function runCloudWorker() {
 				log("following_failure_snapshot_saved");
 			},
 			log,
-			uploadSnapshot: (users, pageCount) =>
-				uploadFollowingSnapshot(
-					extensionPage,
-					config,
-					[...users.values()],
-					pageCount,
-				),
+			uploadSnapshot: (users, pageCount, { signal }) =>
+				uploadFollowingSnapshot(config, [...users.values()], pageCount, {
+					log,
+					signal,
+				}),
 		});
 		const clickedJobs = new Map();
 		let nextFollowingSyncAt = 0;

@@ -42,6 +42,8 @@ export function safeWorkerError(error) {
 		"following_sync_timeout",
 		"following_sync_rate_limited",
 		"following_sync_upgrade_required",
+		"following_upload_rejected",
+		"following_upload_failed",
 	]);
 	return error instanceof FollowingSyncError && allowed.has(error.code)
 		? error.code
@@ -209,6 +211,7 @@ export function createFollowingSynchronizer({
 	let running = null;
 	async function synchronize() {
 		const startedAt = performance.now();
+		const uploadController = new AbortController();
 		let expired = false;
 		let page = null;
 		let timer;
@@ -395,7 +398,9 @@ export function createFollowingSynchronizer({
 				throw new FollowingSyncError("following_page_limit");
 			if (!users.size || state.count === null || users.size !== state.count)
 				throw new FollowingSyncError("following_incomplete");
-			return await uploadSnapshot(users, pageCount);
+			return await uploadSnapshot(users, pageCount, {
+				signal: uploadController.signal,
+			});
 		};
 		try {
 			return await Promise.race([
@@ -403,6 +408,7 @@ export function createFollowingSynchronizer({
 				new Promise((_, reject) => {
 					timer = setTimeout(() => {
 						expired = true;
+						uploadController.abort();
 						if (ownedPage === page) ownedPage = null;
 						void page?.close().catch(() => {});
 						reject(new FollowingSyncError("following_timeout"));
